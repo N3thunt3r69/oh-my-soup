@@ -401,7 +401,7 @@ ${chalk.bold("Available Tools (default-enabled unless noted):")}
   python        - Execute Python code (requires: ${APP_NAME} setup python)
   notebook      - Edit Jupyter notebooks
   inspect_image - Analyze images with a vision model
-  browser       - Browser automation (Puppeteer)
+  browser       - Browser automation (Camoufox)
   computer      - Native host desktop capture and input (disabled by default)
   task          - Launch sub-agents for parallel tasks
   todo          - Manage todo/task lists

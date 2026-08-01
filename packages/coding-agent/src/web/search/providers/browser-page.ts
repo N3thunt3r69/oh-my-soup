@@ -1,8 +1,7 @@
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
 import { untilAborted } from "@oh-my-pi/pi-utils";
-import type { Page } from "puppeteer-core";
-import { applyStealthPatches, applyViewport } from "../../../tools/browser/launch";
-import { acquireBrowser, holdBrowser, releaseBrowser } from "../../../tools/browser/registry";
+import type { Browser, Page } from "puppeteer-core";
+import { adoptInitialPage, launchCamoufoxBrowser, loadPuppeteer } from "../../../tools/browser/launch";
 import { buildBrowserNavigationHeaders } from "./browser-headers";
 import { SEARCH_HARD_TIMEOUT_MS } from "./utils";
 
@@ -53,27 +52,15 @@ async function browseHtmlPage(
 ): Promise<LoadedHtmlPage> {
 	const { homeUrl, ready } = options;
 	const attempts = Math.max(1, options.attempts ?? 1);
-	const handle = await untilAborted(signal, () =>
-		acquireBrowser(
-			{ kind: "headless", headless: true },
-			{
-				cwd: process.cwd(),
-				signal,
-			},
-		),
-	);
-	if (!("browser" in handle)) {
-		await releaseBrowser(handle, { kill: false });
-		throw new Error("Headless browser acquisition returned a non-Puppeteer browser");
-	}
-
-	holdBrowser(handle);
+	// One-shot Camoufox engine per fallback: the Camoufox fingerprint is the
+	// stealth layer now, and per-query isolation beats a shared browser.
+	const puppeteer = await untilAborted(signal, () => loadPuppeteer());
+	let browser: Browser | undefined;
 	let page: Page | undefined;
 	try {
-		const activePage = await untilAborted(signal, () => handle.browser.newPage());
+		browser = await untilAborted(signal, () => launchCamoufoxBrowser(puppeteer, { headless: true }));
+		const activePage = await untilAborted(signal, () => adoptInitialPage(browser!));
 		page = activePage;
-		await applyViewport(activePage);
-		await applyStealthPatches(handle.browser, activePage, handle.stealth);
 		if (homeUrl) {
 			await untilAborted(signal, () =>
 				activePage.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: SEARCH_HARD_TIMEOUT_MS }),
@@ -101,7 +88,7 @@ async function browseHtmlPage(
 		throw new Error("Browser fallback exhausted without a response");
 	} finally {
 		await page?.close().catch(() => undefined);
-		await releaseBrowser(handle, { kill: false });
+		await browser?.close().catch(() => undefined);
 	}
 }
 

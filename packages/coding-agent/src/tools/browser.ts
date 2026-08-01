@@ -7,24 +7,9 @@ import type { ToolSession } from "../sdk";
 import { enforceInlineByteCap } from "../session/streaming-output";
 import { truncateForPrompt } from "./approval";
 import { resolveCmuxKind } from "./browser/cmux/rpc";
-import {
-	acquireBrowser,
-	type BrowserHandle,
-	type BrowserKind,
-	type BrowserKindTag,
-	holdBrowser,
-	releaseBrowser,
-} from "./browser/registry";
+import { acquireBrowser, type BrowserHandle, type BrowserKind, type BrowserKindTag } from "./browser/registry";
 import type { Observation, ScreenshotResult } from "./browser/tab-protocol";
-import {
-	type AcquireTabResult,
-	acquireTab,
-	dropHeadlessTabs,
-	getTab,
-	releaseAllTabs,
-	releaseTab,
-	runInTab,
-} from "./browser/tab-supervisor";
+import { acquireTab, dropHeadlessTabs, getTab, releaseAllTabs, releaseTab, runInTab } from "./browser/tab-supervisor";
 import type { OutputMeta } from "./output-meta";
 import { resolveToCwd } from "./path-utils";
 import { ToolAbortError, ToolError, throwIfAborted } from "./tool-errors";
@@ -95,11 +80,6 @@ function resolveBrowserKind(params: BrowserParams, session: ToolSession): Browse
 		const exe = resolveToCwd(app.path, session.cwd);
 		return { kind: "spawned", path: exe };
 	}
-	// A configured endpoint is a default, not an override: explicit app options win.
-	const configuredCdpUrl = (session.settings.get("browser.cdpUrl") as string | undefined)?.trim();
-	if (configuredCdpUrl) {
-		return { kind: "connected", cdpUrl: configuredCdpUrl.replace(/\/+$/, "") };
-	}
 	const cmuxKind = resolveCmuxKind({
 		settingEnabled: session.settings.get("browser.cmux") as boolean | undefined,
 	});
@@ -168,11 +148,11 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			},
 		},
 		{
-			caption: "Capture a screenshot and return its saved path",
+			caption: "Screenshot to look at the page — no save path",
 			call: {
 				action: "run",
 				name: "docs",
-				code: "return await tab.screenshot();",
+				code: "await tab.screenshot();",
 			},
 		},
 		{
@@ -210,7 +190,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 	): Promise<AgentToolResult<BrowserToolDetails>> {
 		try {
 			throwIfAborted(signal);
-			const timeoutSeconds = clampTimeout("browser", params.timeout, this.session.settings.get("tools.maxTimeout"));
+			const timeoutSeconds = clampTimeout("browser", params.timeout);
 			const timeoutMs = timeoutSeconds * 1000;
 			const name = params.name ?? DEFAULT_TAB_NAME;
 			const details: BrowserToolDetails = { action: params.action, name };
@@ -252,84 +232,59 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			);
 		}
 
-		// The requested timeout must cover the *entire* open — browser
-		// acquisition (CDP discovery/connect), queued tab acquisition, worker
-		// creation, and navigation — not only `acquireTab`. Compose one deadline
-		// from the caller signal and `params.timeout` and thread it through both
-		// stages so a stalled acquisition rejects at the requested boundary.
-		const timeoutSignal = AbortSignal.timeout(timeoutMs);
-		const openSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-		try {
-			const browser = await untilAborted(openSignal, () =>
-				acquireBrowser(kind, {
-					cwd: this.session.cwd,
-					viewport: params.viewport
-						? {
-								width: params.viewport.width,
-								height: params.viewport.height,
-								deviceScaleFactor: params.viewport.scale,
-							}
-						: undefined,
-					appArgs: params.app?.args,
-					signal: openSignal,
-				}),
-			);
-
-			// Hold one open-acquisition lease across the whole tab acquisition.
-			// A freshly-created browser sits in the registry at refCount 0 until a
-			// tab takes a hold; without this lease an abort/timeout mid-acquisition
-			// (or a sibling open of a different tab name on the same browser that
-			// fails) could dispose it out from under this operation. The lease is
-			// released exactly once — the success and failure paths are mutually
-			// exclusive — transferring ownership to the published tab on success or
-			// rolling the fresh browser back on failure.
-			holdBrowser(browser);
-			let result: AcquireTabResult;
-			try {
-				result = await untilAborted(openSignal, () =>
-					acquireTab(name, browser, {
-						url: params.url,
-						waitUntil: params.wait_until,
-						viewport: params.viewport
-							? {
-									width: params.viewport.width,
-									height: params.viewport.height,
-									deviceScaleFactor: params.viewport.scale,
-								}
-							: undefined,
-						target: params.app?.target,
-						timeoutMs,
-						dialogs: params.dialogs,
-						signal: openSignal,
-						ownerSessionId: this.session.getSessionId?.() ?? undefined,
-					}),
-				);
-			} catch (error) {
-				await releaseBrowser(browser, { kill: false });
-				throw error;
+		const browser = await untilAborted(signal, () => {
+			// Headless handles are per-tab (the engine lives in the tab worker):
+			// reusing a live tab must reuse its handle instead of acquiring a
+			// fresh browser nobody will drive.
+			const existingTab = getTab(name);
+			if (existingTab?.state === "alive" && sameBrowserKind(existingTab.browser.kind, kind)) {
+				return Promise.resolve(existingTab.browser);
 			}
-			await releaseBrowser(browser, { kill: false });
+			return acquireBrowser(kind, {
+				cwd: this.session.cwd,
+				viewport: params.viewport
+					? {
+							width: params.viewport.width,
+							height: params.viewport.height,
+							deviceScaleFactor: params.viewport.scale,
+						}
+					: undefined,
+				appArgs: params.app?.args,
+				signal,
+			});
+		});
 
-			const tab = result.tab;
-			const url = tab.info.url;
-			const title = tab.info.title ?? "";
-			details.url = url;
-			details.viewport = tab.info.viewport;
-			const verb = result.created ? "Opened" : "Reused";
-			const lines = [
-				`${verb} tab ${JSON.stringify(name)} on ${describeBrowser(browser)}`,
-				`URL: ${url}`,
-				title ? `Title: ${title}` : null,
-			].filter((l): l is string => typeof l === "string");
-			details.result = lines.join("\n");
-			return toolResult(details).text(lines.join("\n")).done();
-		} catch (error) {
-			// Caller cancellation stays a ToolAbortError; the requested timeout
-			// becomes a timeout ToolError; anything else passes through unchanged.
-			if (signal?.aborted) throw error instanceof ToolAbortError ? error : new ToolAbortError();
-			if (timeoutSignal.aborted) throw new ToolError(`Browser open timed out after ${timeoutMs}ms`);
-			throw error;
-		}
+		const result = await untilAborted(signal, () =>
+			acquireTab(name, browser, {
+				url: params.url,
+				waitUntil: params.wait_until,
+				viewport: params.viewport
+					? {
+							width: params.viewport.width,
+							height: params.viewport.height,
+							deviceScaleFactor: params.viewport.scale,
+						}
+					: undefined,
+				target: params.app?.target,
+				timeoutMs,
+				dialogs: params.dialogs,
+				signal,
+				ownerSessionId: this.session.getSessionId?.() ?? undefined,
+			}),
+		);
+		const tab = result.tab;
+		const url = tab.info.url;
+		const title = tab.info.title ?? "";
+		details.url = url;
+		details.viewport = tab.info.viewport;
+		const verb = result.created ? "Opened" : "Reused";
+		const lines = [
+			`${verb} tab ${JSON.stringify(name)} on ${describeBrowser(browser)}`,
+			`URL: ${url}`,
+			title ? `Title: ${title}` : null,
+		].filter((l): l is string => typeof l === "string");
+		details.result = lines.join("\n");
+		return toolResult(details).text(lines.join("\n")).done();
 	}
 
 	async #close(
@@ -417,12 +372,13 @@ async function saveBrowserOutputArtifact(session: ToolSession, fullText: string)
 }
 
 function describeBrowser(handle: BrowserHandle): string {
-	if (!("browser" in handle)) {
+	if ("client" in handle) {
 		return `cmux browser (${handle.kind.surface ?? "split"})`;
 	}
+	if (!("browser" in handle)) {
+		return `camoufox browser (${handle.kind.headless ? "hidden" : "visible"}, pid ${handle.pid ?? "pending"})`;
+	}
 	switch (handle.kind.kind) {
-		case "headless":
-			return `headless browser (${handle.kind.headless ? "hidden" : "visible"}${handle.sharedDaemon ? ", shared" : ""})`;
 		case "spawned":
 			return `spawned ${handle.kind.path} (pid ${handle.pid ?? "?"})`;
 		case "connected":

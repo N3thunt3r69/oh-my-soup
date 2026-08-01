@@ -627,6 +627,11 @@ export function getPuppeteerDir(): string {
 	return dirs.rootSubdir("puppeteer", "cache");
 }
 
+/** Get the Camoufox engine directory (~/.omp/camoufox). Used as CAMOUFOX_INSTALL_DIR. */
+export function getCamoufoxDir(): string {
+	return dirs.rootSubdir("camoufox", "cache");
+}
+
 /** Get DOCS_RS cache directory () */
 export function getDocsRsCacheDir(): string {
 	return dirs.rootSubdir("webcache", "cache");

@@ -5,7 +5,7 @@ import { webpExclusionForModel } from "../../utils/image-loading";
 import type { ToolSession } from "../index";
 import { expandPath } from "../path-utils";
 import { ToolAbortError, ToolError } from "../tool-errors";
-import { pickElectronTarget, shouldPreserveConnectedBrowserFocus } from "./attach";
+import { gracefulKillTreeOnce, pickElectronTarget, shouldPreserveConnectedBrowserFocus } from "./attach";
 import { CmuxTab, runCmuxCode } from "./cmux/cmux-tab";
 import { mapWaitUntil } from "./cmux/rpc";
 import { DEFAULT_VIEWPORT } from "./launch";
@@ -13,6 +13,7 @@ import {
 	type BrowserHandle,
 	type BrowserKindTag,
 	type CmuxBrowserHandle,
+	type HeadlessBrowserHandle,
 	holdBrowser,
 	type PuppeteerBrowserHandle,
 	releaseBrowser,
@@ -78,10 +79,9 @@ interface TabSessionBase<TBrowser extends BrowserHandle = BrowserHandle> {
 	ownerSessionId?: string;
 }
 
-export interface WorkerTabSession extends TabSessionBase<PuppeteerBrowserHandle> {
+export interface WorkerTabSession extends TabSessionBase<PuppeteerBrowserHandle | HeadlessBrowserHandle> {
 	backend: "worker";
 	worker: WorkerHandle;
-	activateForScreenshot: boolean;
 }
 
 export interface CmuxTabSession extends TabSessionBase<CmuxBrowserHandle> {
@@ -140,18 +140,6 @@ const GRACE_MS = 750;
 const killedTabs = new Map<string, string>();
 const DEFAULT_TAB_CLOSE_TIMEOUT_MS = 5_000;
 class RecoverableWorkerError extends ToolError {}
-const REPORTED_INIT_FAILURE = Symbol("reported-init-failure");
-
-type ReportedInitFailure = Error & { [REPORTED_INIT_FAILURE]?: true };
-
-function markReportedInitFailure(error: Error): Error {
-	(error as ReportedInitFailure)[REPORTED_INIT_FAILURE] = true;
-	return error;
-}
-
-function isReportedInitFailure(error: unknown): boolean {
-	return error instanceof Error && (error as ReportedInitFailure)[REPORTED_INIT_FAILURE] === true;
-}
 
 async function waitForTabCleanup<T>(
 	tab: TabSession,
@@ -278,7 +266,7 @@ async function acquireTabImpl(
 		// after `spawnTabWorker`'s synchronous try/catch has already returned. Fall back to
 		// the inline worker here so module-resolution failures don't poison every tab open.
 		await worker.terminate().catch(() => undefined);
-		if (worker.mode === "inline" || isReportedInitFailure(error)) {
+		if (worker.mode === "inline") {
 			if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
 			throw error;
 		}
@@ -299,21 +287,21 @@ async function acquireTabImpl(
 		}
 	}
 
-	// If the caller aborted while we were spawning/initializing the worker, tear
-	// the freshly-built worker down before publishing the tab so the browser
-	// refCount (which `holdBrowser` below would take) never grows for a tab
-	// nobody is waiting for. Mirror the error paths' `refCount === 0` release so
-	// a fresh browser held by nothing but this aborted open is not orphaned in
-	// the registry; a browser still leased/held elsewhere (refCount > 0) is left
-	// for its owner to release.
+	// If the caller aborted while we were spawning/initializing the worker,
+	// tear the freshly-built worker down before publishing the tab so the
+	// browser refCount (which `holdBrowser` below would take) never grows for
+	// a tab nobody is waiting for.
 	if (opts.signal?.aborted) {
 		await worker.terminate().catch(() => undefined);
-		if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false }).catch(() => undefined);
+		if (tempHold) await releaseBrowser(browser, { kill: false }).catch(() => undefined);
 		throw new ToolAbortError("Browser tab open aborted");
 	}
 
 	holdBrowser(browser);
 	if (tempHold) await releaseBrowser(browser, { kill: false });
+	// Stamp the engine pid the worker reported onto the (virtual) headless
+	// handle so registry teardown can kill the process tree.
+	if (browser.kind.kind === "headless" && info.pid !== undefined) browser.pid = info.pid;
 	const tab: WorkerTabSession = {
 		name,
 		browser,
@@ -325,7 +313,6 @@ async function acquireTabImpl(
 		pending: new Map(),
 		dialogPolicy: opts.dialogs,
 		kindTag: browser.kind.kind,
-		activateForScreenshot: initPayload.mode === "headless" || initPayload.activateForScreenshot !== false,
 		ownerSessionId: opts.ownerSessionId,
 	};
 	worker.onMessage(msg => handleTabMessage(tab, msg));
@@ -598,28 +585,18 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 		return true;
 	}
 	let cleanupError: unknown;
-	let forced = false;
 	if (wasAlive) {
 		try {
 			tab.worker.send({ type: "close" });
 			await waitForClosed(tab);
 		} catch {
-			forced = true;
+			// Graceful close failed; the worker is terminated below and the
+			// registry dispose kills any engine process it left behind.
 		}
 	}
 	await tab.worker.terminate().catch(() => undefined);
-	if (forced && tab.kindTag === "headless") {
-		try {
-			await waitForTabCleanup(
-				tab,
-				timeoutMs,
-				`orphan CDP target ${JSON.stringify(tab.targetId)} (Page.close)`,
-				closeOrphanTarget(tab),
-			);
-		} catch (error) {
-			cleanupError = error;
-		}
-	}
+	// Headless orphan cleanup is the registry's job: dispose kills the engine
+	// pid the worker reported (it may outlive a force-killed worker).
 	try {
 		await releaseBrowser(tab.browser, {
 			kill: opts.kill ?? false,
@@ -682,15 +659,18 @@ function isLastSurfaceCloseError(err: unknown): boolean {
 	return /last/i.test(message);
 }
 
-async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTabOptions): Promise<WorkerInitPayload> {
+async function buildInitPayload(
+	browser: PuppeteerBrowserHandle | HeadlessBrowserHandle,
+	opts: AcquireTabOptions,
+): Promise<WorkerInitPayload> {
 	const safeDir = getPuppeteerDir();
-	const browserWSEndpoint = browser.browser.wsEndpoint();
-	if (!browserWSEndpoint) throw new ToolError("Browser websocket endpoint is unavailable");
-	if (browser.kind.kind === "headless") {
+	if (!("browser" in browser)) {
+		// The worker launches its own Camoufox engine (per-tab process + fresh
+		// fingerprint); there is no shared browser endpoint to hand over.
 		return {
 			mode: "headless",
-			browserWSEndpoint,
 			safeDir,
+			headless: browser.kind.headless,
 			viewport: opts.viewport,
 			dialogs: opts.dialogs,
 			url: opts.url,
@@ -698,10 +678,13 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 			timeoutMs: opts.timeoutMs,
 		};
 	}
+	const browserWSEndpoint = browser.browser.wsEndpoint();
+	if (!browserWSEndpoint) throw new ToolError("Browser websocket endpoint is unavailable");
 	// A connected browser is user-driven. When no target is requested, adopt its
 	// visible tab and avoid raising it before screenshots. An explicit target may
 	// be backgrounded, so retain activation to guarantee target-correct pixels.
-	const activateForScreenshot = browser.kind.kind !== "connected" || !shouldPreserveConnectedBrowserFocus(opts.target);
+	const activateForScreenshot =
+		browser.kind.kind !== "connected" || !shouldPreserveConnectedBrowserFocus(opts.target);
 	const page = await pickElectronTarget(browser.browser, {
 		matcher: opts.target,
 		preferVisible: !activateForScreenshot,
@@ -807,23 +790,42 @@ function toErrorPayload(error: unknown): RunErrorPayload {
 async function recycleTimedOutWorkerTab(tab: WorkerTabSession, timeoutMs: number): Promise<void> {
 	const oldWorker = tab.worker;
 	await oldWorker.terminate().catch(() => undefined);
-	const browserWSEndpoint = tab.browser.browser.wsEndpoint();
-	if (!browserWSEndpoint) throw new ToolError("Browser websocket endpoint is unavailable");
-	const payload: WorkerInitPayload = {
-		mode: "attach",
-		browserWSEndpoint,
-		safeDir: getPuppeteerDir(),
-		targetId: tab.targetId,
-		dialogs: tab.dialogPolicy,
-		// Unblock a wedged page (open JS dialog, hung navigation) before adopting it —
-		// otherwise init stalls, times out, and the tab gets force-killed.
-		recover: true,
-		timeoutMs,
-		activateForScreenshot: tab.activateForScreenshot,
-	};
+	let payload: WorkerInitPayload;
+	if (tab.browser.kind.kind === "headless") {
+		// The run's page may be wedged (that's why it timed out): retire the old
+		// engine and let the fresh worker launch a new Camoufox process. The
+		// registry handle is re-stamped with the new pid from ready info.
+		if (tab.browser.pid !== undefined) {
+			await gracefulKillTreeOnce(tab.browser.pid).catch(() => undefined);
+			tab.browser.pid = undefined;
+		}
+		payload = {
+			mode: "headless",
+			safeDir: getPuppeteerDir(),
+			headless: tab.browser.kind.headless,
+			dialogs: tab.dialogPolicy,
+			timeoutMs,
+		};
+	} else {
+		if (!("browser" in tab.browser)) throw new ToolError("Cannot recycle a headless handle without a browser");
+		const browserWSEndpoint = tab.browser.browser.wsEndpoint();
+		if (!browserWSEndpoint) throw new ToolError("Browser websocket endpoint is unavailable");
+		payload = {
+			mode: "attach",
+			browserWSEndpoint,
+			safeDir: getPuppeteerDir(),
+			targetId: tab.targetId,
+			dialogs: tab.dialogPolicy,
+			timeoutMs,
+			// Unblock a wedged page (open JS dialog, hung navigation) before adopting it —
+			// otherwise init stalls, times out, and the tab gets force-killed.
+			recover: true,
+		};
+	}
 	let worker = await spawnTabWorker();
 	try {
 		const info = await initializeTabWorker(worker, payload, timeoutMs);
+		if (tab.browser.kind.kind === "headless" && info.pid !== undefined) tab.browser.pid = info.pid;
 		tab.worker = worker;
 		tab.info = info;
 		tab.state = "alive";
@@ -833,6 +835,7 @@ async function recycleTimedOutWorkerTab(tab: WorkerTabSession, timeoutMs: number
 		worker = await spawnInlineWorker();
 		try {
 			const info = await initializeTabWorker(worker, payload, timeoutMs);
+			if (tab.browser.kind.kind === "headless" && info.pid !== undefined) tab.browser.pid = info.pid;
 			tab.worker = worker;
 			tab.info = info;
 			tab.state = "alive";
@@ -862,18 +865,9 @@ async function forceKillTab(name: string, reason: string): Promise<void> {
 		return;
 	}
 	await tab.worker.terminate().catch(() => undefined);
-	if (tab.kindTag === "headless") await closeOrphanTarget(tab);
+	// Registry dispose kills the headless engine pid if the worker left it running.
 	await releaseBrowser(tab.browser, { kill: false });
 	tabs.delete(name);
-}
-
-async function closeOrphanTarget(tab: WorkerTabSession): Promise<void> {
-	for (const target of tab.browser.browser.targets()) {
-		if ((await targetIdForTarget(target).catch(() => "")) !== tab.targetId) continue;
-		const page = await target.page().catch(() => null);
-		await page?.close().catch(() => undefined);
-		return;
-	}
 }
 
 async function waitForClosed(tab: WorkerTabSession): Promise<void> {
@@ -1037,7 +1031,7 @@ async function initializeTabWorker(
 	const { promise, resolve, reject } = Promise.withResolvers<ReadyInfo>();
 	const unlisten = worker.onMessage(msg => {
 		if (msg.type === "ready") resolve(msg.info);
-		else if (msg.type === "init-failed") reject(markReportedInitFailure(errorFromPayload(msg.error)));
+		else if (msg.type === "init-failed") reject(errorFromPayload(msg.error));
 		else if (msg.type === "log") logWorkerMessage(msg);
 	});
 	const unlistenError = worker.onError(error => {

@@ -32,7 +32,7 @@ const ALWAYS_EXTERNAL = [
 // bundled).
 const RUNTIME_EXTERNAL = [
 	"puppeteer-core",
-	"@puppeteer/browsers",
+	"camoufox-js",
 	"@babel/parser",
 	"@xterm/headless",
 	"turndown",

@@ -10,6 +10,7 @@ import type {
 	Dialog,
 	ElementHandle,
 	ElementScreenshotOptions,
+	HTTPRequest,
 	HTTPResponse,
 	KeyInput,
 	Page,
@@ -29,10 +30,10 @@ import {
 	resolveAriaRefHandle,
 } from "./aria/aria-snapshot";
 import {
-	applyStealthPatches,
-	applyViewport,
+	adoptInitialPage,
 	BROWSER_PROTOCOL_TIMEOUT_MS,
 	DEFAULT_VIEWPORT,
+	launchCamoufoxBrowser,
 	loadPuppeteerInWorker,
 } from "./launch";
 import { extractReadableFromHtml, type ReadableFormat } from "./readable";
@@ -68,6 +69,7 @@ declare module "puppeteer-core" {
 declare global {
 	interface Element extends HTMLElement {}
 	function getComputedStyle(element: Element): Record<string, unknown>;
+	function stop(): void;
 	var innerWidth: number;
 	var innerHeight: number;
 	var document: {
@@ -117,6 +119,62 @@ const SELECTOR_HANDLER_PREFIXES = [
  */
 const PLAYWRIGHT_ONLY_SELECTOR_RE =
 	/:has-text\(|:text\(|:text-is\(|:text-matches\(|:visible\b|:hidden\b|:nth-match\(|:near\(|:above\(|:below\(|:right-of\(|:left-of\(/;
+
+/** Marker attribute bridging in-page matches back to ElementHandles. */
+const ARIA_MARKER = "data-omp-aria";
+const OBS_MARKER = "data-omp-obs";
+
+/**
+ * Accessible-name-lite, interpolated into page-side scan scripts (string-form
+ * evaluates: puppeteer serializes them verbatim, so no closure references are
+ * possible and TypeScript does not check the body). Covers the accname sources
+ * agents actually target: aria-label(ledby), alt, form labels/placeholders,
+ * title, and visible text of interactive elements.
+ */
+const ACCNAME_SOURCE = `
+const accName = (el) => {
+	const doc = el.ownerDocument;
+	const labelledby = el.getAttribute("aria-labelledby");
+	if (labelledby) {
+		const text = labelledby.split(/\\s+/).map(id => {
+			const target = doc.getElementById(id);
+			return target ? (target.textContent || "").trim() : "";
+		}).filter(Boolean).join(" ");
+		if (text) return text;
+	}
+	const ariaLabel = el.getAttribute("aria-label");
+	if (ariaLabel) return ariaLabel.trim();
+	if (el.tagName === "IMG") {
+		const alt = el.getAttribute("alt");
+		if (alt !== null) return alt.trim();
+	}
+	if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
+		if (el.id) {
+			const lab = doc.querySelector('label[for="' + el.id + '"]');
+			if (lab) return (lab.textContent || "").trim();
+		}
+		const wrapping = el.closest("label");
+		if (wrapping) return (wrapping.textContent || "").trim();
+		const placeholder = el.getAttribute("placeholder");
+		if (placeholder) return placeholder.trim();
+		const type = (el.getAttribute("type") || "").toLowerCase();
+		if (el.tagName === "INPUT" && (type === "button" || type === "submit" || type === "reset")) {
+			return (el.getAttribute("value") || type).trim();
+		}
+	}
+	const interactive = /^(A|BUTTON|SUMMARY|SELECT|TEXTAREA|INPUT|LABEL)$/.test(el.tagName) ||
+		el.hasAttribute("role") || el.hasAttribute("tabindex") || el.isContentEditable;
+	if (interactive) {
+		const text = (el.textContent || "").replace(/\\s+/g, " ").trim();
+		if (text) return text;
+	}
+	const title = el.getAttribute("title");
+	return title ? title.trim() : "";
+};`;
+
+/** Candidate elements scanned by the aria/ engine and the BiDi observe fallback. */
+const INTERACTIVE_CANDIDATE_SELECTOR =
+	"a,button,input,select,textarea,summary,label,[role],[tabindex],[contenteditable='true'],img[alt]";
 
 type DialogPolicy = "accept" | "dismiss";
 type DragTarget = string | { readonly x: number; readonly y: number };
@@ -369,6 +427,20 @@ interface RunPageScope {
  */
 function createRunPageScope(page: Page): RunPageScope {
 	const requestHandlers: unknown[] = [];
+	// Requests still awaiting an interception decision. CDP releases these when
+	// interception is disabled; BiDi leaves them hanging forever, so cleanup
+	// must continue them explicitly BEFORE disabling interception (issue
+	// surfaced by the Camoufox port: held fetches never resolved across runs).
+	const heldRequests = new Set<HTTPRequest>();
+	const trackHeld = (request: HTTPRequest): void => {
+		heldRequests.add(request);
+	};
+	const untrackHeld = (request: HTTPRequest): void => {
+		heldRequests.delete(request);
+	};
+	page.on("request", trackHeld);
+	page.on("requestfinished", untrackHeld);
+	page.on("requestfailed", untrackHeld);
 	const on = page.on;
 	const off = page.off;
 	const once = page.once;
@@ -432,6 +504,16 @@ function createRunPageScope(page: Page): RunPageScope {
 	return {
 		page,
 		async cleanup() {
+			page.off("request", trackHeld);
+			page.off("requestfinished", untrackHeld);
+			page.off("requestfailed", untrackHeld);
+			// Release held requests first so page-side fetches resolve instead of
+			// hanging past the run boundary (BiDi behavior gap vs CDP).
+			for (const request of heldRequests) {
+				if (request.isInterceptResolutionHandled()) continue;
+				await request.continue().catch(() => undefined);
+			}
+			heldRequests.clear();
 			if (onDescriptor) Object.defineProperty(page, "on", onDescriptor);
 			else Reflect.deleteProperty(page, "on");
 			if (offDescriptor) Object.defineProperty(page, "off", offDescriptor);
@@ -633,51 +715,6 @@ async function isClickActionable(handle: ElementHandle): Promise<ActionabilityRe
 	})) as ActionabilityResult;
 }
 
-async function clickQueryHandlerText(
-	page: Page,
-	selector: string,
-	timeoutMs: number,
-	signal?: AbortSignal,
-): Promise<void> {
-	const timeoutSignal = AbortSignal.timeout(timeoutMs);
-	const clickSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-	const start = Date.now();
-	let lastSeen = 0;
-	let lastReason: string | null = null;
-	while (Date.now() - start < timeoutMs) {
-		throwIfAborted(clickSignal);
-		const handles = (await untilAborted(clickSignal, () => page.$$(selector))) as ElementHandle[];
-		try {
-			lastSeen = handles.length;
-			const target = await resolveActionableQueryHandlerClickTarget(handles);
-			if (!target) {
-				lastReason = handles.length ? "no-visible-candidate" : "no-matches";
-				await untilAborted(clickSignal, () => Bun.sleep(100));
-				continue;
-			}
-			const actionability = await isClickActionable(target);
-			if (!actionability.ok) {
-				lastReason = actionability.reason;
-				await untilAborted(clickSignal, () => Bun.sleep(100));
-				continue;
-			}
-			try {
-				await untilAborted(clickSignal, () => target.click());
-				return;
-			} catch (err) {
-				lastReason = err instanceof Error ? err.message : String(err);
-				await untilAborted(clickSignal, () => Bun.sleep(100));
-			}
-		} finally {
-			await Promise.all(handles.map(async handle => handle.dispose().catch(() => undefined)));
-		}
-	}
-	throw new ToolError(
-		`Timed out clicking ${selector} (seen ${lastSeen} matches; last reason: ${lastReason ?? "unknown"}). ` +
-			"If there are multiple matching elements, use observe + tab.id() or a more specific selector.",
-	);
-}
-
 /**
  * Hint appended to a selector op's fail-fast timeout, given the selector's current
  * match count: a missing element (consent wall, wrong page) reads differently from
@@ -743,6 +780,8 @@ export class WorkerCore {
 	#browser?: Browser;
 	#page?: Page;
 	#targetId?: string;
+	/** Headless Camoufox engine pid (worker-owned process). */
+	#pid?: number;
 	#elementCache = new Map<number, ElementHandle>();
 	#elementCounter = 0;
 	#active: ActiveRun | null = null;
@@ -800,16 +839,24 @@ export class WorkerCore {
 			this.#mode = payload.mode;
 			this.#activateForScreenshot = payload.mode === "headless" || payload.activateForScreenshot !== false;
 			const puppeteer = await loadPuppeteerInWorker(payload.safeDir);
-			this.#browser = await puppeteer.connect({
-				browserWSEndpoint: payload.browserWSEndpoint,
-				defaultViewport: null,
-				protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
-			});
 			if (payload.mode === "headless") {
-				this.#page = await this.#browser.newPage();
+				// Per-tab Camoufox engine over WebDriver BiDi (Playwright's Juggler
+				// transport needs fd 3/4 pipes Bun can't do — oven-sh/bun#4670).
+				// newPage() hangs over BiDi on Camoufox, so adopt the initial tab.
+				this.#browser = await launchCamoufoxBrowser(puppeteer, { headless: payload.headless });
+				this.#page = await adoptInitialPage(this.#browser);
+				this.#pid = this.#browser.process()?.pid;
+				this.#targetId = this.#pid !== undefined ? `camoufox-${this.#pid}` : `camoufox-${Snowflake.next()}`;
 				this.#observeDialogs();
-				await applyStealthPatches(this.#browser, this.#page, { browserSession: null, override: null });
-				await applyViewport(this.#page, payload.viewport);
+				// No default viewport: Camoufox pins the window to its spoofed
+				// screen size; only an explicit request may override it.
+				if (payload.viewport) {
+					await this.#page.setViewport({
+						width: payload.viewport.width,
+						height: payload.viewport.height,
+						deviceScaleFactor: payload.viewport.deviceScaleFactor ?? 1,
+					});
+				}
 				if (payload.dialogs) this.#applyDialogPolicy(payload.dialogs);
 				if (payload.url) {
 					await this.#page.goto(payload.url, {
@@ -819,6 +866,11 @@ export class WorkerCore {
 					});
 				}
 			} else {
+				this.#browser = await puppeteer.connect({
+					browserWSEndpoint: payload.browserWSEndpoint,
+					defaultViewport: null,
+					protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+				});
 				const target = await this.#findAttachedTarget(payload.targetId);
 				// Post-timeout recycle: unblock the target BEFORE adopting the page — an open
 				// modal dialog or hung navigation can stall `target.page()` / ready info, and a
@@ -837,7 +889,7 @@ export class WorkerCore {
 					});
 				}
 			}
-			this.#targetId = await targetIdForPage(this.#page);
+			this.#targetId ??= await targetIdForPage(this.#page);
 			this.#transport.send({ type: "ready", info: await this.#currentReadyInfo() });
 		} catch (error) {
 			this.#transport.send({ type: "init-failed", error: errorPayload(error) });
@@ -901,6 +953,7 @@ export class WorkerCore {
 			title: await page.title().catch(() => undefined),
 			viewport: page.viewport() ?? DEFAULT_VIEWPORT,
 			targetId,
+			pid: this.#pid,
 		};
 	}
 
@@ -1179,13 +1232,12 @@ export class WorkerCore {
 	 * toward the zero-match window.
 	 */
 	async #zeroMatchWatchdog(selector: string, label: string, afterMs: number, signal: AbortSignal): Promise<never> {
-		const page = this.#requirePage();
 		const resolved = normalizeSelector(selector);
 		const deadline = Date.now() + afterMs;
 		while (!signal.aborted) {
 			let count: number | null = null;
 			try {
-				const handles = await page.$$(resolved);
+				const handles = await this.#querySelectorAll(resolved);
 				count = handles.length;
 				for (const handle of handles) void handle.dispose().catch(() => undefined);
 			} catch {
@@ -1212,7 +1264,7 @@ export class WorkerCore {
 		if (parseAriaRefSelector(selector) !== null) return "";
 		try {
 			const handles = await Promise.race([
-				this.#requirePage().$$(normalizeSelector(selector)),
+				this.#querySelectorAll(normalizeSelector(selector)),
 				Bun.sleep(1_000).then(() => null),
 			]);
 			if (!handles) return "";
@@ -1279,9 +1331,7 @@ export class WorkerCore {
 					async sig => {
 						let root: ElementHandle | null = null;
 						if (selector) {
-							root = (await untilAborted(sig, () =>
-								page.$(normalizeSelector(selector)),
-							)) as ElementHandle | null;
+							root = await untilAborted(sig, () => this.#querySelector(normalizeSelector(selector)));
 							if (!root)
 								throw new ToolError(
 									`tab.ariaSnapshot: selector ${JSON.stringify(selector)} matched no element`,
@@ -1330,7 +1380,8 @@ export class WorkerCore {
 							return;
 						}
 						const resolved = normalizeSelector(selector);
-						if (resolved.startsWith("text/")) await clickQueryHandlerText(page, resolved, actionOpMs, sig);
+						if (resolved.startsWith("text/") || resolved.startsWith("aria/"))
+							await this.#clickFirstActionable(resolved, actionOpMs, sig);
 						else
 							await untilAborted(sig, () =>
 								page.locator(resolved).setTimeout(actionOpMs).click({ signal: sig }),
@@ -1366,8 +1417,18 @@ export class WorkerCore {
 							}
 							return;
 						}
+						const resolved = normalizeSelector(selector);
+						if (resolved.startsWith("aria/")) {
+							const handle = await this.#resolveActionHandle(selector, actionOpMs, sig);
+							try {
+								await fillViaHandle(handle, value, sig);
+							} finally {
+								await handle.dispose().catch(() => undefined);
+							}
+							return;
+						}
 						await untilAborted(sig, () =>
-							page.locator(normalizeSelector(selector)).setTimeout(actionOpMs).fill(value, { signal: sig }),
+							page.locator(resolved).setTimeout(actionOpMs).fill(value, { signal: sig }),
 						);
 					},
 					{ selector, zeroMatchAfterMs: ZERO_MATCH_FAIL_FAST_MS },
@@ -1409,8 +1470,13 @@ export class WorkerCore {
 					async sig => {
 						if (parseAriaRefSelector(selector) !== null)
 							return toActionableHandle(await this.#resolveAriaRef(selector));
+						const resolved = normalizeSelector(selector);
+						if (resolved.startsWith("aria/")) {
+							const ariaHandle = await this.#waitForAria(resolved, w, opts, sig);
+							return ariaHandle ? toActionableHandle(ariaHandle) : null;
+						}
 						const handle = (await untilAborted(sig, () =>
-							page.waitForSelector(normalizeSelector(selector), {
+							page.waitForSelector(resolved, {
 								timeout: w,
 								visible: opts?.visible,
 								hidden: opts?.hidden,
@@ -1434,17 +1500,12 @@ export class WorkerCore {
 					),
 				);
 			},
-			evaluate: (fn, ...args) =>
-				op("tab.evaluate()", INF, sig =>
-					untilAborted(sig, () =>
-						typeof fn === "string"
-							? page.mainFrame().mainRealm().evaluate(fn)
-							: page
-									.mainFrame()
-									.mainRealm()
-									.evaluate(fn as (...a: unknown[]) => unknown, ...args),
-					),
-				) as never,
+			evaluate: (fn, ...args) => {
+				// TArgs is opaque at the call boundary; the runtime serializes
+				// verbatim regardless of the tuple's static shape.
+				const pageFn = fn as string | ((...fnArgs: unknown[]) => unknown);
+				return op("tab.evaluate()", INF, sig => untilAborted(sig, () => this.#evaluateMain(pageFn, args))) as never;
+			},
 			scrollIntoView: selector =>
 				op(
 					`tab.scrollIntoView(${JSON.stringify(selector)})`,
@@ -1493,6 +1554,77 @@ export class WorkerCore {
 		};
 	}
 
+	/**
+	 * Main-world evaluation for `tab.evaluate`. Puppeteer's plain page.evaluate
+	 * runs in an isolated realm on BOTH drivers (CDP utility world, BiDi sandbox
+	 * realm) — page-script globals are only visible through the main realm.
+	 */
+	async #evaluateMain(fn: string | ((...args: unknown[]) => unknown), args: unknown[]): Promise<unknown> {
+		const realm = this.#requirePage().mainFrame().mainRealm();
+		return typeof fn === "string" ? realm.evaluate(fn) : realm.evaluate(fn, ...args);
+	}
+
+	/**
+	 * aria/-engine wait: mirrors waitForSelector's attached/visible/hidden
+	 * semantics for selectors a locator cannot express.
+	 */
+	async #waitForAria(
+		selector: string,
+		timeoutMs: number,
+		opts: { visible?: boolean; hidden?: boolean } | undefined,
+		sig: AbortSignal,
+	): Promise<ElementHandle | null> {
+		const deadline = Date.now() + timeoutMs;
+		for (;;) {
+			throwIfAborted(sig);
+			const handles = await this.#querySelectorAll(selector);
+			let winner: ElementHandle | null = null;
+			if (opts?.hidden) {
+				if (!handles.length) return null;
+			} else if (handles.length) {
+				if (!opts?.visible) {
+					winner = handles[0]!;
+				} else {
+					for (const handle of handles) {
+						const visible = (await handle
+							.evaluate(el => {
+								const style = getComputedStyle(el);
+								const rect = (
+									el as unknown as { getBoundingClientRect(): { width: number; height: number } }
+								).getBoundingClientRect();
+								return (
+									style.display !== "none" &&
+									style.visibility !== "hidden" &&
+									rect.width >= 1 &&
+									rect.height >= 1
+								);
+							})
+							.catch(() => false)) as boolean;
+						if (visible) {
+							winner = handle;
+							break;
+						}
+					}
+				}
+			}
+			if (winner) {
+				for (const handle of handles) {
+					if (handle !== winner) await handle.dispose().catch(() => undefined);
+				}
+				return winner;
+			}
+			for (const handle of handles) await handle.dispose().catch(() => undefined);
+			if (Date.now() >= deadline) {
+				const error = new Error(
+					`Waiting for selector ${JSON.stringify(selector)} failed: timeout ${timeoutMs}ms exceeded`,
+				);
+				error.name = "TimeoutError";
+				throw error;
+			}
+			await untilAborted(sig, () => Bun.sleep(100));
+		}
+	}
+
 	async #collectObservation(options: {
 		includeAll?: boolean;
 		viewportOnly?: boolean;
@@ -1502,12 +1634,23 @@ export class WorkerCore {
 		this.#clearElementCache();
 		const includeAll = options.includeAll ?? false;
 		const viewportOnly = options.viewportOnly ?? false;
-		const snapshot = (await untilAborted(options.signal, () =>
-			page.accessibility.snapshot({ interestingOnly: !includeAll }),
-		)) as SerializedAXNode | null;
-		if (!snapshot) throw new ToolError("Accessibility snapshot unavailable");
-		const entries: ObservationEntry[] = [];
-		await collectObservationEntries(this, snapshot, entries, { includeAll, viewportOnly });
+		let entries: ObservationEntry[];
+		try {
+			const snapshot = (await untilAborted(options.signal, () =>
+				page.accessibility.snapshot({ interestingOnly: !includeAll }),
+			)) as SerializedAXNode | null;
+			if (!snapshot) throw new ToolError("Accessibility snapshot unavailable");
+			entries = [];
+			await collectObservationEntries(this, snapshot, entries, { includeAll, viewportOnly });
+		} catch (error) {
+			if (options.signal?.aborted) throw error;
+			// Camoufox/BiDi has no AX tree (CDP-only): fall back to an in-page
+			// interactive-element scan producing the same Observation shape.
+			this.#log("debug", "Accessibility snapshot unavailable; using DOM scan", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			entries = await this.#scanObservationDom({ includeAll, viewportOnly });
+		}
 		const scroll = (await untilAborted(options.signal, () =>
 			page.evaluate(() => {
 				const win = globalThis as unknown as {
@@ -1537,6 +1680,87 @@ export class WorkerCore {
 		};
 	}
 
+	/**
+	 * DOM-based interactive scan for pages without a CDP accessibility tree
+	 * (Camoufox/BiDi). Tags visible interactive candidates, reads them back as
+	 * cached ElementHandles, and untags. With `includeAll`, also sweeps headings
+	 * and images — the closest DOM analogue of the full AX tree.
+	 */
+	async #scanObservationDom(options: { includeAll: boolean; viewportOnly: boolean }): Promise<ObservationEntry[]> {
+		const page = this.#requirePage();
+		const selector = options.includeAll
+			? `${INTERACTIVE_CANDIDATE_SELECTOR},h1,h2,h3,h4,h5,h6,img`
+			: INTERACTIVE_CANDIDATE_SELECTOR;
+		const scanned = (await page.evaluate(
+			`(() => { ${ACCNAME_SOURCE}
+				const marker = ${JSON.stringify(OBS_MARKER)};
+				const viewportOnly = ${JSON.stringify(options.viewportOnly)};
+				for (const el of Array.from(document.querySelectorAll("[" + marker + "]"))) el.removeAttribute(marker);
+				const ROLE_BY_TAG = { A: "link", BUTTON: "button", SELECT: "combobox", TEXTAREA: "textbox", SUMMARY: "button", LABEL: "label", IMG: "img" };
+				const INPUT_ROLE = { checkbox: "checkbox", radio: "radio", range: "slider", number: "spinbutton", button: "button", submit: "button", reset: "button", search: "searchbox" };
+				const HEADINGS = ["H1", "H2", "H3", "H4", "H5", "H6"];
+				const roleOf = (el) => {
+					const explicit = el.getAttribute("role");
+					if (explicit) return explicit.split(/\\s+/)[0];
+					if (el.tagName === "INPUT") return INPUT_ROLE[(el.getAttribute("type") || "text").toLowerCase()] || "textbox";
+					if (HEADINGS.includes(el.tagName)) return "heading";
+					return ROLE_BY_TAG[el.tagName] || null;
+				};
+				const out = [];
+				let n = 0;
+				for (const el of Array.from(document.querySelectorAll(${JSON.stringify(selector)}))) {
+					const role = roleOf(el);
+					if (!role) continue;
+					const style = getComputedStyle(el);
+					if (style.display === "none" || style.visibility === "hidden") continue;
+					const rect = el.getBoundingClientRect();
+					if (rect.width < 1 || rect.height < 1) continue;
+					if (viewportOnly) {
+						const left = Math.max(0, Math.min(innerWidth, rect.left));
+						const right = Math.max(0, Math.min(innerWidth, rect.right));
+						const top = Math.max(0, Math.min(innerHeight, rect.top));
+						const bottom = Math.max(0, Math.min(innerHeight, rect.bottom));
+						if (right - left < 1 || bottom - top < 1) continue;
+					}
+					const states = [];
+					if (el.disabled) states.push("disabled");
+					if (typeof el.checked === "boolean") states.push("checked=" + String(el.checked));
+					if (typeof el.selected === "boolean" && el.tagName === "OPTION") states.push("selected=" + String(el.selected));
+					const expanded = el.getAttribute("aria-expanded");
+					if (expanded !== null) states.push("expanded=" + expanded);
+					if (el.required) states.push("required");
+					if (el.readOnly) states.push("readonly");
+					if (el === document.activeElement) states.push("focused");
+					el.setAttribute(marker, String(n++));
+					const name = accName(el);
+					out.push({
+						role,
+						name: name || undefined,
+						value: "value" in el && el.value ? String(el.value) : undefined,
+						states,
+					});
+				}
+				return out; })()`,
+		)) as Array<{ role: string; name?: string; value?: string; states: string[] }>;
+		const handles = (await page.$$(`[${OBS_MARKER}]`)) as ElementHandle[];
+		await page
+			.evaluate(
+				`for (const el of Array.from(document.querySelectorAll("[${OBS_MARKER}]"))) el.removeAttribute("${OBS_MARKER}")`,
+			)
+			.catch(() => undefined);
+		const entries: ObservationEntry[] = [];
+		for (let i = 0; i < scanned.length; i++) {
+			const handle = handles[i];
+			if (!handle) break;
+			const id = this.nextElementId();
+			this.cacheElement(id, handle);
+			const item = scanned[i]!;
+			entries.push({ id, role: item.role, name: item.name, value: item.value, states: item.states });
+		}
+		for (const extra of handles.slice(scanned.length)) await extra.dispose().catch(() => undefined);
+		return entries;
+	}
+
 	async #captureScreenshot(
 		session: SessionSnapshot,
 		output: RunOutput,
@@ -1564,7 +1788,7 @@ export class WorkerCore {
 			const handle =
 				parseAriaRefSelector(opts.selector) !== null
 					? await this.#resolveAriaRef(opts.selector)
-					: asElementHandle(await untilAborted(signal, () => page.$(normalizeSelector(opts.selector!))));
+					: await untilAborted(signal, () => this.#querySelector(normalizeSelector(opts.selector!)));
 			if (!handle) throw new ToolError("Screenshot selector did not resolve to an element");
 			try {
 				// Bring the element into view with a single instant scroll instead of puppeteer's
@@ -1636,7 +1860,7 @@ export class WorkerCore {
 				const handle =
 					parseAriaRefSelector(target) !== null
 						? await this.#resolveAriaRef(target)
-						: asElementHandle(await untilAborted(signal, () => page.$(normalizeSelector(target))));
+						: await untilAborted(signal, () => this.#querySelector(normalizeSelector(target)));
 				if (!handle) throw new ToolError(`Drag ${role} selector did not resolve: ${target}`);
 				const box = (await untilAborted(signal, () => handle.boundingBox())) as {
 					x: number;
@@ -1779,6 +2003,93 @@ export class WorkerCore {
 		return (await untilAborted(signal, () => page.waitForResponse(predicate, { timeout, signal }))) as HTTPResponse;
 	}
 
+	/**
+	 * Selector fan-out for the aria/ engine. Puppeteer's built-in aria/ handler
+	 * needs CDP (unavailable on Camoufox/BiDi), so aria/Name resolves through an
+	 * in-page accname scan that tags matches, reads them back as handles, and
+	 * untags. All other selectors go to puppeteer's own handlers.
+	 */
+	async #querySelectorAll(selector: string): Promise<ElementHandle[]> {
+		if (selector.startsWith("aria/")) return this.#queryAria(selector.slice("aria/".length));
+		return (await this.#requirePage().$$(selector)) as ElementHandle[];
+	}
+
+	async #querySelector(selector: string): Promise<ElementHandle | null> {
+		const handles = await this.#querySelectorAll(selector);
+		const first = handles[0] ?? null;
+		await Promise.all(handles.slice(1).map(handle => handle.dispose().catch(() => undefined)));
+		return first;
+	}
+
+	async #queryAria(name: string): Promise<ElementHandle[]> {
+		const page = this.#requirePage();
+		const tagged = (await page.evaluate(
+			`(() => { ${ACCNAME_SOURCE}
+				const needle = ${JSON.stringify(name)}.toLowerCase();
+				const marker = ${JSON.stringify(ARIA_MARKER)};
+				for (const el of Array.from(document.querySelectorAll("[" + marker + "]"))) el.removeAttribute(marker);
+				let n = 0;
+				for (const el of Array.from(document.querySelectorAll(${JSON.stringify(INTERACTIVE_CANDIDATE_SELECTOR)}))) {
+					const acc = accName(el);
+					if (acc && acc.toLowerCase().includes(needle)) el.setAttribute(marker, String(n++));
+				}
+				return n; })()`,
+		)) as number;
+		if (!tagged) return [];
+		const handles = (await page.$$(`[${ARIA_MARKER}]`)) as ElementHandle[];
+		await page
+			.evaluate(
+				`for (const el of Array.from(document.querySelectorAll("[${ARIA_MARKER}]"))) el.removeAttribute("${ARIA_MARKER}")`,
+			)
+			.catch(() => undefined);
+		return handles;
+	}
+
+	/**
+	 * Retry-loop click for query-handler selectors (text/, aria/): among all
+	 * matches, click the first actionable candidate; keep polling while matches
+	 * are missing or not yet clickable. CSS selectors use the locator path.
+	 */
+	async #clickFirstActionable(selector: string, timeoutMs: number, signal?: AbortSignal): Promise<void> {
+		const timeoutSignal = AbortSignal.timeout(timeoutMs);
+		const clickSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+		const start = Date.now();
+		let lastSeen = 0;
+		let lastReason: string | null = null;
+		while (Date.now() - start < timeoutMs) {
+			throwIfAborted(clickSignal);
+			const handles = await untilAborted(clickSignal, () => this.#querySelectorAll(selector));
+			try {
+				lastSeen = handles.length;
+				const target = await resolveActionableQueryHandlerClickTarget(handles);
+				if (!target) {
+					lastReason = handles.length ? "no-visible-candidate" : "no-matches";
+					await untilAborted(clickSignal, () => Bun.sleep(100));
+					continue;
+				}
+				const actionability = await isClickActionable(target);
+				if (!actionability.ok) {
+					lastReason = actionability.reason;
+					await untilAborted(clickSignal, () => Bun.sleep(100));
+					continue;
+				}
+				try {
+					await untilAborted(clickSignal, () => target.click());
+					return;
+				} catch (err) {
+					lastReason = err instanceof Error ? err.message : String(err);
+					await untilAborted(clickSignal, () => Bun.sleep(100));
+				}
+			} finally {
+				await Promise.all(handles.map(async handle => handle.dispose().catch(() => undefined)));
+			}
+		}
+		throw new ToolError(
+			`Timed out clicking ${selector} (seen ${lastSeen} matches; last reason: ${lastReason ?? "unknown"}). ` +
+				"If there are multiple matching elements, use observe + tab.id() or a more specific selector.",
+		);
+	}
+
 	async #resolveCachedHandle(id: number): Promise<ElementHandle> {
 		const handle = this.#elementCache.get(id);
 		if (!handle) throw new ToolError(`Unknown element id ${id}. Run tab.observe() to refresh the element list.`);
@@ -1814,8 +2125,26 @@ export class WorkerCore {
 	 */
 	async #resolveActionHandle(selector: string, timeoutMs: number, sig: AbortSignal): Promise<ElementHandle> {
 		if (parseAriaRefSelector(selector) !== null) return this.#resolveAriaRef(selector);
+		const resolved = normalizeSelector(selector);
+		if (resolved.startsWith("aria/")) {
+			// Poll the accname engine; a locator cannot express it.
+			const deadline = Date.now() + timeoutMs;
+			for (;;) {
+				throwIfAborted(sig);
+				const handle = await this.#querySelector(resolved);
+				if (handle) return handle;
+				if (Date.now() >= deadline) {
+					const error = new Error(
+						`Waiting for selector ${JSON.stringify(selector)} failed: timeout ${timeoutMs}ms exceeded`,
+					);
+					error.name = "TimeoutError";
+					throw error;
+				}
+				await untilAborted(sig, () => Bun.sleep(100));
+			}
+		}
 		return (await untilAborted(sig, () =>
-			this.#requirePage().locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle({ signal: sig }),
+			this.#requirePage().locator(resolved).setTimeout(timeoutMs).waitHandle({ signal: sig }),
 		)) as ElementHandle;
 	}
 	#clearElementCache(): void {
@@ -1829,9 +2158,14 @@ export class WorkerCore {
 		for (const handle of handles) void handle.dispose().catch(() => undefined);
 	}
 
-	/** Best-effort `Page.stopLoading` so an abandoned navigation cannot stall later ops. */
+	/** Best-effort navigation stop so an abandoned load cannot stall later ops. */
 	async #stopLoading(): Promise<void> {
 		try {
+			if (this.#mode === "headless") {
+				// BiDi has no Page.stopLoading; window.stop() is the equivalent.
+				await this.#requirePage().evaluate(() => stop());
+				return;
+			}
 			const session = await this.#requirePage().createCDPSession();
 			try {
 				await session.send("Page.stopLoading");
@@ -1850,8 +2184,12 @@ export class WorkerCore {
 		this.#clearElementCache();
 		const page = this.#page;
 		if (this.#dialogHandler && page && !page.isClosed()) page.off("dialog", this.#dialogHandler);
-		if (this.#mode === "headless" && page && !page.isClosed()) await page.close().catch(() => undefined);
-		if (this.#browser?.connected) this.#browser.disconnect();
+		if (this.#mode === "headless" && this.#browser?.connected) {
+			// Worker owns the Camoufox process: closing the browser kills the engine.
+			await this.#browser.close().catch(() => undefined);
+		} else if (this.#browser?.connected) {
+			this.#browser.disconnect();
+		}
 		this.#transport.send({ type: "closed" });
 		this.#transport.close();
 	}

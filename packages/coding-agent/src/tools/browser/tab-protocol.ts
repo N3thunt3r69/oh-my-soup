@@ -45,8 +45,8 @@ export interface SessionSnapshot {
 export type WorkerInitPayload =
 	| {
 			mode: "headless";
-			browserWSEndpoint: string;
 			safeDir: string;
+			headless: boolean;
 			viewport?: { width: number; height: number; deviceScaleFactor?: number };
 			dialogs?: "accept" | "dismiss";
 			url?: string;
@@ -89,6 +89,8 @@ export interface ReadyInfo {
 	title?: string;
 	viewport: { width: number; height: number; deviceScaleFactor?: number };
 	targetId: string;
+	/** Headless Camoufox engine pid; stamped onto the registry handle for teardown. */
+	pid?: number;
 }
 
 export interface RunResultOk {
