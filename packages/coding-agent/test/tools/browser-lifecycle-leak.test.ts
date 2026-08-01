@@ -19,7 +19,12 @@
 import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import type { CmuxKind } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/rpc";
 import { CmuxSocketClient } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/socket-client";
-import { acquireBrowser, getBrowsersMapForTest } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
+import {
+	acquireBrowser,
+	getBrowsersMapForTest,
+	holdBrowser,
+	releaseBrowser,
+} from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import {
 	acquireTab,
 	getTabsMapForTest,
@@ -91,6 +96,16 @@ describe("browser lifecycle — aborted open must not leak a browser handle", ()
 			connectSpy.mockRestore();
 			closeSpy.mockRestore();
 		}
+	});
+
+	it("evicts a released headless handle under its published key", async () => {
+		const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: "/tmp" });
+		expect(getBrowsersMapForTest().get(browser.key)).toBe(browser);
+
+		holdBrowser(browser);
+		await releaseBrowser(browser, { kill: false });
+
+		expect(getBrowsersMapForTest().size).toBe(0);
 	});
 });
 

@@ -58,7 +58,17 @@ async function browseHtmlPage(
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	try {
-		browser = await untilAborted(signal, () => launchCamoufoxBrowser(puppeteer, { headless: true }));
+		const launch = launchCamoufoxBrowser(puppeteer, { headless: true });
+		// `untilAborted` rejects its outer promise immediately but cannot cancel
+		// an in-flight Puppeteer launch. Reap a browser that arrives after abort
+		// because `browser` is never assigned and the finally block cannot see it.
+		void launch.then(
+			async lateBrowser => {
+				if (signal.aborted) await lateBrowser.close().catch(() => undefined);
+			},
+			() => undefined,
+		);
+		browser = await untilAborted(signal, () => launch);
 		const activePage = await untilAborted(signal, () => adoptInitialPage(browser!));
 		page = activePage;
 		if (homeUrl) {
