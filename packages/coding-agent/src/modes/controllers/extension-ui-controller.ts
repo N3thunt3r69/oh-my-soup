@@ -10,6 +10,7 @@ import type {
 	ExtensionAskDialogResultItem,
 	ExtensionCommandContextActions,
 	ExtensionContextActions,
+	ExtensionCustomOptions,
 	ExtensionError,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -1047,7 +1048,7 @@ export class ExtensionUiController {
 			keybindings: KeybindingsManager,
 			done: (result: T) => void,
 		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
-		options?: { overlay?: boolean },
+		options?: ExtensionCustomOptions,
 	): Promise<T> {
 		const savedText = this.ctx.editor.getText();
 		const keybindings = KeybindingsManager.inMemory();
@@ -1080,12 +1081,16 @@ export class ExtensionUiController {
 			}
 			component = c;
 			if (options?.overlay) {
-				overlayHandle = this.ctx.ui.showOverlay(component, {
-					anchor: "bottom-center",
-					width: "100%",
-					maxHeight: "100%",
-					margin: 0,
-				});
+				overlayHandle = this.ctx.ui.showOverlay(
+					component,
+					options.overlayOptions ?? {
+						anchor: "bottom-center",
+						width: "100%",
+						maxHeight: "100%",
+						margin: 0,
+					},
+				);
+				options.onHandle?.(overlayHandle);
 				return;
 			}
 			this.ctx.editorContainer.clear();
