@@ -18,6 +18,7 @@ const goalSchema = type({
 	op: type("'create' | 'get' | 'complete' | 'resume' | 'drop'").describe("goal operation"),
 	"objective?": type("string").describe("goal objective"),
 	"token_budget?": type("number.integer").describe("token budget"),
+	"gates?": type("string[]").describe("quality gate shell commands; each must exit 0 before the goal can complete"),
 });
 
 export type GoalToolInput = typeof goalSchema.infer;
@@ -43,7 +44,7 @@ export function buildGoalToolResponse(
 	};
 }
 
-function validateCreateParams(params: GoalToolInput): { objective: string; tokenBudget?: number } {
+function validateCreateParams(params: GoalToolInput): { objective: string; tokenBudget?: number; gates?: string[] } {
 	const objective = params.objective?.trim();
 	if (!objective) {
 		throw new ToolError("objective is required when op=create");
@@ -52,7 +53,7 @@ function validateCreateParams(params: GoalToolInput): { objective: string; token
 	if (tokenBudget !== undefined && (!Number.isInteger(tokenBudget) || tokenBudget <= 0)) {
 		throw new ToolError("token_budget must be a positive integer when provided");
 	}
-	return { objective, tokenBudget };
+	return { objective, tokenBudget, gates: params.gates };
 }
 
 export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
@@ -105,6 +106,9 @@ export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
 			}
 			if (response.remainingTokens !== null) {
 				text += `\nRemaining tokens: ${response.remainingTokens}`;
+			}
+			if (response.goal.gates?.length) {
+				text += `\nQuality gates (${response.goal.gates.length}): ${response.goal.gates.join("; ")}`;
 			}
 			if (response.completionBudgetReport) {
 				text += `\n\n${response.completionBudgetReport}`;

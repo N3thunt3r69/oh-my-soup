@@ -44,6 +44,7 @@ export default {
 			interpreter: readInterpreterSetting(opts.session),
 			sessionFile: opts.sessionFile,
 			artifactsDir: opts.session.getArtifactsDir?.() ?? undefined,
+			stateSnapshot: readSetting<boolean>(opts.session, "python.stateSnapshot"),
 			localRoots: resolveEvalUrlRoots(opts.session),
 			kernelOwnerId: opts.kernelOwnerId,
 			reset: opts.reset,

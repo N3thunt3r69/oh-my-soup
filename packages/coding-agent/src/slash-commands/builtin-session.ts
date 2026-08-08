@@ -9,7 +9,7 @@ import {
 	renderChangelogEntries,
 } from "../utils/changelog";
 import { formatTokenCount, refreshStatusLine } from "./builtin-modes";
-import { buildContextReportText } from "./helpers/context-report";
+import { buildContextReportText, buildContextTreeText } from "./helpers/context-report";
 import { formatDuration } from "./helpers/format";
 import { handleMcpAcp } from "./helpers/mcp";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./helpers/parse";
@@ -423,11 +423,14 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			return `Context: ${Math.round(usage.percent)}% (${formatTokenCount(usage.tokens)}/${formatTokenCount(usage.contextWindow)})`;
 		},
 		handle: async (_command, runtime) => {
-			await runtime.output(buildContextReportText(runtime));
+			const treeText = await buildContextTreeText(runtime);
+			await runtime.output(
+				treeText ? `${buildContextReportText(runtime)}\n\n${treeText}` : buildContextReportText(runtime),
+			);
 			return commandConsumed();
 		},
 		handleTui: (_command, runtime) => {
-			runtime.ctx.handleContextCommand();
+			void runtime.ctx.handleContextCommand();
 			runtime.ctx.editor.setText("");
 		},
 	},

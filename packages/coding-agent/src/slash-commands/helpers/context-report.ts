@@ -1,4 +1,5 @@
 import { computeContextBreakdown } from "../../modes/utils/context-usage";
+import { buildContextTree, renderContextTreeLines } from "../../session/context-tree";
 import type { SlashCommandRuntime } from "../types";
 import { renderAsciiBar } from "./format";
 
@@ -62,5 +63,19 @@ export function buildContextReportText(runtime: SlashCommandRuntime): string {
 		const fallback = runtime.session.getContextUsage();
 		if (!fallback) return "Context usage is unavailable.";
 		return ["Context", `Window: ${fallback.contextWindow}`, `Used: ${fallback.tokens ?? 0}`].join("\n");
+	}
+}
+
+/**
+ * Build the `/context` per-agent usage tree (main session plus live and
+ * disk-only subagents). Best-effort: returns undefined when the tree cannot
+ * be built so the flat breakdown still renders on its own.
+ */
+export async function buildContextTreeText(runtime: SlashCommandRuntime): Promise<string | undefined> {
+	try {
+		const tree = await buildContextTree(runtime.session);
+		return ["Agents (own = this agent only, total = own + descendants):", ...renderContextTreeLines(tree)].join("\n");
+	} catch {
+		return undefined;
 	}
 }

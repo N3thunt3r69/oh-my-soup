@@ -320,6 +320,15 @@ export interface ToolSession {
 	getTurnBudget?: () => { total: number | null; spent: number; hard: boolean };
 	/** Record output tokens consumed by an eval-spawned subagent toward the current turn budget. */
 	recordEvalSubagentUsage?: (output: number) => void;
+	/** compact.status eval helper: current context usage + whether a requested compaction is pending. */
+	getCompactionStatus?: () => {
+		tokens: number | null;
+		contextWindow: number | null;
+		percent: number | null;
+		scheduled: boolean;
+	};
+	/** compact.run eval helper: schedule a compaction at the next safe turn boundary. */
+	requestCompaction?: (instructions?: string) => { scheduled: boolean; reason?: string; note?: string };
 	/** Bridge to the connected client (e.g. ACP editor host). Tools should route fs/terminal/permission requests through this when available. */
 	getClientBridge?: () => ClientBridge | undefined;
 	/** Get cached todo phases for this session. */

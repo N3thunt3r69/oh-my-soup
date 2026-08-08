@@ -322,9 +322,9 @@ function formatHudNoteMarker(count: number): string {
 	return theme.fg("dim", chalk.italic(` \u207a${sub}`));
 }
 
-type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop" | "budget";
+type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop" | "budget" | "gates";
 
-const GOAL_SUBCOMMANDS = new Set<GoalSubcommand>(["set", "show", "pause", "resume", "drop", "budget"]);
+const GOAL_SUBCOMMANDS = new Set<GoalSubcommand>(["set", "show", "pause", "resume", "drop", "budget", "gates"]);
 const PLAN_KEEP_CONTEXT_OPTION_INDEX = 2;
 const PLAN_KEEP_CONTEXT_DISABLE_THRESHOLD_PERCENT = 95;
 
@@ -1401,15 +1401,48 @@ export class InteractiveMode implements InteractiveModeContext {
 			if ((this.editor.pendingImages?.length ?? 0) > 0) return;
 			const latestState = this.session.getGoalModeState();
 			if (!latestState?.enabled || latestState.goal.status !== "active") return;
-			this.#goalContinuationTurnInFlight = true;
-			this.onInputCallback(
-				this.startPendingSubmission({
-					text: prompt,
-					customType: "goal-continuation",
-					display: false,
-				}),
-			);
+			void this.#submitGoalContinuationWithGates(prompt);
 		}, 800);
+	}
+
+	/** Runs the goal's quality gates (if configured) before firing the
+	 *  continuation. A failing gate's output replaces the normal continuation
+	 *  prompt verbatim; exhausted gate retries stop auto-continuation. */
+	async #submitGoalContinuationWithGates(fallbackPrompt: string): Promise<void> {
+		let text: string | undefined = fallbackPrompt;
+		try {
+			text = await this.session.goalRuntime.buildGateAwareContinuationPrompt();
+		} catch {
+			// Gate execution problems must not kill the continuation loop; fall
+			// back to the plain continuation prompt.
+			text = fallbackPrompt;
+		}
+		if (!this.onInputCallback) return;
+		if (!this.goalModeEnabled || this.goalModePaused) return;
+		const latestState = this.session.getGoalModeState();
+		if (!latestState?.enabled || latestState.goal.status !== "active") return;
+		if (text === undefined) {
+			// Gate retries exhausted: stop auto-continuing; the operator decides.
+			const failure = this.session.goalRuntime.lastGateFailure;
+			if (failure) {
+				this.showWarning(
+					`Goal gate \`${failure.command}\` still failing after ${failure.attempt} attempts; auto-continuation stopped.`,
+				);
+			}
+			return;
+		}
+		if (this.#isAutoSubmitBlocked()) return;
+		if (this.#pendingSubmittedInput) return;
+		if (this.editor.getText().trim().length > 0) return;
+		if ((this.editor.pendingImages?.length ?? 0) > 0) return;
+		this.#goalContinuationTurnInFlight = true;
+		this.onInputCallback(
+			this.startPendingSubmission({
+				text,
+				customType: "goal-continuation",
+				display: false,
+			}),
+		);
 	}
 
 	#cancelGoalContinuation(): void {
@@ -3566,7 +3599,46 @@ export class InteractiveMode implements InteractiveModeContext {
 				}
 				await this.#handleGoalBudgetCommand(rest);
 				return;
+			case "gates":
+				await this.#handleGoalGatesCommand(rest);
+				return;
 		}
+	}
+
+	async #handleGoalGatesCommand(rest: string): Promise<void> {
+		const state = this.session.getGoalModeState();
+		if (!state?.goal || state.goal.status === "complete" || state.goal.status === "dropped") {
+			this.showWarning("No goal to configure gates for.");
+			return;
+		}
+		const trimmed = rest.trim();
+		if (!trimmed) {
+			const prefill = state.goal.gates?.join("\n") ?? "";
+			const input = await this.showHookEditor(
+				"Goal quality gates (one shell command per line, empty to clear)",
+				prefill,
+				undefined,
+				{ promptStyle: true },
+			);
+			if (input === undefined) return;
+			await this.#applyGoalGates(input.split("\n"));
+			return;
+		}
+		if (trimmed.toLowerCase() === "off" || trimmed.toLowerCase() === "clear") {
+			await this.#applyGoalGates(undefined);
+			return;
+		}
+		await this.#applyGoalGates([trimmed]);
+	}
+
+	async #applyGoalGates(gates: string[] | undefined): Promise<void> {
+		const state = await this.session.goalRuntime.setGates(gates);
+		const configured = state?.goal.gates;
+		this.showStatus(
+			configured?.length
+				? `Goal gates set (${configured.length}):\n${configured.map(command => `  ${command}`).join("\n")}`
+				: "Goal gates cleared.",
+		);
 	}
 
 	async #openGoalMenu(state: "active" | "paused"): Promise<void> {
@@ -3617,6 +3689,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			`Tokens: ${budgetLine}`,
 			`Time spent: ${formatDuration(goal.timeUsedSeconds * 1000)}`,
 		];
+		if (goal.gates?.length) {
+			lines.push(`Gates: ${goal.gates.join("; ")}`);
+		}
 		this.showStatus(lines.join("\n"));
 	}
 
@@ -4496,8 +4571,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#commandController.handleToolsCommand();
 	}
 
-	handleContextCommand(): void {
-		this.#commandController.handleContextCommand();
+	handleContextCommand(): Promise<void> {
+		return this.#commandController.handleContextCommand();
 	}
 
 	#vibeSessionTransitionBlocked(): boolean {

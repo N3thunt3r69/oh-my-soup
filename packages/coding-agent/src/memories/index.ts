@@ -1409,7 +1409,8 @@ async function readLearnedLessons(memoryRoot: string): Promise<string> {
 		.join("\n");
 }
 
-function encodeProjectPath(cwd: string): string {
+/** Encode a project cwd into a filesystem-safe directory segment (shared with /refine state). */
+export function encodeProjectPath(cwd: string): string {
 	return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 

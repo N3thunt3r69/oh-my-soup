@@ -4,8 +4,14 @@
 import { type } from "@oh-my-pi/omptype";
 import {
 	buildStructuredSubagentRecoveryHint,
+	type EffectiveSubagentPolicy,
+	reserveStructuredSubagentId,
+	resolveEffectiveSubagentPolicy,
 	runStructuredSubagent,
 	StructuredSubagentError,
+	type StructuredSubagentIsolationControls,
+	type StructuredSubagentRequest,
+	type StructuredSubagentResult,
 	type StructuredSubagentSchemaMode,
 } from "../task/structured-subagent";
 import type { AgentProgress, SingleResult } from "../task/types";
@@ -30,6 +36,7 @@ const agentArgsSchema = type({
 	"apply?": "boolean",
 	"merge?": "boolean",
 	"handle?": "boolean",
+	"detach?": "boolean",
 	"+": "delete",
 });
 
@@ -43,6 +50,7 @@ interface EvalAgentArgs {
 	apply?: boolean;
 	merge?: boolean;
 	handle?: boolean;
+	detach?: boolean;
 }
 
 export interface EvalAgentBridgeOptions {
@@ -55,9 +63,15 @@ export interface EvalAgentResult {
 	text: string;
 	/** Parsed structured data returned by the child executor. */
 	data?: unknown;
+	/** Set when the call was admitted with `detach`: the child runs as a background job and no result was awaited. */
+	detached?: true;
 	details: {
 		agent: string;
 		id: string;
+		/** Background job id for a detached admission (matches the agent id). */
+		jobId?: string;
+		/** Caller-supplied label echoed back for detached admissions. */
+		label?: string;
 		model?: string | string[];
 		structured: boolean;
 		schemaSource?: "caller" | "agent" | "session";
@@ -118,6 +132,118 @@ function buildSubagentFailureMessage(agentName: string, result: SingleResult): s
 	);
 }
 
+/** Normalize the caller's isolated/apply/merge flags into isolation controls. */
+function buildIsolationControls(parsed: EvalAgentArgs): StructuredSubagentIsolationControls | undefined {
+	if (!Object.hasOwn(parsed, "isolated") && !Object.hasOwn(parsed, "apply") && !Object.hasOwn(parsed, "merge")) {
+		return undefined;
+	}
+	return {
+		...(parsed.isolated !== undefined ? { requested: parsed.isolated } : {}),
+		...(parsed.merge === false ? { merge: "patch" as const } : {}),
+		...(parsed.apply !== undefined ? { apply: parsed.apply } : {}),
+	};
+}
+
+/**
+ * Admit a detached subagent: preflight and id reservation run inline so the
+ * caller sees validation errors immediately, then execution is registered as
+ * a background job on the session's AsyncJobManager — the same channel task
+ * async spawns use, so the child shows up in `hub jobs` and its result
+ * auto-delivers to the owning agent. The eval cell's abort signal is
+ * deliberately NOT wired to the job: detached children outlive the cell and
+ * are cancelled through the job manager instead.
+ */
+async function spawnDetachedEvalAgent(
+	parsed: EvalAgentArgs,
+	options: EvalAgentBridgeOptions,
+): Promise<EvalAgentResult> {
+	const session = options.session;
+	const manager = session.settings.get("async.enabled") ? session.asyncJobManager : undefined;
+	if (!manager) {
+		throw new ToolError(
+			"agent(detach) requires background jobs: enable `async.enabled` (with a registered job manager) or call agent() without detach.",
+		);
+	}
+	const label = trimToUndefined(parsed.label);
+	const isolation = buildIsolationControls(parsed);
+	const request: StructuredSubagentRequest = {
+		session,
+		invocationKind: "eval",
+		assignment: parsed.prompt,
+		detached: true,
+		...(parsed.agent !== undefined ? { agent: parsed.agent } : {}),
+		...(Object.hasOwn(parsed, "schema") ? { outputSchema: parsed.schema } : {}),
+		...(parsed.schemaMode !== undefined ? { schemaMode: parsed.schemaMode } : {}),
+		...(isolation ? { isolation } : {}),
+		// The finished child must stay reachable: agent://<id> needs retained
+		// artifacts and keepAlive leaves an idle registry ref for hub follow-up,
+		// matching task async spawns rather than eval's blocking one-shots.
+		retainArtifacts: true,
+		keepAlive: true,
+		shareEvalSession: false,
+	};
+	let policy: EffectiveSubagentPolicy;
+	try {
+		policy = await resolveEffectiveSubagentPolicy(request);
+	} catch (error) {
+		if (error instanceof StructuredSubagentError) throw new ToolError(error.message);
+		throw error;
+	}
+	const id = await reserveStructuredSubagentId(session, { label: label ?? "EvalAgent" });
+	const ownerId = session.getAgentId?.() ?? undefined;
+	const jobId = manager.register(
+		"task",
+		id,
+		async ({ signal, reportProgress, markRunning }) => {
+			markRunning();
+			await reportProgress(`Running detached agent ${id}...`);
+			let execution: StructuredSubagentResult;
+			try {
+				execution = await runStructuredSubagent({
+					...request,
+					identity: { id, ...(label !== undefined ? { label } : {}) },
+					signal,
+					onProgress: progress => {
+						const intent = progress.lastIntent ? ` — ${progress.lastIntent}` : "";
+						void reportProgress(`${id}: ${progress.status}${intent}`);
+					},
+				});
+			} catch (error) {
+				if (error instanceof StructuredSubagentError) throw new Error(error.message, { cause: error });
+				throw error;
+			}
+			const { result, mergeSummary, changesApplied, artifactsDir } = execution;
+			if (result.exitCode !== 0 || result.error || result.aborted) {
+				const failureMessage = buildSubagentFailureMessage(policy.agentName, result)
+					.replace(/<\/?system-notification>/g, "")
+					.trim();
+				const recoveryHint = policy.isIsolated
+					? await buildStructuredSubagentRecoveryHint(result, artifactsDir)
+					: "";
+				throw new Error(`${failureMessage}${recoveryHint}`);
+			}
+			if (policy.isIsolated && changesApplied === false) {
+				const summary = mergeSummary.replace(/<\/?system-notification>/g, "").trim();
+				const recoveryHint = await buildStructuredSubagentRecoveryHint(result, artifactsDir);
+				throw new Error(
+					`agent(detach) isolated apply failed for ${result.id}${summary ? `: ${summary}` : ""}${recoveryHint}`,
+				);
+			}
+			return `${result.output}${mergeSummary}\n\nDetached agent ${id} finished — full output at agent://${id}.`;
+		},
+		{
+			id,
+			agentId: id,
+			...(ownerId !== undefined ? { ownerId } : {}),
+		},
+	);
+	return {
+		text: `Spawned detached agent ${id} (job ${jobId}). The result auto-delivers when it settles; poll via hub jobs or read agent://${id} afterwards.`,
+		detached: true,
+		details: { agent: policy.agentName, id, jobId, structured: false, ...(label !== undefined ? { label } : {}) },
+	};
+}
+
 /**
  * Run a single subagent on behalf of an eval cell's `agent()` call.
  */
@@ -129,14 +255,10 @@ export async function runEvalAgent(args: unknown, options: EvalAgentBridgeOption
 			`agent() blocked: turn token budget exhausted (${turnBudget.spent}/${turnBudget.total} output tokens). Raise or drop the +Nk! ceiling to continue.`,
 		);
 	}
-	const isolation =
-		Object.hasOwn(parsed, "isolated") || Object.hasOwn(parsed, "apply") || Object.hasOwn(parsed, "merge")
-			? {
-					...(parsed.isolated !== undefined ? { requested: parsed.isolated } : {}),
-					...(parsed.merge === false ? { merge: "patch" as const } : {}),
-					...(parsed.apply !== undefined ? { apply: parsed.apply } : {}),
-				}
-			: undefined;
+	if (parsed.detach) {
+		return spawnDetachedEvalAgent(parsed, options);
+	}
+	const isolation = buildIsolationControls(parsed);
 
 	try {
 		const execution = await withBridgeTimeoutPause(

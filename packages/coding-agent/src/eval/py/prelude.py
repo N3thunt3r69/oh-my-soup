@@ -495,12 +495,17 @@ if "__omp_prelude_loaded__" not in globals():
         apply=None,
         merge=None,
         handle=False,
+        detach=False,
     ):
         """Run a subagent and return its final output or structured data.
 
         `schema` overrides agent and session schemas. `schema_mode` is
         `"permissive"` or `"strict"`. `handle=True` returns the child output
         reference and metadata, with parsed data under `"data"` when available.
+        `detach=True` returns at admission with `{"id", "handle", "job_id"}`
+        instead of waiting: the child runs as a background job, shows up in
+        `tool.hub({"op": "jobs"})`, auto-delivers its result to the parent
+        agent, and its full output stays readable at `agent://<id>`.
         """
         args = {"prompt": prompt}
         if agent is not None:
@@ -519,7 +524,22 @@ if "__omp_prelude_loaded__" not in globals():
             args["merge"] = bool(merge)
         if handle:
             args["handle"] = True
+        if detach:
+            args["detach"] = True
         res = _bridge_call("__agent__", args)
+        if detach:
+            details = res.get("details") if isinstance(res, dict) else None
+            details = details if isinstance(details, dict) else {}
+            agent_id = details.get("id")
+            return {
+                "id": agent_id,
+                "handle": f"agent://{agent_id}" if agent_id else None,
+                "label": details.get("label"),
+                "agent": details.get("agent"),
+                "job_id": details.get("jobId"),
+                "detached": True,
+                "text": res.get("text") if isinstance(res, dict) else res,
+            }
         text = res.get("text") if isinstance(res, dict) else res
         has_data = isinstance(res, dict) and "data" in res
         parsed = res["data"] if has_data else json.loads(text) if schema is not None else text
@@ -671,3 +691,29 @@ if "__omp_prelude_loaded__" not in globals():
                 return "<budget unavailable>"
 
     budget = _Budget()
+
+    class _Compact:
+        """Context-usage view + agent-scheduled compaction via the host bridge."""
+
+        def status(self):
+            """Current context usage: {tokens, contextWindow, percent, scheduled}."""
+            return _bridge_call("__compact__", {"op": "status"}) or {}
+
+        def run(self, instructions=None):
+            """Schedule compaction at the next turn boundary; the session resumes automatically."""
+            payload = {"op": "run"}
+            if instructions is not None:
+                payload["instructions"] = str(instructions)
+            return _bridge_call("__compact__", payload) or {}
+
+    compact = _Compact()
+
+    def __omp_list_new_globals__(limit=50):
+        """User-defined top-level names added after the prelude baseline (post-compaction probe)."""
+        base = globals().get("__omp_baseline_globals__") or frozenset()
+        names = sorted(n for n in globals() if not n.startswith("_") and n not in base)
+        return names[:limit]
+
+    # Snapshot AFTER every prelude definition: anything visible now is
+    # infrastructure, so the probe reports only names user code added later.
+    __omp_baseline_globals__ = frozenset(globals())

@@ -17,7 +17,7 @@ export type AgentSessionEvent =
 	  })
 	| {
 			type: "auto_compaction_start";
-			reason: "threshold" | "overflow" | "idle" | "incomplete";
+			reason: "threshold" | "overflow" | "idle" | "incomplete" | "requested";
 			action: "context-full" | "handoff" | "shake" | "snapcompact";
 	  }
 	| {

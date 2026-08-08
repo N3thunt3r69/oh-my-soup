@@ -2150,6 +2150,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"compaction.agentCallable": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			group: "Compaction",
+			label: "Agent-Callable Compaction",
+			description: "Let the agent inspect context usage and schedule compaction from eval cells (compact.status/compact.run)",
+		},
+	},
+
 	"compaction.midTurnEnabled": {
 		type: "boolean",
 		default: true,
@@ -2664,6 +2675,34 @@ export const SETTINGS_SCHEMA = {
 	},
 	// Config-file-only knob (numbers without `options` are hidden from the UI).
 	"autolearn.minToolCalls": { type: "number", default: 5 },
+
+	// /refine continual harness (experimental): audited, rollback-able
+	// trajectory-review loop over reusable prompt notes, memories, skill
+	// descriptions, and subagent specs. State + audit log live under
+	// ~/.omp/agent/refinement/<project>/.
+	"refine.auto": {
+		type: "enum",
+		values: ["off", "compact", "turnInterval"] as const,
+		default: "off",
+		ui: {
+			tab: "memory",
+			group: "Refine",
+			label: "Auto-Refine",
+			description: "Automatically run a guarded /refine pass, throttled by the cooldown",
+			options: [
+				{ value: "off", label: "Off", description: "Only manual /refine runs" },
+				{ value: "compact", label: "After compaction", description: "Run one pass after each manual compaction" },
+				{
+					value: "turnInterval",
+					label: "Turn interval",
+					description: "Reserved: run every refine.turnInterval turns (trigger not wired yet)",
+				},
+			],
+		},
+	},
+	// Config-file-only knobs (numbers without `options` are hidden from the UI).
+	"refine.turnInterval": { type: "number", default: 8 },
+	"refine.cooldownMinutes": { type: "number", default: 20 },
 
 	// Mnemopi local SQLite memory backend.
 	"mnemopi.dbPath": {
@@ -3617,6 +3656,17 @@ export const SETTINGS_SCHEMA = {
 			description: "Keep the IPython kernel alive across eval calls or start fresh each time",
 		},
 	},
+	"python.stateSnapshot": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "shell",
+			group: "Eval & Runtimes",
+			label: "Python State Snapshot",
+			description:
+				"Snapshot the Python kernel's variables (per-variable dill pickle) on graceful session shutdown and restore them when the session resumes",
+		},
+	},
 	"python.interpreter": {
 		type: "string",
 		default: "",
@@ -4434,6 +4484,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"goal.maxGateRetries": {
+		type: "number",
+		default: 3,
+		ui: {
+			tab: "tasks",
+			group: "Modes",
+			label: "Goal Gate Max Retries",
+			description: "Failed quality-gate attempts per gate command before goal auto-continuation stops",
+		},
+	},
+
 	"title.refreshOnReplan": {
 		type: "boolean",
 		default: true,
@@ -4444,6 +4505,20 @@ export const SETTINGS_SCHEMA = {
 			description: "Refresh generated session titles after todo init replans unless the title was set by the user",
 		},
 	},
+
+	// Scheduled prompts (heartbeats)
+	"scheduledPrompts.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tasks",
+			group: "Modes",
+			label: "Scheduled Prompts",
+			description: "Allow /heartbeat scheduled prompts to fire into live sessions",
+		},
+	},
+
+	"scheduledPrompts.maxJobs": { type: "number", default: 8 },
 
 	// Delegation
 	"task.isolation.mode": {

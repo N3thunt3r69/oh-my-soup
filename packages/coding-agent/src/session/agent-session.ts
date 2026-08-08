@@ -108,6 +108,7 @@ import type { Settings, SkillsSettings } from "../config/settings";
 import { onAppendOnlyModeChanged, onModelRolesChanged } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
+import { collectPostCompactionKernelState, KERNEL_PERSISTED_MESSAGE_TYPE } from "../eval/kernel-state";
 import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
 import type { TtsrManager } from "../export/ttsr";
@@ -159,6 +160,7 @@ import { listPlanFiles, readPlanFile } from "../plan-mode/plan-files";
 import type { PlanModeState } from "../plan-mode/state";
 import goalModeContextPrompt from "../prompts/goals/goal-mode-context.md" with { type: "text" };
 import goalTodoContextPrompt from "../prompts/goals/goal-todo-context.md" with { type: "text" };
+import kernelPersistedTemplate from "../prompts/session/kernel-persisted.md" with { type: "text" };
 import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type: "text" };
 import interruptedThinkingTemplate from "../prompts/system/interrupted-thinking.md" with { type: "text" };
 import planModeActivePrompt from "../prompts/system/plan-mode-active.md" with { type: "text" };
@@ -313,6 +315,13 @@ import {
 	queueChipText,
 	toRestoredQueuedMessage,
 } from "./queued-messages";
+import {
+	DEFAULT_MAX_SCHEDULED_PROMPT_JOBS,
+	SCHEDULED_PROMPTS_FILENAME,
+	ScheduledPromptScheduler,
+	type ScheduledPromptSchedulerHost,
+	ScheduledPromptStore,
+} from "./scheduled-prompts";
 import { type AdvisorStats, SessionAdvisors, type SessionAdvisorsHost } from "./session-advisors";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
 import { getRestorableSessionModels } from "./session-context";
@@ -525,6 +534,7 @@ export class AgentSession {
 	#asyncDeliveryEpoch = 0;
 
 	readonly #irc: IrcBridge;
+	readonly #scheduledPrompts: ScheduledPromptScheduler;
 	#ircWakeTurnObserver:
 		| ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined)
 		| undefined;
@@ -958,6 +968,34 @@ export class AgentSession {
 			runEphemeralTurn: args => this.runEphemeralTurn(args),
 		};
 		this.#irc = new IrcBridge(ircHost);
+		const scheduledPromptsHost: ScheduledPromptSchedulerHost = {
+			sessionId: () => this.sessionId,
+			isDisposed: () => this.#isDisposed,
+			enabled: () => this.settings.get("scheduledPrompts.enabled") !== false,
+			maxJobs: () => this.settings.get("scheduledPrompts.maxJobs") ?? DEFAULT_MAX_SCHEDULED_PROMPT_JOBS,
+			deliver: async (_job, promptText, mode) => {
+				// Idle: starts a turn directly. Streaming: queues onto the existing
+				// steering / follow-up queues per the job's delivery mode.
+				await this.prompt(promptText, {
+					expandPromptTemplates: false,
+					synthetic: true,
+					streamingBehavior: mode === "steer" ? "steer" : "followUp",
+				});
+			},
+			onError: (job, error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				this.emitNotice("warning", `Scheduled prompt ${job.id} failed: ${message}`, "scheduled-prompts");
+			},
+		};
+		this.#scheduledPrompts = new ScheduledPromptScheduler(
+			new ScheduledPromptStore(
+				this.sessionManager.getSessionFile()
+					? path.join(this.sessionManager.getSessionDir(), SCHEDULED_PROMPTS_FILENAME)
+					: undefined,
+			),
+			scheduledPromptsHost,
+		);
+		this.#scheduledPrompts.start();
 		const prewalkHost: PrewalkCoordinatorHost = {
 			agent: this.agent,
 			sessionManager: this.sessionManager,
@@ -1375,6 +1413,10 @@ export class AgentSession {
 					{ deliverAs: message.deliverAs },
 				);
 			},
+			gateContext: () => ({
+				cwd: this.sessionManager.getCwd(),
+				maxRetries: this.settings.get("goal.maxGateRetries"),
+			}),
 		});
 		this.#cancelExitRecorder = postmortem.register(`agent-session:${this.sessionManager.getSessionId()}`, reason => {
 			this.#recordSessionExit(reason);
@@ -1493,6 +1535,7 @@ export class AgentSession {
 			recordAnchoredHistoryRewrite: tokensRemoved => this.#stats.recordAnchoredHistoryRewrite(tokensRemoved),
 			getContextBreakdown: options => this.getContextBreakdown(options),
 			getContextUsage: options => this.getContextUsage(options),
+			notifyKernelPersistedAfterCompaction: () => this.#notifyKernelStateAfterCompaction(),
 			shake: (mode, options) => this.shake(mode, options),
 			dropImages: () => this.dropImages(),
 			runHandoff: (customInstructions, options) => this.handoff(customInstructions, options),
@@ -2823,6 +2866,8 @@ export class AgentSession {
 			// continuations — except TTSR self-repair, which already scheduled a
 			// hidden retry while #ttsrAbortPending is still true.
 			if (msg.stopReason === "aborted") {
+				// A deliberate abort drops any pending agent-requested compaction.
+				this.#maintenance.clearPendingRequestedCompaction();
 				this.#recovery.resolveRetry();
 				this.#resetSessionStopContinuationState();
 				await emitAgentEndNotification(ttsrAbortPendingAtAgentEnd ? { willContinue: true } : undefined);
@@ -3679,6 +3724,7 @@ export class AgentSession {
 		this.#memory.cancelLocalMemoryStartup();
 		this.#titleGenerationAbortController.abort();
 		this.#abortAutolearnCapture();
+		this.#scheduledPrompts.stop();
 		this.#irc.flushPending();
 		this.yieldQueue.clear();
 		this.agent.setAsideMessageProvider(undefined);
@@ -7135,6 +7181,11 @@ export class AgentSession {
 		return this.#irc.deliver(msg, opts);
 	}
 
+	/** Session-local scheduled prompts (heartbeats). */
+	get scheduledPrompts(): ScheduledPromptScheduler {
+		return this.#scheduledPrompts;
+	}
+
 	/** Installs task-executor monitoring around autonomous IRC wake turns. */
 	setIrcWakeTurnObserver(
 		observer: ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined) | undefined,
@@ -8332,6 +8383,56 @@ export class AgentSession {
 
 	getContextUsage(options?: { contextWindow?: number }): ContextUsage | undefined {
 		return this.#stats.getContextUsage(options);
+	}
+
+	/** Whether an agent-requested compaction (eval compact.run) awaits the next turn boundary. */
+	get hasPendingRequestedCompaction(): boolean {
+		return this.#maintenance.hasPendingRequestedCompaction;
+	}
+
+	/** Schedule a compaction at the next turn boundary on behalf of the agent (eval compact.run). */
+	requestCompactionFromAgent(instructions?: string): { scheduled: boolean; reason?: string; note?: string } {
+		return this.#maintenance.requestCompactionFromAgent(instructions);
+	}
+
+	/**
+	 * Post-compaction, LLM-visible reminder that live eval kernel state survived
+	 * the history rewrite, with up to ~50 surviving top-level names. Skips
+	 * silently when no kernel is live or the bounded probe fails/times out.
+	 */
+	async #notifyKernelStateAfterCompaction(): Promise<void> {
+		try {
+			const evalSessionId = this.getEvalSessionId();
+			if (!evalSessionId) return;
+			const snapshots = await collectPostCompactionKernelState(evalSessionId);
+			for (const snapshot of snapshots) {
+				const content = prompt.render(kernelPersistedTemplate, {
+					language: snapshot.language,
+					hasNames: snapshot.names.length > 0,
+					names: snapshot.names.join(", "),
+				});
+				const message: CustomMessage = {
+					role: "custom",
+					customType: KERNEL_PERSISTED_MESSAGE_TYPE,
+					content,
+					display: false,
+					attribution: "agent",
+					timestamp: Date.now(),
+				};
+				this.agent.appendMessage(message);
+				this.sessionManager.appendCustomMessageEntry(
+					message.customType,
+					message.content,
+					message.display,
+					undefined,
+					"agent",
+				);
+			}
+		} catch (error) {
+			logger.debug("Post-compaction kernel-state notice skipped", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
 	}
 
 	/**

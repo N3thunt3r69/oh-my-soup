@@ -79,6 +79,8 @@ export class EvalRunner {
 				kernelOwnerId: this.#kernelOwnerId,
 				kernelMode: this.#host.settings.get("python.kernelMode"),
 				interpreter: this.#host.settings.get("python.interpreter")?.trim() || undefined,
+				artifactsDir: this.#host.sessionManager.getArtifactsDir() ?? undefined,
+				stateSnapshot: this.#host.settings.get("python.stateSnapshot"),
 				onChunk,
 				signal: abortController.signal,
 			});

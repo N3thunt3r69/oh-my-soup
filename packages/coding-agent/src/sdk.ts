@@ -1722,6 +1722,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			getUsageStatistics: () => sessionManager.getUsageStatistics(),
 			getTurnBudget: () => sessionManager.getTurnBudget(),
 			recordEvalSubagentUsage: output => sessionManager.recordEvalSubagentOutput(output),
+			getCompactionStatus: () => {
+				const usage = session?.getContextUsage();
+				return {
+					tokens: usage?.tokens ?? null,
+					contextWindow: usage?.contextWindow ?? null,
+					percent: usage?.percent ?? null,
+					scheduled: session?.hasPendingRequestedCompaction ?? false,
+				};
+			},
+			requestCompaction: instructions =>
+				session?.requestCompactionFromAgent(instructions) ?? {
+					scheduled: false,
+					reason: "session unavailable",
+				},
 			getClientBridge: () => session?.clientBridge,
 			queueDeferredDiagnostics: entry => session?.yieldQueue.enqueue(LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE, entry),
 			queueLaunchCompletion: notification =>

@@ -7,6 +7,8 @@ export interface Goal {
 	objective: string;
 	status: GoalStatus;
 	tokenBudget?: number;
+	/** Quality gate shell commands; all must exit 0 before the goal may complete. */
+	gates?: string[];
 	tokensUsed: number;
 	timeUsedSeconds: number;
 	createdAt: number;

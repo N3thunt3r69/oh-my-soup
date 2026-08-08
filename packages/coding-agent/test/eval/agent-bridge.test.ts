@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runEvalAgent } from "@oh-my-pi/pi-coding-agent/eval/agent-bridge";
 import type { LocalProtocolOptions } from "@oh-my-pi/pi-coding-agent/internal-urls";
@@ -92,5 +93,100 @@ describe("runEvalAgent", () => {
 
 		expect(result.data).toEqual({ status: "ok" });
 		expect(result.details).toMatchObject({ structured: true, schemaSource: "agent", schemaMode: "strict" });
+	});
+
+	it("detach returns at admission and delivers the result through the job manager", async () => {
+		const agent: AgentDefinition = {
+			name: "task",
+			description: "Task agent",
+			systemPrompt: "Handle task",
+			source: "bundled",
+		};
+		vi.spyOn(taskDiscovery, "discoverAgents").mockResolvedValue({ agents: [agent], projectAgentsDir: null });
+		let release: (result: SingleResult) => void = () => {};
+		const gate = new Promise<SingleResult>(resolve => {
+			release = resolve;
+		});
+		const runSubprocessSpy = vi.spyOn(taskExecutor, "runSubprocess").mockImplementation(() => gate);
+		const manager = new AsyncJobManager({});
+		try {
+			const session = {
+				cwd: "/tmp",
+				settings: Settings.isolated(),
+				getSessionSpawns: () => "*",
+				getSessionFile: () => null,
+				getAgentId: () => "Main",
+				asyncJobManager: manager,
+			} as unknown as ToolSession;
+
+			const admitted = await runEvalAgent({ prompt: "sleep-ish task", detach: true }, { session });
+			const jobId = admitted.details.jobId ?? "";
+
+			// Admission-time contract: id + job registered, no result awaited yet.
+			expect(admitted.detached).toBe(true);
+			expect(admitted.details.id.length).toBeGreaterThan(0);
+			expect(jobId).toBe(admitted.details.id);
+			expect(admitted.details.agent).toBe("task");
+			const job = manager.getJob(jobId);
+			expect(job?.status).toBe("running");
+			expect(job?.ownerId).toBe("Main");
+			expect(job?.agentId).toBe(admitted.details.id);
+
+			release(createResult({ id: admitted.details.id, output: "slept fine" }));
+			await job?.promise;
+
+			expect(runSubprocessSpy).toHaveBeenCalledTimes(1);
+			expect(manager.getJob(jobId)?.status).toBe("completed");
+			expect(manager.getJob(jobId)?.resultText).toContain("slept fine");
+			expect(manager.getJob(jobId)?.resultText).toContain(`agent://${admitted.details.id}`);
+		} finally {
+			await manager.dispose();
+		}
+	});
+
+	it("detach fails a job whose subagent errors, keeping the failure text", async () => {
+		const agent: AgentDefinition = {
+			name: "task",
+			description: "Task agent",
+			systemPrompt: "Handle task",
+			source: "bundled",
+		};
+		vi.spyOn(taskDiscovery, "discoverAgents").mockResolvedValue({ agents: [agent], projectAgentsDir: null });
+		vi.spyOn(taskExecutor, "runSubprocess").mockResolvedValue(
+			createResult({ exitCode: 1, error: "child exploded", output: "" }),
+		);
+		const manager = new AsyncJobManager({});
+		try {
+			const session = {
+				cwd: "/tmp",
+				settings: Settings.isolated(),
+				getSessionSpawns: () => "*",
+				getSessionFile: () => null,
+				asyncJobManager: manager,
+			} as unknown as ToolSession;
+
+			const admitted = await runEvalAgent({ prompt: "doomed task", detach: true }, { session });
+			const jobId = admitted.details.jobId ?? "";
+			const job = manager.getJob(jobId);
+			await job?.promise;
+
+			expect(manager.getJob(jobId)?.status).toBe("failed");
+			expect(manager.getJob(jobId)?.errorText).toContain("child exploded");
+		} finally {
+			await manager.dispose();
+		}
+	});
+
+	it("detach without a job manager fails at admission", async () => {
+		const session = {
+			cwd: "/tmp",
+			settings: Settings.isolated(),
+			getSessionSpawns: () => "*",
+			getSessionFile: () => null,
+		} as unknown as ToolSession;
+
+		await expect(runEvalAgent({ prompt: "no manager", detach: true }, { session })).rejects.toThrow(
+			/detach.*requires background jobs/i,
+		);
 	});
 });

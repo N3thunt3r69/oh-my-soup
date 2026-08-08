@@ -45,7 +45,8 @@ interface WorkerHandle {
 interface PendingRun {
 	runId: string;
 	runState: VmRunState;
-	toolSession: ToolSession;
+	/** Absent for host-internal probe runs, which never invoke bridge tools. */
+	toolSession: ToolSession | undefined;
 	resolve(value: { value: unknown }): void;
 	reject(error: Error): void;
 	toolCalls: Map<string, AbortController>;
@@ -176,6 +177,65 @@ export async function executeInVmContext(options: {
 		options.ownerId,
 	);
 	return await runOnce(session, options);
+}
+
+/**
+ * Post-compaction namespace probe: run a tool-free snippet on an already-live
+ * VM context and capture the surviving user-defined global names. Never
+ * spawns a worker. Returns `undefined` when no live context exists for
+ * `sessionId` and `null` when the probe fails or times out — a timed-out
+ * probe is abandoned, never escalated, so the user's context stays intact.
+ */
+export async function probeLiveVmGlobals(
+	sessionId: string,
+	timeoutMs: number,
+	limit: number,
+): Promise<string[] | null | undefined> {
+	let target: JsSession | undefined;
+	for (const session of sessions.values()) {
+		if (session.state === "alive" && session.sessionId === sessionId) {
+			target = session;
+			break;
+		}
+	}
+	if (!target) return undefined;
+	const session = target;
+	const runId = `probe-${Snowflake.next()}`;
+	let names: string[] | null = null;
+	const { promise, resolve, reject } = Promise.withResolvers<{ value: unknown }>();
+	const pending: PendingRun = {
+		runId,
+		runState: {
+			onDisplay: output => {
+				if (output.type !== "json") return;
+				const data: unknown = output.data;
+				if (Array.isArray(data) && data.every(item => typeof item === "string")) names = data;
+			},
+		},
+		toolSession: undefined,
+		resolve,
+		reject,
+		toolCalls: new Map(),
+		deferDepth: 0,
+		aborted: false,
+		settled: false,
+	};
+	session.pending.set(runId, pending);
+	try {
+		session.worker.send({
+			type: "run",
+			runId,
+			code: `__omp_list_new_globals__(${limit})`,
+			filename: `${runId}.js`,
+			snapshot: { cwd: session.cwd, sessionId: session.sessionId },
+		});
+		await raceWithTimeout(promise, timeoutMs, "kernel state probe timed out");
+		return names;
+	} catch {
+		return null;
+	} finally {
+		session.pending.delete(runId);
+	}
 }
 
 export async function resetVmContext(sessionKey: string): Promise<void> {
@@ -530,11 +590,20 @@ async function handleToolCall(session: JsSession, msg: Extract<WorkerOutbound, {
 		});
 		return;
 	}
+	if (!pending.toolSession) {
+		safeSend(session, {
+			type: "tool-reply",
+			id: msg.id,
+			reply: { ok: false, error: { message: "Tool bridge unavailable for this run" } },
+		});
+		return;
+	}
+	const toolSession = pending.toolSession;
 	const ctrl = new AbortController();
 	pending.toolCalls.set(msg.id, ctrl);
 	try {
 		const value = await callSessionTool(msg.name, msg.args, {
-			session: pending.toolSession,
+			session: toolSession,
 			signal: ctrl.signal,
 			emitStatus: (event: JsStatusEvent) => {
 				trackDeferPhase(pending, event);

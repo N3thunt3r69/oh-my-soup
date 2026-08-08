@@ -78,6 +78,8 @@ const OVERFLOW_PATTERNS = [
 	/greater than the context length/i, // LM Studio
 	/context window exceeds limit/i, // MiniMax
 	/exceeded model token limit/i, // Kimi For Coding
+	/too large for model with \d+ maximum context length/i, // Mistral: "Prompt contains X tokens ... too large for model with Y maximum context length"
+	/prompt too long; exceeded (?:max )?context length/i, // Ollama explicit overflow error
 	/context[_ ]length[_ ]exceeded/i, // Generic fallback
 	/too many tokens/i, // Generic fallback
 	/token limit exceeded/i, // Generic fallback
@@ -91,6 +93,18 @@ const OVERFLOW_PATTERNS = [
 ];
 
 const OVERFLOW_NO_BODY_PATTERN = /\b4(00|13)\s*(status code)?\s*\(no body\)/i;
+
+/**
+ * Non-overflow errors that would otherwise match an OVERFLOW_PATTERN.
+ * Example: Bedrock throttling reads "ThrottlingException: Too many tokens,
+ * please wait before trying again." which matches /too many tokens/i.
+ */
+const NON_OVERFLOW_PATTERNS = [
+	/^(Throttling error|Service unavailable):/i, // AWS Bedrock human-readable non-overflow prefixes
+	/throttl/i, // Raw AWS "ThrottlingException" and similar shed-load wording
+	/rate limit/i, // Generic rate limiting
+	/too many requests/i, // Generic HTTP 429 style
+];
 const TIMEOUT_PATTERN = /\b(?:operation\s+)?timed?\s*out\b|\btimeout\b|\bstream stall\b/i;
 const TRANSIENT_ENVELOPE_PATTERN = /anthropic stream envelope error:/i;
 const TRANSIENT_ENVELOPE_BEFORE_START_PATTERN = /before message_start/i;
@@ -326,6 +340,7 @@ function isContentBlockedText(text: string): boolean {
 }
 
 function matchesOverflowText(text: string): boolean {
+	if (NON_OVERFLOW_PATTERNS.some(p => p.test(text))) return false;
 	return OVERFLOW_PATTERNS.some(p => p.test(text)) || OVERFLOW_NO_BODY_PATTERN.test(text);
 }
 

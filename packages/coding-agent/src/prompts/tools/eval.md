@@ -20,14 +20,17 @@ tool.<name>(args) → unknown
     Invoke any session tool; `args` = its parameter object.
 completion(prompt, model?="default"|"smol"|"slow", system?=None, schema?=None) → str | dict
     Oneshot, stateless (no history/tools). `model`: "smol" fast | "default" session | "slow" most capable. `schema` (JSON-Schema) → parsed object.
-{{#if spawns}}agent(prompt, agent?="{{spawnDefaultAgent}}", label?=None, schema?=None, schema{{#if js}}Mode{{else}}_mode{{/if}}?="permissive", isolated?=None, apply?=None, merge?=None, handle?=False) → str | dict
+{{#if spawns}}agent(prompt, agent?="{{spawnDefaultAgent}}", label?=None, schema?=None, schema{{#if js}}Mode{{else}}_mode{{/if}}?="permissive", isolated?=None, apply?=None, merge?=None, handle?=False, detach?=False) → str | dict
     Run a subagent → final output. `agent` selects a discovered agent; omit it to use `{{spawnDefaultAgent}}`.{{#if spawnAllowedAgentsText}} Allowed agents: {{spawnAllowedAgentsText}}.{{/if}} `schema` overrides agent/session schemas; `schemaMode`/`schema_mode`: "permissive" | "strict". Effective schemas return parsed data. `isolated` requests a worktree; `apply`/`merge` control its changes. Background via `local://` files named in the prompt. `handle` → { text, output, handle: "agent://<id>", id, agent }, parsed `data` when structured.
-{{#if js}}    JS: ONE trailing object — agent(prompt, { agent, label, schema, schemaMode, isolated, apply, merge, handle }).{{/if}}
+    `detach` → returns AT ADMISSION with { id, handle: "agent://<id>", label, {{#if js}}jobId{{else}}job_id{{/if}} } — no result wait. The child runs as a background job that survives the cell: it appears in `hub` jobs, its result auto-delivers on settle, and the full output stays readable at agent://<id>. Poll/block via tool.hub({ "op": "jobs" }) / ({ "op": "wait", "ids": [id] }); cancel via ({ "op": "cancel", "ids": [id] }).
+{{#if js}}    JS: ONE trailing object — agent(prompt, { agent, label, schema, schemaMode, isolated, apply, merge, handle, detach }).{{/if}}
 {{/if}}
 parallel(thunks) → list     pipeline(items, ...stages) → list
 log(message) → None         phase(title) → None
 budget → {{#if py}}`budget.total` (ceiling or None), `budget.spent()`, `budget.remaining()`{{/if}}{{#if js}}`await budget.total()`, `await budget.spent()`, `await budget.remaining()`{{/if}}{{#if rb}}`budget.total`, `budget.spent`, `budget.remaining`{{/if}}{{#if jl}}`budget.total`, `budget.spent()`, `budget.remaining()`{{/if}}; ceiling `+Nk` advisory, `+Nk!` hard.
-```
+{{#if py}}compact → `compact.status()` → {tokens, contextWindow, percent, scheduled}; `compact.run(instructions?=None)` schedules compaction at the next turn boundary — you resume automatically; optional instructions focus the summary.
+{{/if}}{{#if js}}compact → `await compact.status()` → {tokens, contextWindow, percent, scheduled}; `await compact.run(instructions?)` schedules compaction at the next turn boundary — you resume automatically; optional instructions focus the summary.
+{{/if}}```
 </prelude>
 {{#if spawns}}
 <dag>

@@ -86,10 +86,12 @@ interface KernelSessionRegistryDescriptor<
 	validateKernel?: (session: TSession, kernel: TKernel) => boolean;
 }
 
-interface KernelSessionRegistry<TOptions extends KernelSessionRegistryOptions, TResult> {
+interface KernelSessionRegistry<TOptions extends KernelSessionRegistryOptions, TResult, TSession = unknown> {
 	disposeAll(): Promise<void>;
 	disposeByOwner(ownerId: string): Promise<void>;
 	executeOnSession(code: string, cwd: string, options: TOptions): Promise<TResult>;
+	/** Live-session lookup by kernel session id (e.g. "python:<id>"); never spawns. */
+	peekSessionById(sessionId: string): TSession | undefined;
 }
 
 export function normalizeKernelSessionCwd(cwd: string): string {
@@ -130,7 +132,7 @@ export function createKernelSessionRegistry<
 	TSession extends KernelSession<TKernel>,
 >(
 	descriptor: KernelSessionRegistryDescriptor<TKernel, TOptions, TResult, TSession>,
-): KernelSessionRegistry<TOptions, TResult> {
+): KernelSessionRegistry<TOptions, TResult, TSession> {
 	const sessions = new Map<string, TSession>();
 	const startingSessions = new Map<string, StartingKernelSession<TSession>>();
 	const resettingSessions = new Map<string, Promise<void>>();
@@ -394,5 +396,12 @@ export function createKernelSessionRegistry<
 		}
 	}
 
-	return { disposeAll, disposeByOwner, executeOnSession };
+	function peekSessionById(sessionId: string): TSession | undefined {
+		for (const session of sessions.values()) {
+			if (session.sessionId === sessionId && session.kernel.isAlive()) return session;
+		}
+		return undefined;
+	}
+
+	return { disposeAll, disposeByOwner, executeOnSession, peekSessionById };
 }

@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { getProjectDir, logger } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "../../tools";
@@ -32,6 +33,17 @@ import {
 	PythonKernel,
 } from "./kernel";
 import { resolveExplicitPythonRuntime } from "./runtime";
+import {
+	buildRestoreCode,
+	buildSnapshotCode,
+	formatRestoreNotice,
+	manifestPathIn,
+	parseMarkerError,
+	parseRestoreResult,
+	parseSnapshotResult,
+	SNAPSHOT_DIR_NAME,
+	snapshotPathIn,
+} from "./state-snapshot";
 import { ensurePyToolBridge } from "./tool-bridge";
 
 export type PythonKernelMode = "session" | "per-call";
@@ -75,6 +87,13 @@ export interface PythonExecutorOptions {
 	 * preferred over `PI_SESSION_FILE`-derived paths.
 	 */
 	artifactsDir?: string;
+	/**
+	 * Snapshot the kernel's user namespace to `<artifactsDir>/py-kernel-snapshot/`
+	 * on graceful session shutdown and restore it once when a resumed session
+	 * boots a fresh kernel. Enabled by default (`python.stateSnapshot` setting);
+	 * requires `artifactsDir` and session kernel mode.
+	 */
+	stateSnapshot?: boolean;
 	/** Artifact path/id for full output storage */
 	artifactPath?: string;
 	artifactId?: string;
@@ -153,6 +172,8 @@ interface SessionKernelReplacement {
 interface PythonSession extends KernelSession<PythonKernel> {
 	generation: number;
 	replacement?: SessionKernelReplacement;
+	/** Where graceful shutdown persists the namespace snapshot, when enabled. */
+	stateSnapshotDir?: string;
 }
 
 function normalizeExplicitInterpreter(cwd: string, interpreter: string | undefined): string {
@@ -162,6 +183,113 @@ function normalizeExplicitInterpreter(cwd: string, interpreter: string | undefin
 		return fs.realpathSync.native(resolved);
 	} catch {
 		return resolved;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Kernel state snapshot/restore (session resume)
+//
+// On graceful session shutdown (dispose by owner / dispose-all at exit) the
+// live namespace is pickled per-variable with dill into the session's
+// artifacts dir; when a resumed session boots a fresh kernel the payload is
+// revived and a one-line notice is surfaced through the first cell's output.
+// Both directions are best-effort: a missing dill, unpicklable values, or a
+// corrupt payload degrade to a debug log and never break shutdown or boot.
+// ---------------------------------------------------------------------------
+
+const STATE_SNAPSHOT_TIMEOUT_MS = 30_000;
+
+/** Snapshot payloads already restored (or attempted) by this process. */
+const restoredSnapshotPaths = new Set<string>();
+
+/** Restore notices awaiting delivery through the kernel's next cell output. */
+const pendingRestoreNotices = new WeakMap<PythonKernelExecutor, string>();
+
+function resolveStateSnapshotDir(options: PythonExecutorOptions): string | undefined {
+	if (options.stateSnapshot === false) return undefined;
+	if (options.kernelMode === "per-call") return undefined;
+	if (!options.artifactsDir) return undefined;
+	return path.join(options.artifactsDir, SNAPSHOT_DIR_NAME);
+}
+
+/** Runs state helper code silently on the kernel and returns collected stdout. */
+async function runKernelStateCode(kernel: PythonKernelExecutor, code: string): Promise<string> {
+	let stdout = "";
+	await kernel.execute(code, {
+		silent: true,
+		storeHistory: false,
+		timeoutMs: STATE_SNAPSHOT_TIMEOUT_MS,
+		onChunk: text => {
+			stdout += text;
+		},
+	});
+	return stdout;
+}
+
+/** Best-effort namespace snapshot before a graceful session shutdown. Never throws. */
+async function snapshotKernelState(session: PythonSession): Promise<void> {
+	const dir = session.stateSnapshotDir;
+	if (!dir || !session.kernel.isAlive()) return;
+	const outPath = snapshotPathIn(dir);
+	try {
+		const stdout = await runKernelStateCode(session.kernel, buildSnapshotCode(outPath, manifestPathIn(dir)));
+		const result = parseSnapshotResult(stdout, outPath);
+		if (!result) {
+			logger.debug("Python kernel state snapshot skipped", {
+				path: outPath,
+				reason: parseMarkerError(stdout) ?? "no result marker",
+			});
+			return;
+		}
+		logger.debug("Python kernel state snapshot written", {
+			path: outPath,
+			saved: result.saved.length,
+			skipped: result.skipped.length,
+			bytes: result.bytes,
+		});
+	} catch (err) {
+		logger.debug("Python kernel state snapshot failed", {
+			path: outPath,
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
+}
+
+/**
+ * Restore a persisted namespace into a freshly booted session kernel. Runs at
+ * most once per snapshot path per process so a mid-session kernel replacement
+ * cannot resurrect state that is staler than the work done since resume.
+ * Never throws.
+ */
+async function restoreKernelStateIfPresent(kernel: PythonKernel, options: PythonExecutorOptions): Promise<void> {
+	const dir = resolveStateSnapshotDir(options);
+	if (!dir) return;
+	const snapshotPath = snapshotPathIn(dir);
+	if (restoredSnapshotPaths.has(snapshotPath)) return;
+	restoredSnapshotPaths.add(snapshotPath);
+	try {
+		if (!fs.existsSync(snapshotPath)) return;
+		const stdout = await runKernelStateCode(kernel, buildRestoreCode(snapshotPath));
+		const result = parseRestoreResult(stdout, snapshotPath);
+		if (!result) {
+			logger.debug("Python kernel state restore skipped", {
+				path: snapshotPath,
+				reason: parseMarkerError(stdout) ?? "no result marker",
+			});
+			return;
+		}
+		if (result.restored.length === 0 && result.failed.length === 0) return;
+		pendingRestoreNotices.set(kernel, formatRestoreNotice(result));
+		logger.debug("Python kernel state restored", {
+			path: snapshotPath,
+			restored: result.restored.length,
+			failed: result.failed.length,
+		});
+	} catch (err) {
+		logger.debug("Python kernel state restore failed", {
+			path: snapshotPath,
+			error: err instanceof Error ? err.message : String(err),
+		});
 	}
 }
 
@@ -202,13 +330,15 @@ function createCancelledPythonResult(timedOut: boolean, timeoutMs?: number): Pyt
 
 async function startKernel(cwd: string, options: PythonExecutorOptions): Promise<PythonKernel> {
 	requireRemainingTimeoutMs(options.deadlineMs);
-	return await PythonKernel.start({
+	const kernel = await PythonKernel.start({
 		cwd,
 		env: buildManagedKernelEnv(options),
 		signal: options.signal,
 		deadlineMs: options.deadlineMs,
 		interpreter: options.interpreter,
 	});
+	await restoreKernelStateIfPresent(kernel, options);
+	return kernel;
 }
 
 async function replaceSessionKernel(
@@ -285,9 +415,10 @@ async function replaceSessionKernel(
 	return await waitForPromiseWithCancellation(deferred.promise, options, PythonExecutionCancelledError);
 }
 
-async function shutdownInvalidatedSession(session: PythonSession): Promise<KernelShutdownResult> {
+async function shutdownInvalidatedSession(session: PythonSession, resetting: boolean): Promise<KernelShutdownResult> {
 	const replacement = session.replacement;
 	if (replacement) await replacement.promise.catch(() => undefined);
+	if (!resetting) await snapshotKernelState(session);
 	return await session.kernel.shutdown();
 }
 
@@ -297,6 +428,7 @@ async function acquireLiveSessionKernel(
 	options: PythonExecutorOptions,
 	context: KernelSessionRegistryContext<PythonKernel, PythonExecutorOptions, PythonSession>,
 ): Promise<PythonKernel> {
+	session.stateSnapshotDir = resolveStateSnapshotDir(options);
 	while (context.sessions.get(session.sessionKey) === session) {
 		const kernel = session.kernel;
 		if (kernel.isAlive()) return kernel;
@@ -314,7 +446,12 @@ async function executeWithKernel(
 	code: string,
 	options: PythonExecutorOptions | undefined,
 ): Promise<PythonResult> {
-	return executeWithKernelBase<PythonExecutorOptions>({
+	const notice = pendingRestoreNotices.get(kernel);
+	if (notice !== undefined) {
+		pendingRestoreNotices.delete(kernel);
+		await options?.onChunk?.(notice);
+	}
+	const result = await executeWithKernelBase<PythonExecutorOptions>({
 		kernel,
 		code,
 		options,
@@ -325,6 +462,8 @@ async function executeWithKernel(
 		formatKernelTimeoutAnnotation,
 		formatTimeoutAnnotation,
 	});
+	if (notice !== undefined) result.output = notice + result.output;
+	return result;
 }
 
 async function ensureKernelAvailable(cwd: string, options: PythonExecutorOptions): Promise<void> {
@@ -376,9 +515,18 @@ const sessionRegistry = createKernelSessionRegistry<PythonKernel, PythonExecutor
 	invalidateSession: session => {
 		session.generation += 1;
 	},
-	shutdownSession: session => shutdownInvalidatedSession(session),
+	shutdownSession: (session, resetting) => shutdownInvalidatedSession(session, resetting),
 	validateKernel: (session, kernel) => session.kernel === kernel,
 });
+
+/**
+ * Live-kernel peek for the post-compaction kernel-state notice. Returns the
+ * session's kernel only when it is already running; never spawns one.
+ */
+export function peekLivePythonKernel(sessionId: string): PythonKernelExecutor | undefined {
+	const session = sessionRegistry.peekSessionById(sessionId);
+	return session?.kernel.isAlive() ? session.kernel : undefined;
+}
 
 export async function disposeAllKernelSessions(): Promise<void> {
 	await sessionRegistry.disposeAll();

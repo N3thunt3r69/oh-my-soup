@@ -92,3 +92,69 @@ describe("isContextOverflow - 400/413 no-body (Cerebras, Mistral, proxy wrappers
 		expect(isContextOverflow(createErrorMessage("429 status code (no body)"))).toBe(false);
 	});
 });
+
+describe("isContextOverflow - provider patterns", () => {
+	it("detects Mistral prompt-too-large wording", () => {
+		const message = createErrorMessage(
+			"Prompt contains 300735 tokens and 0 images, which is too large for model with 131072 maximum context length",
+		);
+		expect(isContextOverflow(message)).toBe(true);
+	});
+
+	it("detects Ollama explicit overflow error", () => {
+		const message = createErrorMessage("prompt too long; exceeded max context length by 4821 tokens");
+		expect(isContextOverflow(message)).toBe(true);
+	});
+});
+
+describe("isContextOverflow - non-overflow exclusions", () => {
+	it("does not classify Bedrock throttling as overflow despite 'Too many tokens' wording", () => {
+		const message = createErrorMessage("ThrottlingException: Too many tokens, please wait before trying again.");
+		expect(isContextOverflow(message)).toBe(false);
+	});
+
+	it("does not classify formatted Bedrock throttling prefix as overflow", () => {
+		const message = createErrorMessage("Throttling error: Too many tokens, please wait before trying again.");
+		expect(isContextOverflow(message)).toBe(false);
+	});
+
+	it("does not classify rate-limit wording as overflow even with token-limit phrasing", () => {
+		const message = createErrorMessage("rate limit reached: token limit exceeded for this minute");
+		expect(isContextOverflow(message)).toBe(false);
+	});
+
+	it("does not classify 'too many requests' as overflow", () => {
+		const message = createErrorMessage("429 too many requests: reduce the length of the messages");
+		expect(isContextOverflow(message)).toBe(false);
+	});
+});
+
+describe("isContextOverflow - silent overflow (usage exceeds window)", () => {
+	function createStopMessage(input: number, cacheRead: number): AssistantMessage {
+		return {
+			...createErrorMessage(""),
+			stopReason: "stop",
+			errorMessage: undefined,
+			usage: {
+				input,
+				output: 50,
+				cacheRead,
+				cacheWrite: 0,
+				totalTokens: input + cacheRead + 50,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		};
+	}
+
+	it("detects a successful response whose input + cacheRead exceeds the context window", () => {
+		expect(isContextOverflow(createStopMessage(150_000, 60_000), 200_000)).toBe(true);
+	});
+
+	it("does not flag a successful response within the context window", () => {
+		expect(isContextOverflow(createStopMessage(100_000, 50_000), 200_000)).toBe(false);
+	});
+
+	it("does not flag without a context window to compare against", () => {
+		expect(isContextOverflow(createStopMessage(150_000, 60_000))).toBe(false);
+	});
+});

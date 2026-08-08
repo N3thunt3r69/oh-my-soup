@@ -64,6 +64,7 @@ import type { MemoryBackendOperationContext } from "../memory-backend/types";
 import type { NonMessageTokenSource } from "../modes/utils/context-usage";
 import { computeNonMessageTokens } from "../modes/utils/context-usage";
 import { createPlanReadMatcher } from "../plan-mode/plan-protection";
+import { scheduleAutoRefineAfterCompaction } from "../refinement/auto";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ContextUsageBreakdown, HandoffResult, SessionHandoffOptions } from "./agent-session-types";
@@ -248,6 +249,8 @@ export interface SessionMaintenanceHost {
 	runHandoff(customInstructions?: string, options?: SessionHandoffOptions): Promise<HandoffResult | undefined>;
 	removeAssistantMessageFromActiveContext(message: AssistantMessage): void;
 	dropPersistedAssistantTurn(message: AssistantMessage): Promise<void>;
+	/** Post-compaction: tell the model its live eval kernel state survived (silent when no kernel). */
+	notifyKernelPersistedAfterCompaction(): Promise<void>;
 	runRecoveryCompactionWithRollback(
 		reason: "overflow" | "incomplete",
 		message: AssistantMessage,
@@ -286,6 +289,12 @@ export class SessionMaintenance {
 	 */
 	#midTurnDeadEndPendingPrePrompt = false;
 	#skipPostTurnMaintenanceAssistantTimestamp: number | undefined;
+	/**
+	 * One pending agent-requested compaction (eval `compact.run`). Replaced on
+	 * re-call, consumed by the next {@link runAutoCompaction}, dropped on turn
+	 * abort.
+	 */
+	#pendingRequestedCompaction: { customInstructions?: string } | undefined;
 	readonly #host: SessionMaintenanceHost;
 
 	get #model(): Model | undefined {
@@ -303,6 +312,50 @@ export class SessionMaintenance {
 	/** Whether manual or automatic context maintenance is active. */
 	get isCompacting(): boolean {
 		return this.#autoCompactionAbortController !== undefined || this.#compactionAbortController !== undefined;
+	}
+
+	/** Whether an agent-requested compaction is scheduled for the next turn boundary. */
+	get hasPendingRequestedCompaction(): boolean {
+		return this.#pendingRequestedCompaction !== undefined;
+	}
+
+	/** Drop a pending agent-requested compaction (turn aborts take the request with them). */
+	clearPendingRequestedCompaction(): void {
+		this.#pendingRequestedCompaction = undefined;
+	}
+
+	/**
+	 * Schedule a compaction at the next turn boundary on behalf of the agent
+	 * (eval `compact.run`). Compaction would abort the run executing the
+	 * requesting cell, so this only schedules; {@link checkCompaction} consumes
+	 * the request at the turn boundary. Runs even when `compaction.enabled` is
+	 * false — an explicit request wins. One pending request max; re-calls
+	 * replace it.
+	 */
+	requestCompactionFromAgent(instructions?: string): { scheduled: boolean; reason?: string; note?: string } {
+		if (!this.#host.isStreaming()) {
+			return {
+				scheduled: false,
+				reason: "no active turn; compaction can only be requested while a turn is running",
+			};
+		}
+		const preparation = prepareCompaction(
+			this.#host.sessionManager.getBranch(),
+			this.#host.settings.getGroup("compaction"),
+			this.#model,
+		);
+		if (!preparation) {
+			const lastEntry = this.#host.sessionManager.getBranch().at(-1);
+			return {
+				scheduled: false,
+				reason: lastEntry?.type === "compaction" ? "already compacted" : "session is too short to compact",
+			};
+		}
+		this.#pendingRequestedCompaction = { customInstructions: instructions };
+		return {
+			scheduled: true,
+			note: "Compaction runs when the current turn ends; you resume automatically afterwards. Continue working normally.",
+		};
 	}
 
 	/** Assistant timestamp whose post-turn maintenance must be skipped once. */
@@ -900,6 +953,14 @@ export class SessionMaintenance {
 				});
 			}
 
+			// LLM-visible reminder that live eval kernel state survived the rewrite.
+			await this.#host.notifyKernelPersistedAfterCompaction();
+
+			// /refine auto trigger (refine.auto = "compact"): single guarded call on
+			// the post-compaction seam. Fire-and-forget — a refinement pass must
+			// never block or fail compaction.
+			scheduleAutoRefineAfterCompaction(this.#host);
+
 			const compactionResult: CompactionResult = {
 				summary,
 				shortSummary,
@@ -1198,7 +1259,11 @@ export class SessionMaintenance {
 		autoContinue = true,
 	): Promise<CompactionCheckResult> {
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
-		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return COMPACTION_CHECK_NONE;
+		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") {
+			// An aborted turn drops any pending agent-requested compaction with it.
+			this.#pendingRequestedCompaction = undefined;
+			return COMPACTION_CHECK_NONE;
+		}
 		const contextWindow = this.#model?.contextWindow ?? 0;
 		const generation = this.#host.promptGeneration();
 		// Skip overflow check if the message came from a different model.
@@ -1329,6 +1394,18 @@ export class SessionMaintenance {
 		// cheap (bails when no candidate) and independent of the compaction
 		// setting.
 		const supersedeResult = await this.#pruneStaleToolResults();
+
+		// Agent-requested compaction (eval compact.run): consumed at this turn
+		// boundary, even when auto-compaction is disabled — the explicit request
+		// wins. Overflow recovery above can fire first and take the pending
+		// request (and its instructions) with it inside runAutoCompaction.
+		if (this.#pendingRequestedCompaction !== undefined) {
+			return await this.runAutoCompaction("requested", false, false, allowDefer, {
+				autoContinue,
+				phase: "pre_turn",
+				terminalTextAnswer: isTerminalTextAssistantAnswer(assistantMessage),
+			});
+		}
 
 		const compactionSettings = this.#host.settings.getGroup("compaction");
 		if (!compactionSettings.enabled || compactionSettings.strategy === "off") return COMPACTION_CHECK_NONE;
@@ -2131,7 +2208,7 @@ export class SessionMaintenance {
 	 * @returns whether auto-compaction scheduled a follow-up turn.
 	 */
 	async runAutoCompaction(
-		reason: "overflow" | "threshold" | "idle" | "incomplete",
+		reason: "overflow" | "threshold" | "idle" | "incomplete" | "requested",
 		willRetry: boolean,
 		deferred = false,
 		allowDefer = true,
@@ -2145,8 +2222,12 @@ export class SessionMaintenance {
 		} = {},
 	): Promise<CompactionCheckResult> {
 		const compactionSettings = this.#host.settings.getGroup("compaction");
-		if (compactionSettings.strategy === "off") return COMPACTION_CHECK_NONE;
-		if (reason !== "idle" && !compactionSettings.enabled) return COMPACTION_CHECK_NONE;
+		// "requested" (agent compact.run) bypasses the enabled/strategy gates:
+		// the explicit request wins and always runs a summary compaction.
+		if (reason !== "requested") {
+			if (compactionSettings.strategy === "off") return COMPACTION_CHECK_NONE;
+			if (reason !== "idle" && !compactionSettings.enabled) return COMPACTION_CHECK_NONE;
+		}
 		const generation = this.#host.promptGeneration();
 		const terminalTextAnswer =
 			options.terminalTextAnswer ?? isTerminalTextAssistantAnswer(this.#host.findLastAssistantMessage());
@@ -2154,11 +2235,17 @@ export class SessionMaintenance {
 		const shouldAutoContinue =
 			!suppressContinuation && options.autoContinue !== false && compactionSettings.autoContinue !== false;
 		const suppressHandoff = options.suppressHandoff === true;
+		// Consume the pending agent request regardless of reason: whichever
+		// maintenance pass runs first (overflow recovery, threshold, requested)
+		// takes the request — and its focus instructions — with it, exactly once.
+		const pendingRequested = this.#pendingRequestedCompaction;
+		this.#pendingRequestedCompaction = undefined;
+		const requestedInstructions = pendingRequested?.customInstructions;
 		let fallbackFromShake = false;
 		// Shake runs inline (cheap, no remote LLM). On overflow recovery, if shake
 		// reclaims nothing we fall through to the summary-compaction body below so
 		// the oversized input still gets resolved.
-		if (compactionSettings.strategy === "shake") {
+		if (compactionSettings.strategy === "shake" && reason !== "requested") {
 			const outcome = await this.#runAutoShake(
 				reason,
 				willRetry,
@@ -2181,6 +2268,7 @@ export class SessionMaintenance {
 			reason !== "overflow" &&
 			reason !== "incomplete" &&
 			reason !== "idle" &&
+			reason !== "requested" &&
 			compactionSettings.strategy === "handoff"
 		) {
 			this.#host.schedulePostPromptTask(
@@ -2204,11 +2292,13 @@ export class SessionMaintenance {
 		// LLM call would hit the same overflow. "incomplete" is an output-side problem,
 		// so a handoff request on the existing context is still viable.
 		let action: "context-full" | "handoff" | "snapcompact" =
-			compactionSettings.strategy === "snapcompact"
-				? "snapcompact"
-				: compactionSettings.strategy === "handoff" && reason !== "overflow" && !suppressHandoff
-					? "handoff"
-					: "context-full";
+			reason === "requested"
+				? "context-full"
+				: compactionSettings.strategy === "snapcompact"
+					? "snapcompact"
+					: compactionSettings.strategy === "handoff" && reason !== "overflow" && !suppressHandoff
+						? "handoff"
+						: "context-full";
 		if (action === "snapcompact" && this.#model && !this.#model.input.includes("image")) {
 			this.#host.emitNotice(
 				"warning",
@@ -2437,7 +2527,7 @@ export class SessionMaintenance {
 					type: "session_before_compact",
 					preparation,
 					branchEntries: pathEntriesForCompaction,
-					customInstructions: undefined,
+					customInstructions: requestedInstructions,
 					signal: autoCompactionSignal,
 				})) as SessionBeforeCompactResult | undefined;
 
@@ -2578,10 +2668,14 @@ export class SessionMaintenance {
 				let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
 				codexCompaction = createCodexCompactionContext({
 					trigger: "auto",
-					reason: "context_limit",
+					reason: reason === "requested" ? "user_requested" : "context_limit",
 					phase:
 						options.phase ??
-						(reason === "threshold" ? "pre_turn" : reason === "idle" ? "standalone_turn" : "mid_turn"),
+						(reason === "threshold" || reason === "requested"
+							? "pre_turn"
+							: reason === "idle"
+								? "standalone_turn"
+								: "mid_turn"),
 				});
 
 				for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
@@ -2604,7 +2698,7 @@ export class SessionMaintenance {
 								this.#host.obfuscatePreparationForProvider(preparation),
 								candidate,
 								this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
-								undefined,
+								this.#host.obfuscateTextForProvider(requestedInstructions),
 								autoCompactionSignal,
 								{
 									promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
@@ -2783,6 +2877,9 @@ export class SessionMaintenance {
 					fromExtension,
 				});
 			}
+
+			// LLM-visible reminder that live eval kernel state survived the rewrite.
+			await this.#host.notifyKernelPersistedAfterCompaction();
 
 			const result: CompactionResult = {
 				summary,

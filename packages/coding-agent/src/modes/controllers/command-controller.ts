@@ -43,6 +43,7 @@ import { buildToolsMarkdown } from "../../modes/utils/tools-markdown";
 import type { AsyncJobSnapshotItem } from "../../session/agent-session";
 import type { AuthStorage, OAuthAccountIdentity } from "../../session/auth-storage";
 import type { CompactMode } from "../../session/compact-modes";
+import { buildContextTree, renderContextTreeLines } from "../../session/context-tree";
 import type { NewSessionOptions } from "../../session/session-entries";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
 import { formatActiveAccountLabel, limitMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
@@ -594,18 +595,36 @@ export class CommandController {
 		showMarkdownPanel(this.ctx, "Available Tools", tools);
 	}
 
-	handleContextCommand(): void {
+	async handleContextCommand(): Promise<void> {
 		const breakdown = computeContextBreakdown(this.ctx.session, { snapcompactSavings: true });
 		if (breakdown.contextWindow <= 0) {
 			this.ctx.showWarning("Context usage is unavailable: no model is selected for this session.");
 			return;
 		}
 		const output = renderContextUsage(breakdown, theme);
+		let treeLines: string[] = [];
+		try {
+			const tree = await buildContextTree(this.ctx.session);
+			treeLines = renderContextTreeLines(tree, {
+				branch: theme.tree.branch,
+				last: theme.tree.last,
+				vertical: theme.tree.vertical,
+				dim: text => theme.fg("dim", text),
+				bold: text => theme.bold(text),
+			});
+		} catch {
+			// The per-agent tree is best-effort; the flat breakdown still renders.
+		}
 		const block = new TranscriptBlock();
 		block.addChild(new DynamicBorder());
 		block.addChild(new Text(theme.bold(theme.fg("accent", "Context Usage")), 1, 0));
 		block.addChild(new Spacer(1));
 		block.addChild(new Text(output, 1, 0));
+		if (treeLines.length > 0) {
+			block.addChild(new Spacer(1));
+			block.addChild(new Text(theme.bold(theme.fg("accent", "Agents")), 1, 0));
+			block.addChild(new Text(treeLines.join("\n"), 1, 0));
+		}
 		block.addChild(new DynamicBorder());
 		this.ctx.presentCommandOutput(block);
 	}

@@ -222,6 +222,11 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			{ name: "resume", description: "Resume a paused goal" },
 			{ name: "drop", description: "Drop the current goal" },
 			{ name: "budget", description: "Adjust the token budget", usage: "<N|off>" },
+			{
+				name: "gates",
+				description: "Configure quality gate commands (all must exit 0 to complete)",
+				usage: "[command | off]",
+			},
 		],
 		inlineHint: "[objective]",
 		allowArgs: true,

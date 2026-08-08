@@ -4,6 +4,7 @@ import type { ToolSession } from "../../tools";
 import { ToolError } from "../../tools/tool-errors";
 import { EVAL_AGENT_BRIDGE_NAME, runEvalAgent } from "../agent-bridge";
 import { EVAL_BUDGET_BRIDGE_NAME, type EvalBudgetResult, runEvalBudget } from "../budget-bridge";
+import { EVAL_COMPACT_BRIDGE_NAME, type EvalCompactResult, runEvalCompact } from "../compact-bridge";
 import { EVAL_COMPLETION_BRIDGE_NAME, runEvalCompletion } from "../completion-bridge";
 import { EVAL_CONCURRENCY_BRIDGE_NAME, type EvalConcurrencyResult, runEvalConcurrency } from "../concurrency-bridge";
 import type { JsStatusEvent } from "./shared/types";
@@ -19,6 +20,7 @@ interface ToolBridgeOptions {
 type ToolValue =
 	| string
 	| EvalBudgetResult
+	| EvalCompactResult
 	| EvalConcurrencyResult
 	| {
 			text: string;
@@ -119,6 +121,9 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
 	}
 	if (name === EVAL_CONCURRENCY_BRIDGE_NAME) {
 		return runEvalConcurrency(args, options);
+	}
+	if (name === EVAL_COMPACT_BRIDGE_NAME) {
+		return runEvalCompact(args, options);
 	}
 	const tool = getTool(options.session, name);
 	const normalizedArgs = normalizeArgs(args);

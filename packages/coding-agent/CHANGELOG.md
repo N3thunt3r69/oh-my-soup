@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added quality gates to goal mode: goals may carry shell gate commands (`goal({op:"create", gates:[...]})` or `/goal gates`) that must all exit 0 before the goal can complete. Failing gate output feeds the auto-continuation prompt verbatim, reruns are skipped when the git worktree is unchanged since the last failure, and the new `goal.maxGateRetries` setting bounds failed attempts per gate.
+- Added scheduled prompts and heartbeats: `/heartbeat <interval|cron> <prompt>` schedules recurring or one-shot prompts delivered as steering or follow-up messages (`/heartbeats` lists, pauses, resumes, and cancels them). Jobs persist in a crash-safe per-session store — a restart after downtime collapses missed slots into exactly one late fire. Gated by `scheduledPrompts.enabled` and capped by `scheduledPrompts.maxJobs`. (Ported from prime-agent.)
+- Added Python kernel state snapshots: session-mode kernels now pickle their namespace per-variable with `dill` on session save and restore it on resume, reporting restored/skipped names in the first cell's output. Unpicklable values are skipped and reported; snapshots are capped at 256 MB and written atomically. Disable with `python.stateSnapshot`. (Ported from prime-agent.)
+- Added detached subagent spawning from eval cells: `agent(prompt, detach=True)` (Python) / `agent(prompt, { detach: true })` (JS) returns at admission with an `agent://` handle instead of blocking; children run as background jobs visible in `hub jobs`, survive the cell, and deliver results through the job manager. (Ported from prime-agent.)
+- Added a hierarchical agent tree to `/context`: main session plus all live and disk-persisted subagents with per-node own/total token usage (descendants never double-counted) and context-window utilization. (Ported from prime-agent.)
+- Added agent-callable compaction to the eval preludes: `compact.status()` reports context usage and `compact.run(instructions?)` schedules a compaction at the next safe turn boundary — honored even when auto-compaction is disabled, with custom instructions threaded into the summary. Gated by `compaction.agentCallable`. (Ported from prime-agent.)
+- Added a kernel-persistence notice after compaction: sessions with a live Python or JS kernel now remind the model that kernel state survived, listing up to 50 surviving top-level names. (Ported from prime-agent.)
+- Added `/refine`, a continual-harness pass that reviews the recent trajectory and applies small evidence-backed updates to supplemental prompt notes, memories, managed skill descriptions, and reusable subagent specs — every pass is recorded in `refinements.jsonl` and `/refine rollback <id>` restores the prior state byte-identically. Optional auto-refine after compaction via `refine.auto` with a 20-minute cooldown. (Ported from prime-agent.)
+
+### Changed
+
+- Broadened context-overflow detection with explicit Mistral and Ollama error patterns and added non-overflow exclusions so AWS throttling and rate-limit errors are no longer misclassified as overflow. (Ported from prime-agent.)
+
 ## [17.2.11] - 2026-08-07
 
 ### Added
