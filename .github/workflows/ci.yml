@@ -163,14 +163,16 @@ jobs:
          # Clippy scope mirrors `cargo clippy --workspace` (libraries only, no
          # test targets) plus the strict/default split: crates with
          # `[lints] workspace = true` get the workspace policy, the vendored
-         # brush fork is exempt (same as run-rs-task.ts's cargo excludes).
+         # brush-core fork is exempt (same as run-rs-task.ts's cargo excludes).
+         # pi-builtins lands in the default-lints bucket below: it opts out of
+         # pedantic/nursery in its own manifest but is still linted.
          - name: Clippy (workspace lint policy on opted-in crates)
            run: |
               bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-voice/... + //crates/pi-walker/...)" \
                 | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy-strict --
          - name: Clippy (default lints elsewhere)
            run: |
-              bazelisk query "kind('rust_library|rust_shared_library', //crates/... - (//crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-voice/... + //crates/pi-walker/...) - //crates/vendor/brush-core/... - //crates/vendor/brush-builtins/...)" \
+              bazelisk query "kind('rust_library|rust_shared_library', //crates/... - (//crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-voice/... + //crates/pi-walker/...) - //crates/vendor/brush-core/...)" \
                 | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy --
          - name: Rustfmt
            run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
