@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [17.2.11] - 2026-08-07
+
+### Changed
+
+- Pasting an empty named register (`PUT … @name` with no matching capture) now surfaces a warning listing available registers and removes the span target instead of throwing an error.
+
+### Fixed
+
+- Fixed an issue where pipe-numbered `read`/`search` rows copied into top-level and bare-body patch payloads were not properly recovered (#7905).
+
+## [17.2.10] - 2026-08-06
+
+### Changed
+
+- Updated internal caching dependency to use `@oh-my-pi/pi-utils/lru`.
+
 ## [17.2.2] - 2026-07-31
 
 ### Breaking Changes

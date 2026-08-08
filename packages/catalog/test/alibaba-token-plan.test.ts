@@ -46,7 +46,7 @@ describe("QwenCloud Token Plan provider", () => {
 		]);
 	});
 
-	test("discovers the subscribed allowlist from the native models endpoint", async () => {
+	test("discovers subscribed chat models from the native models endpoint", async () => {
 		let requestedUrl = "";
 		let authorization = "";
 		const fetchMock: FetchImpl = (input, init) => {
@@ -62,6 +62,23 @@ describe("QwenCloud Token Plan provider", () => {
 							context_length: 262_144,
 							max_completion_tokens: 16_384,
 						},
+						{ id: "deepseek-v4-flash", owned_by: "qwencloud" },
+						{ id: "deepseek-v4-flash-0731", owned_by: "qwencloud" },
+						{ id: "kimi-k2.7-code", owned_by: "qwencloud" },
+						{ id: "MiniMax-M2.5", owned_by: "qwencloud" },
+						{ id: "qwen3.6-plus", owned_by: "qwencloud" },
+						{ id: "qwen3.8-max", owned_by: "qwencloud" },
+						{ id: "deepseek-v3.2", owned_by: "qwencloud" },
+						{ id: "glm-5.1", owned_by: "qwencloud" },
+						{ id: "glm-5", owned_by: "qwencloud" },
+						{ id: "kimi-k2.6", owned_by: "qwencloud" },
+						{ id: "kimi-k2.5", owned_by: "qwencloud" },
+						{ id: "future-chat-model", owned_by: "qwencloud" },
+						{ id: "fun-asr", owned_by: "qwencloud" },
+						{ id: "qwen-image-2.0-pro", owned_by: "qwencloud" },
+						{ id: "qwen-audio-3.0-tts-plus", owned_by: "qwencloud" },
+						{ id: "happyhorse-1.1-t2v", owned_by: "qwencloud" },
+						{ id: "text-embedding-v4", owned_by: "qwencloud" },
 						{ id: "wan2.7-image", owned_by: "qwencloud" },
 					],
 				}),
@@ -74,8 +91,52 @@ describe("QwenCloud Token Plan provider", () => {
 
 		expect(requestedUrl).toBe(`${ALIBABA_TOKEN_PLAN_BASE_URL}/models`);
 		expect(authorization).toBe("Bearer sk-sp-test");
-		expect(models).toHaveLength(1);
-		expect(models?.[0]).toMatchObject({
+		expect(models?.map(model => model.id)).toEqual([
+			"deepseek-v3.2",
+			"deepseek-v4-flash",
+			"deepseek-v4-flash-0731",
+			"future-chat-model",
+			"glm-5",
+			"glm-5.1",
+			"kimi-k2.5",
+			"kimi-k2.6",
+			"kimi-k2.7-code",
+			"MiniMax-M2.5",
+			"qwen3.6-plus",
+			"qwen3.7-plus",
+			"qwen3.8-max",
+		]);
+		const expectedLimits = [
+			["qwen3.6-plus", 1_000_000, 65_536],
+			["qwen3.8-max", 1_000_000, 131_072],
+			["deepseek-v4-flash", 1_000_000, 384_000],
+			["deepseek-v4-flash-0731", 1_000_000, 384_000],
+			["deepseek-v3.2", 131_072, 65_536],
+			["glm-5.1", 202_752, 128_000],
+			["glm-5", 202_752, 16_384],
+			["kimi-k2.7-code", 262_144, 262_144],
+			["kimi-k2.6", 262_144, 262_144],
+			["kimi-k2.5", 262_144, 98_304],
+			["MiniMax-M2.5", 196_608, 32_768],
+		] as const;
+		for (const [id, contextWindow, maxTokens] of expectedLimits) {
+			expect(models?.find(model => model.id === id)).toMatchObject({ contextWindow, maxTokens });
+		}
+		for (const id of ["deepseek-v4-flash", "deepseek-v4-flash-0731"]) {
+			expect(models?.find(model => model.id === id)).toMatchObject({
+				reasoning: true,
+				thinking: {
+					mode: "effort",
+					efforts: ["high", "max"],
+				},
+			});
+		}
+		expect(models?.find(model => model.id === "future-chat-model")).toMatchObject({
+			id: "future-chat-model",
+			contextWindow: null,
+			maxTokens: null,
+		});
+		expect(models?.find(model => model.id === "qwen3.7-plus")).toMatchObject({
 			id: "qwen3.7-plus",
 			provider: "alibaba-token-plan",
 			name: "Qwen3.7 Plus",

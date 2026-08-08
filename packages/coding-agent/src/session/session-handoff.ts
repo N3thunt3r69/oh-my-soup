@@ -14,7 +14,8 @@ import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
 import type { ExtensionRunner, SessionBeforeSwitchResult } from "../extensibility/extensions";
-import { obfuscateProviderContext, type SecretObfuscator } from "../secrets/obfuscator";
+import { obfuscateProviderContext } from "../secrets/message-transform";
+import type { SecretObfuscator } from "../secrets/obfuscator";
 import type { HandoffResult, SessionHandoffOptions } from "./agent-session-types";
 import type { BashSessionTransition } from "./bash-runner";
 import type { SessionContext } from "./session-context";
@@ -309,7 +310,11 @@ export class SessionHandoff {
 
 			return { document: handoffText, savedPath };
 		} catch (error) {
-			if (handoffSignal.aborted || (error instanceof Error && error.name === "AbortError")) {
+			// Only a genuine abort (user Esc or the source turn cancelling) is a
+			// cancellation. A provider that throws a name==="AbortError" error without the
+			// handoff signal being aborted (stall/idle timeout, nested resolution failure)
+			// is a real failure and must surface verbatim, not be masked as "cancelled".
+			if (handoffSignal.aborted) {
 				throw new Error("Handoff cancelled");
 			}
 			throw error;

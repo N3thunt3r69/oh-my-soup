@@ -83,9 +83,11 @@ describe("hashline core — verb header forms", () => {
 	});
 
 	it("recovers top-level numbered snapshot rows as single-line replacements", () => {
-		const result = parsePatch("2:B\n4:D");
-		expect(applyEdits(FILE, result.edits).text).toBe("a\nB\nc\nD\ne");
-		expect(result.warnings.some(w => /snapshot row.*single-line `PUT N\.=N:`/i.test(w))).toBe(true);
+		for (const separator of [":", "|"]) {
+			const result = parsePatch(`2${separator}B\n4${separator}D`);
+			expect(applyEdits(FILE, result.edits).text).toBe("a\nB\nc\nD\ne");
+			expect(result.warnings.some(w => /snapshot row.*single-line `PUT N\.=N:`/i.test(w))).toBe(true);
+		}
 	});
 
 	it("recovers a bare range header as an implicit PUT", () => {
@@ -133,10 +135,12 @@ describe("hashline body contracts", () => {
 		expect(result.warnings.some(w => /Auto-prefixed bare body row/.test(w))).toBe(true);
 	});
 
-	it("strips read-output line number prefix from auto-piped bare body rows", () => {
-		const result = parsePatch("PUT 2-2:\n2:hello");
-		expect(applyEdits(FILE, result.edits).text).toBe("a\nhello\nc\nd\ne");
-		expect(result.warnings.some(w => /Auto-prefixed bare body row/.test(w))).toBe(true);
+	it("strips read-output line number prefixes from auto-piped bare body rows", () => {
+		for (const separator of [":", "|"]) {
+			const result = parsePatch(`PUT 2-2:\n2${separator}hello`);
+			expect(applyEdits(FILE, result.edits).text).toBe("a\nhello\nc\nd\ne");
+			expect(result.warnings.some(w => /Auto-prefixed bare body row/.test(w))).toBe(true);
+		}
 	});
 	it("preserves `+N:` literal payloads without stripping", () => {
 		const result = parsePatch("PUT 2-2:\n+3:keep");

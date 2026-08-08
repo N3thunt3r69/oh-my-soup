@@ -112,7 +112,7 @@ function bodylessTargetMessage(target: BlockTarget, hadColon: boolean): string |
  */
 const BARE_LITERAL_VALUE_RE = /^\s*(?:"[^"]*"|'[^']*'|[-+]?\d+(?:\.\d+)?)\s*,?\s*$/;
 
-const TOP_LEVEL_SNAPSHOT_ROW_RE = /^\s*([1-9]\d*):(.*)$/;
+const TOP_LEVEL_SNAPSHOT_ROW_RE = /^\s*([1-9]\d*)[:|](.*)$/;
 
 function parseTopLevelSnapshotRow(text: string): { line: number; text: string } | null {
 	const match = TOP_LEVEL_SNAPSHOT_ROW_RE.exec(text);
@@ -595,11 +595,11 @@ export class Executor {
 	}
 
 	/**
-	 * Strip a single read-output line-number prefix (`N:`) from every bare body
-	 * row, but only when *all* bare rows carry one. A uniform set of prefixes is
-	 * the signature of content pasted straight from `read`/`search` output; a
-	 * mixed set means the `N:` is genuine payload content and must stay. Rows
-	 * authored with an explicit `+` are not bare and are never touched.
+	 * Strip a single read-output line-number prefix (`N:` or `N|`) from every
+	 * bare body row, but only when *all* bare rows carry one. A uniform set of
+	 * prefixes is the signature of content pasted straight from `read`/`search`
+	 * output; a mixed set means the prefix is genuine payload content and must
+	 * stay. Rows authored with an explicit `+` are not bare and are never touched.
 	 */
 	#stripBarePrefixesIfUniform(payloads: PayloadRow[]): void {
 		let sawBare = false;

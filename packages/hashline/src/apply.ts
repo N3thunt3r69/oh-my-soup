@@ -1301,7 +1301,7 @@ export interface ApplyEditsOptions {
 	 * across files; omitted, the call gets a private register.
 	 */
 	clipboard?: Clipboard;
-	/** `PASTE` with an empty register: `throw` (default) or `drop` (streaming previews). */
+	/** Anonymous `PASTE` with an empty register: `throw` (default) or `drop` (streaming previews). An empty named-register paste never throws — it warns and pastes nothing. */
 	onEmptyPaste?: "throw" | "drop";
 }
 
@@ -1318,8 +1318,10 @@ export function applyEdits(text: string, edits: readonly Edit[], options: ApplyE
 
 	// Clipboard pre-pass: capture `cut` ranges from the original lines and
 	// expand `paste` edits into plain inserts in authored order.
+	const clipboardWarnings: string[] = [];
 	const concrete = resolveClipboardEdits(edits, fileLines, options.clipboard ?? {}, {
 		...(options.onEmptyPaste === undefined ? {} : { onEmptyPaste: options.onEmptyPaste }),
+		onWarning: message => clipboardWarnings.push(message),
 	});
 
 	// Block edits are deferred until `resolveBlockEdits` expands them into
@@ -1345,7 +1347,7 @@ export function applyEdits(text: string, edits: readonly Edit[], options: ApplyE
 	const indentationWarnings = repairReplacementIndentation(targetEdits, fileLines);
 	const { edits: repaired, warnings: boundaryWarnings } = repairReplacementBoundaries(targetEdits, fileLines);
 	const { edits: landed, warnings: landingWarnings } = repairAfterInsertLandings(repaired, fileLines);
-	const warnings = [...indentationWarnings, ...boundaryWarnings, ...landingWarnings];
+	const warnings = [...clipboardWarnings, ...indentationWarnings, ...boundaryWarnings, ...landingWarnings];
 
 	// Partition edits into bof, eof, and anchor-targeted buckets.
 	const bofLines: string[] = [];

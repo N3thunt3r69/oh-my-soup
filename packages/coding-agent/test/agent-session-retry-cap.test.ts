@@ -151,6 +151,61 @@ describe("AgentSession retry delay cap", () => {
 		expect(session.isRetrying).toBe(false);
 	});
 
+	it("honors the reason backoff for a transient rate-limit 429 without a provider hint", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) {
+			throw new Error("Expected bundled Anthropic test model to exist");
+		}
+
+		const mock = createMockModel({
+			responses: [
+				{ throw: "429 Rate limit exceeded, too many requests" },
+				{ content: ["recovered after rate-limit window"], stopReason: "stop" },
+			],
+		});
+		const agent = new Agent({
+			getApiKey: requestedModel => `${requestedModel.provider}-test-key`,
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (requestedModel, context, options) => mock.stream(requestedModel, context, options),
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxDelayMs": 60_000,
+			"retry.maxRetries": 1,
+			"retry.modelFallback": false,
+		});
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const waitSpy = vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const retryStartEvents: AutoRetryStartEvent[] = [];
+		session.subscribe(event => {
+			if (event.type === "auto_retry_start") retryStartEvents.push(event);
+		});
+
+		await session.prompt("Trigger transient rate limit without retry-after");
+		await session.waitForIdle();
+
+		expect(retryStartEvents).toHaveLength(1);
+		expect(retryStartEvents[0].delayMs).toBe(30_000);
+		expect(waitSpy.mock.calls.some(call => call[0] === 30_000)).toBe(true);
+		expect(lastAssistant(session).content).toContainEqual({
+			type: "text",
+			text: "recovered after rate-limit window",
+		});
+	});
+
 	it("auto-retries OpenAI Responses stream_read_error instead of stopping the conversation", async () => {
 		const model = getBundledModel("openai", "gpt-5");
 		if (!model) {
@@ -1164,29 +1219,14 @@ describe("AgentSession retry delay cap", () => {
 
 					if (streamCalls === 1) {
 						const thinking = { type: "thinking" as const, thinking: "partial thought" };
-						// No visible text: a committed text block makes the failed turn
-						// replay-unsafe (turn-recovery #hasReplayUnsafeOutput), which would
-						// correctly suppress this retry. The delay-cap contract under test
-						// needs a replay-safe partial turn, so only thinking plus an
-						// incomplete (never toolcall_end'd) tool call is emitted.
-						const toolCall: ToolCall = {
-							type: "toolCall",
-							id: "tc-incomplete",
-							name: "bash",
-							arguments: { command: "bun probe-archive3.ts" },
-						};
-						partial.content.push(thinking, toolCall);
+						const text = { type: "text" as const, text: "partial buffered answer" };
+						partial.content.push(thinking, text);
 						stream.push({ type: "start", partial });
 						stream.push({ type: "thinking_start", contentIndex: 0, partial });
 						stream.push({ type: "thinking_delta", contentIndex: 0, delta: thinking.thinking, partial });
 						stream.push({ type: "thinking_end", contentIndex: 0, content: thinking.thinking, partial });
-						stream.push({ type: "toolcall_start", contentIndex: 1, partial });
-						stream.push({
-							type: "toolcall_delta",
-							contentIndex: 1,
-							delta: JSON.stringify(toolCall.arguments),
-							partial,
-						});
+						stream.push({ type: "text_start", contentIndex: 1, partial });
+						stream.push({ type: "text_delta", contentIndex: 1, delta: text.text, partial });
 						stream.push({
 							type: "error",
 							reason: "error",
@@ -1243,6 +1283,7 @@ describe("AgentSession retry delay cap", () => {
 			if (event.type === "auto_retry_end") retryEndEvents.push(event);
 		});
 
+		session.setTextOutputCommitted(false);
 		await session.prompt("Trigger partial socket close");
 		await session.waitForIdle();
 
@@ -1660,7 +1701,9 @@ describe("AgentSession retry delay cap", () => {
 		expect(retryStartEvents[0]).toMatchObject({ attempt: 1, maxAttempts: 1 });
 		expect(retryEndEvents).toHaveLength(1);
 		expect(retryEndEvents[0]).toMatchObject({ success: false, attempt: 1 });
-		expect(lastAssistant(session).errorMessage).toBe("server_error: stream closed with reason: error");
+		expect(lastAssistant(session).errorMessage).toBe(
+			"Retry budget exhausted after 1 retry: server_error: stream closed with reason: error",
+		);
 		expect(session.isRetrying).toBe(false);
 	});
 

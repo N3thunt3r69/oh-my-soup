@@ -93,6 +93,20 @@ describe("clipboard apply semantics", () => {
 		expect(() => section.applyTo("l1\nl2\n")).toThrow(/Nothing to paste/);
 	});
 
+	it("treats a span paste from an empty named register as a cut with a warning", () => {
+		const section = Patch.parseSingle(`[${PATH}#1A2B]\nPUT 2-3 @gone`);
+		const result = section.applyTo("l1\nl2\nl3\nl4\n");
+		expect(result.text).toBe("l1\nl4\n");
+		expect(result.warnings?.join("\n")).toMatch(/`@gone` was empty/);
+	});
+
+	it("pastes nothing at a gap from an empty named register, with a warning", () => {
+		const section = Patch.parseSingle(`[${PATH}#1A2B]\nCUT 1 @kept\nPUT >2 @gone`);
+		const result = section.applyTo("l1\nl2\n");
+		expect(result.text).toBe("l2\n");
+		expect(result.warnings?.join("\n")).toMatch(/`@gone` was empty.*Available registers: `@kept`/);
+	});
+
 	it("drops an empty-register PUT on the streaming-tolerant path", () => {
 		const section = Patch.parseSingle(`[${PATH}#1A2B]\nPUT >1`);
 		expect(section.applyPartialTo("l1\nl2\n").text).toBe("l1\nl2\n");

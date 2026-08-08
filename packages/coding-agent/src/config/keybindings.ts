@@ -29,6 +29,7 @@ interface AppKeybindings {
 	"app.model.select": true;
 	"app.model.selectTemporary": true;
 	"app.tools.expand": true;
+	"app.tools.toggleVisibility": true;
 	"app.editor.external": true;
 	"app.message.followUp": true;
 	"app.retry": true;
@@ -124,6 +125,10 @@ export const KEYBINDINGS = {
 		defaultKeys: "ctrl+o",
 		description: "Expand tools",
 	},
+	"app.tools.toggleVisibility": {
+		defaultKeys: "ctrl+shift+o",
+		description: "Show or hide tool activity",
+	},
 	"app.editor.external": {
 		defaultKeys: "ctrl+g",
 		description: "Open external editor",
@@ -140,7 +145,9 @@ export const KEYBINDINGS = {
 		description: "Retry last failed assistant turn",
 	},
 	"app.message.dequeue": {
-		defaultKeys: "alt+up",
+		// Shift+Up is listed alongside Alt+Up because macOS Terminal.app consumes Option
+		// for character composition, leaving Alt+Up unreachable there.
+		defaultKeys: ["alt+up", "shift+up"],
 		description: "Dequeue message",
 	},
 	"app.clipboard.pasteImage": {
@@ -516,6 +523,13 @@ function migrateKeybindingsConfigFile(agentDir: string): void {
 
 const FOLLOW_UP_KEYBINDING: AppKeybinding = "app.message.followUp";
 const WINDOWS_FOLLOW_UP_FALLBACK_KEY: KeyId = "ctrl+q";
+const DEQUEUE_KEYBINDING: AppKeybinding = "app.message.dequeue";
+const MACOS_DEQUEUE_FALLBACK_KEY: KeyId = "shift+up";
+function getFallbackKey(keybinding: Keybinding): KeyId | undefined {
+	if (keybinding === FOLLOW_UP_KEYBINDING) return WINDOWS_FOLLOW_UP_FALLBACK_KEY;
+	if (keybinding === DEQUEUE_KEYBINDING) return MACOS_DEQUEUE_FALLBACK_KEY;
+	return undefined;
+}
 function keyListIncludes(keys: KeyId | KeyId[] | undefined, target: KeyId): boolean {
 	if (keys === undefined) return false;
 	const keyList = Array.isArray(keys) ? keys : [keys];
@@ -593,24 +607,20 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		this.setUserBindings(mergeKeybindingsConfig(inheritedConfig, profileConfig));
 	}
 
-	setUserBindings(userBindings: KeybindingsConfig): void {
+	override setUserBindings(userBindings: KeybindingsConfig): void {
 		this.#userBindings = userBindings;
 		super.setUserBindings(userBindings);
 	}
 
-	getKeys(keybinding: Keybinding): KeyId[] {
+	override getKeys(keybinding: Keybinding): KeyId[] {
 		const keys = super.getKeys(keybinding);
-		if (keybinding === FOLLOW_UP_KEYBINDING) {
-			if (this.#userBindings[FOLLOW_UP_KEYBINDING] !== undefined) return keys;
-			if (!userBindingClaimsKey(this.#userBindings, WINDOWS_FOLLOW_UP_FALLBACK_KEY, FOLLOW_UP_KEYBINDING)) {
-				return keys;
-			}
-			return removeKey(keys, WINDOWS_FOLLOW_UP_FALLBACK_KEY);
-		}
-		return keys;
+		const fallbackKey = getFallbackKey(keybinding);
+		if (fallbackKey === undefined || this.#userBindings[keybinding] !== undefined) return keys;
+		if (!userBindingClaimsKey(this.#userBindings, fallbackKey, keybinding)) return keys;
+		return removeKey(keys, fallbackKey);
 	}
 
-	getResolvedBindings(): KeybindingsConfig {
+	override getResolvedBindings(): KeybindingsConfig {
 		const resolved = super.getResolvedBindings();
 		resolved[FOLLOW_UP_KEYBINDING] = keyConfigValue(this.getKeys(FOLLOW_UP_KEYBINDING));
 		return resolved;

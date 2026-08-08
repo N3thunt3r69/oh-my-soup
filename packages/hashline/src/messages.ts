@@ -331,9 +331,9 @@ export const COLONLESS_SPAN_PUT = `Colonless \`PUT\` is clipboard-backed, and sp
 /** Anonymous paste ran with an empty anonymous register. */
 export const EMPTY_PASTE = `Nothing to paste: no unlabeled \`CUT\` precedes this \`PUT\` in this call, and the anonymous register never carries across calls. Put \`CUT N${HL_RANGE_SEP}M\` / \`CUT N*\` above it, or use named registers (\`CUT … @name\` → \`PUT … @name\`) for cross-call moves.`;
 
-/** Named paste read a register that holds nothing. */
-export function unknownRegisterMessage(name: string, known: readonly string[]): string {
-	const base = `\`@${name}\` is empty: no \`CUT … @${name}\` precedes this op in this call and no persisted register has that name.`;
+/** Named paste read a register that holds nothing; the paste applied as empty (span targets are still removed). */
+export function emptyRegisterPasteWarning(name: string, known: readonly string[]): string {
+	const base = `\`@${name}\` was empty — no \`CUT … @${name}\` precedes this op in this call and no persisted register has that name — so nothing was pasted (a span target is still removed).`;
 	return known.length === 0 ? base : `${base} Available registers: ${known.map(k => `\`@${k}\``).join(", ")}.`;
 }
 
