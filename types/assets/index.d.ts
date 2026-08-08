@@ -13,6 +13,11 @@ declare module "*.py" {
 	export default content;
 }
 
+declare module "*.java" {
+	const content: string;
+	export default content;
+}
+
 declare module "*.rb" {
 	const content: string;
 	export default content;

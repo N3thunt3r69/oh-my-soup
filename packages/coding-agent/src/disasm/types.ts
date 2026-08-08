@@ -17,13 +17,15 @@ export interface DisassemblerTarget {
 export interface DisassemblerQueryResult {
 	columns: string[];
 	rows: Array<Record<string, unknown>>;
+	truncated?: boolean;
 }
 
-/** Result of backend-native execution (IDAPython for IDA, a future Ghidra script for Ghidra). */
+/** Result of backend-native execution (IDAPython for IDA, Ghidra Java for Ghidra). */
 export interface DisassemblerExecutionResult {
 	result?: unknown;
 	stdout?: string;
 	stderr?: string;
+	truncated?: boolean;
 }
 
 export interface DisassemblerExecutionOptions {
@@ -51,7 +53,9 @@ export interface DisassemblerAdapterCapabilities {
 
 export interface DisassemblerOpenOptions {
 	file: string;
-	outputIdb?: string;
+	outputDb?: string;
+	/** Domain path inside an existing Ghidra project. */
+	program?: string;
 	timeoutSec?: number;
 }
 
@@ -87,6 +91,8 @@ export interface DisassemblerAdapterOptions {
 	endpoint?: string;
 	idaDir?: string;
 	python?: string;
+	ghidraInstallDir?: string;
+	ghidraJavaHome?: string;
 	cwd?: string;
 }
 

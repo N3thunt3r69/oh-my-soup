@@ -1,3 +1,4 @@
+import { GhidraDisassemblerAdapter } from "./ghidra/adapter";
 import { IdaDisassemblerAdapter } from "./ida/adapter";
 import type { DisassemblerAdapter, DisassemblerAdapterFactory, DisassemblerAdapterOptions } from "./types";
 
@@ -8,6 +9,14 @@ const factories = new Map<string, DisassemblerAdapterFactory>([
 			id: "ida",
 			label: "IDA Pro",
 			create: options => new IdaDisassemblerAdapter(options),
+		},
+	],
+	[
+		"ghidra",
+		{
+			id: "ghidra",
+			label: "Ghidra",
+			create: options => new GhidraDisassemblerAdapter(options),
 		},
 	],
 ]);
@@ -31,7 +40,7 @@ export function createDisassemblerAdapter(
 	return factory.create(options);
 }
 
-/** Register a native backend adapter. Intended for built-ins such as future Ghidra support. */
+/** Register an additional native backend adapter. */
 export function registerDisassemblerAdapter(factory: DisassemblerAdapterFactory): () => void {
 	const id = factory.id.trim().toLowerCase();
 	if (!id) throw new Error("Disassembler backend id must not be empty");

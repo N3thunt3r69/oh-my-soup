@@ -43,15 +43,18 @@ import { clampTimeout } from "./tool-timeouts";
 const disasmActionSchema = type.enumerated("backends", "open", "list", "query", "execute", "reset", "save", "close");
 const disasmSchema = type({
 	action: disasmActionSchema,
-	"backend?": type("string").describe("native adapter id; defaults to disasm.defaultBackend (ida)"),
-	"endpoint?": type("string").describe("one-call backend endpoint override"),
-	"file?": type("string").describe("open only: binary or existing .i64/.idb path, relative to the session cwd"),
-	"output_idb?": type("string").describe("open only: persistent .i64/.idb output path for a raw binary"),
+	"backend?": type("string").describe("native adapter id; defaults to disasm.defaultBackend"),
+	"endpoint?": type("string").describe("one-call IDA bridge endpoint override"),
+	"file?": type("string").describe("open only: binary or existing IDA database/Ghidra .gpr project"),
+	"output_db?": type("string").describe("open only: persistent backend database path for a raw binary"),
+	"program?": type("string").describe("open only: domain path inside an existing Ghidra project"),
 	"python?": type("string").describe("open only: one-call Python executable override"),
 	"ida_dir?": type("string").describe("open only: one-call IDA installation directory override"),
+	"java_home?": type("string").describe("open only: one-call Java home override for Ghidra"),
+	"ghidra_dir?": type("string").describe("open only: one-call Ghidra installation directory override"),
 	"target?": type("string").describe("target id returned by list"),
-	"sql?": type("string").describe("backend-neutral SQL query or scoped SQL mutation"),
-	"code?": type("string").describe("backend-native code (IDAPython for ida)"),
+	"sql?": type("string").describe("backend-neutral read-only SQL query; scoped SQL mutations are IDA-only"),
+	"code?": type("string").describe("backend-native code (IDAPython or Ghidra Java)"),
 	"stateful?": type("boolean").describe("persist the backend execution namespace between calls"),
 	"session_id?": type("string").describe("stateful namespace owner id"),
 	"takeover?": type("boolean").describe("reset only: replace a foreign stateful owner; user-directed only"),
@@ -150,7 +153,7 @@ export const disasmToolRenderer = {
 export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDetails> {
 	readonly name = "disasm";
 	readonly label = "Disassembler";
-	readonly summary = "Open binaries and query headless disassemblers via SQL or native analysis code";
+	readonly summary = "Open binaries and query headless IDA or Ghidra via SQL or native analysis code";
 	readonly description: string;
 	readonly parameters = disasmSchema;
 	readonly strict = true;
@@ -165,9 +168,12 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 		const lines = [`Action: ${params.action ?? "(missing)"}`, `Backend: ${params.backend ?? "default"}`];
 		if (params.target) lines.push(`Target: ${truncateForPrompt(params.target)}`);
 		if (params.file) lines.push(`File: ${truncateForPrompt(params.file)}`);
-		if (params.output_idb) lines.push(`Output IDB: ${truncateForPrompt(params.output_idb)}`);
+		if (params.output_db) lines.push(`Output database: ${truncateForPrompt(params.output_db)}`);
+		if (params.program) lines.push(`Program: ${truncateForPrompt(params.program)}`);
 		if (params.python) lines.push(`Python: ${truncateForPrompt(params.python)}`);
 		if (params.ida_dir) lines.push(`IDA directory: ${truncateForPrompt(params.ida_dir)}`);
+		if (params.java_home) lines.push(`Java home: ${truncateForPrompt(params.java_home)}`);
+		if (params.ghidra_dir) lines.push(`Ghidra directory: ${truncateForPrompt(params.ghidra_dir)}`);
 		if (params.sql) lines.push(`SQL: ${truncateForPrompt(firstLine(params.sql))}`);
 		if (params.code) lines.push(`Code: ${truncateForPrompt(firstLine(params.code))}`);
 		return lines;
@@ -176,7 +182,11 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 	readonly examples: readonly ToolExample<DisasmParams>[] = [
 		{
 			caption: "Open a binary in a managed headless IDA worker",
-			call: { action: "open", backend: "ida", file: "./sample.exe", output_idb: "./sample.i64" },
+			call: { action: "open", backend: "ida", file: "./sample.exe", output_db: "./sample.i64" },
+		},
+		{
+			caption: "Open a binary in a managed headless Ghidra worker",
+			call: { action: "open", backend: "ghidra", file: "./sample.exe", output_db: "./sample.gpr" },
 		},
 		{ caption: "Discover IDA databases", call: { action: "list", backend: "ida" } },
 		{
@@ -223,9 +233,14 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 			return result.text(formatBackends(backends)).done();
 		}
 
-		const backend = params.backend?.trim() || this.session.settings.get("disasm.defaultBackend") || "ida";
+		const backend = (params.backend?.trim() || this.session.settings.get("disasm.defaultBackend") || "ida")
+			.trim()
+			.toLowerCase();
+		validateBackendParameters(params, backend);
 		const endpoint = params.endpoint ?? this.#configuredEndpoint(backend);
-		const timeoutSec = clampTimeout("disasm", params.timeout, this.session.settings.get("tools.maxTimeout"));
+		const timeoutSec = Math.floor(
+			clampTimeout("disasm", params.timeout, this.session.settings.get("tools.maxTimeout")),
+		);
 		const timeoutSignal = AbortSignal.timeout(timeoutSec * 1000);
 		const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 		let adapter: DisassemblerAdapter;
@@ -235,6 +250,12 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 				idaDir:
 					params.ida_dir ?? (backend === "ida" ? this.session.settings.get("disasm.ida.installDir") : undefined),
 				python: params.python ?? (backend === "ida" ? this.session.settings.get("disasm.ida.python") : undefined),
+				ghidraInstallDir:
+					params.ghidra_dir ??
+					(backend === "ghidra" ? this.session.settings.get("disasm.ghidra.installDir") : undefined),
+				ghidraJavaHome:
+					params.java_home ??
+					(backend === "ghidra" ? this.session.settings.get("disasm.ghidra.javaHome") : undefined),
 				cwd: this.session.cwd,
 			});
 		} catch (error) {
@@ -252,7 +273,7 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 				case "open": {
 					if (!adapter.open) throw new ToolError(`${adapter.label} does not support opening files`);
 					const opened = await adapter.open(
-						{ file: params.file as string, outputIdb: params.output_idb, timeoutSec },
+						{ file: params.file as string, outputDb: params.output_db, program: params.program, timeoutSec },
 						combinedSignal,
 					);
 					details.target = opened.id;
@@ -352,9 +373,12 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 function validateActionParameters(params: DisasmParams): void {
 	const openOnly = [
 		["file", params.file],
-		["output_idb", params.output_idb],
+		["output_db", params.output_db],
+		["program", params.program],
 		["python", params.python],
 		["ida_dir", params.ida_dir],
+		["java_home", params.java_home],
+		["ghidra_dir", params.ghidra_dir],
 	] as const;
 	if (params.action === "open") {
 		if (!params.file?.trim()) throw new ToolError("file is required for open");
@@ -376,6 +400,24 @@ function validateActionParameters(params: DisasmParams): void {
 	if (params.action !== "execute" && params.code !== undefined) throw new ToolError(`code is only valid for execute`);
 }
 
+function validateBackendParameters(params: DisasmParams, backend: string): void {
+	const mismatched =
+		backend === "ghidra"
+			? ([
+					["endpoint", params.endpoint],
+					["ida_dir", params.ida_dir],
+					["python", params.python],
+				] as const)
+			: backend === "ida"
+				? ([
+						["ghidra_dir", params.ghidra_dir],
+						["java_home", params.java_home],
+						["program", params.program],
+					] as const)
+				: [];
+	const invalid = mismatched.find(([, value]) => value !== undefined);
+	if (invalid) throw new ToolError(`${invalid[0]} is not valid for the ${backend} backend`);
+}
 function requireTarget(params: DisasmParams): string {
 	if (!params.target?.trim()) throw new ToolError(`target is required for ${params.action}; run list first`);
 	return params.target;
@@ -423,6 +465,7 @@ function formatExecution(execution: DisassemblerExecutionResult): string {
 	if (execution.result !== undefined) sections.push(`Result:\n${stringifyUnknown(execution.result)}`);
 	if (execution.stdout) sections.push(`stdout:\n${execution.stdout}`);
 	if (execution.stderr) sections.push(`stderr:\n${execution.stderr}`);
+	if (execution.truncated) sections.push("[backend execution output truncated]");
 	return sections.length > 0 ? sections.join("\n") : "Execution completed without output.";
 }
 

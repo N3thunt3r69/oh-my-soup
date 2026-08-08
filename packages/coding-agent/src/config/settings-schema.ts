@@ -3929,7 +3929,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			group: "Disassembler",
 			label: "Default Backend",
-			description: "Backend used when disasm calls omit backend (currently ida)",
+			description: "Backend used when disasm calls omit backend (ida or ghidra)",
 		},
 	},
 
@@ -3963,6 +3963,28 @@ export const SETTINGS_SCHEMA = {
 			group: "Disassembler",
 			label: "IDA Python Executable",
 			description: "Python executable with ida-bridge installed; defaults to python/python3 on PATH",
+		},
+	},
+
+	"disasm.ghidra.installDir": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "Ghidra Installation Directory",
+			description: "Ghidra directory containing support/analyzeHeadless",
+		},
+	},
+
+	"disasm.ghidra.javaHome": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "Ghidra Java Home",
+			description: "Java 21+ home used by analyzeHeadless; defaults to JAVA_HOME or a sibling JDK",
 		},
 	},
 

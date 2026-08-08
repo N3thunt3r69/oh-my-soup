@@ -266,7 +266,7 @@ describe("disasm tool adapter boundary", () => {
 			},
 			async execute(_target, _code, options = {}) {
 				calls.push({ kind: "execute", options });
-				return { result: { language: "native" }, stdout: "ok" };
+				return { result: { language: "native" }, stdout: "ok", truncated: true };
 			},
 			dispose() {},
 		};
@@ -276,17 +276,25 @@ describe("disasm tool adapter boundary", () => {
 			create: () => adapter,
 		});
 		try {
-			const tool = new DisasmTool(makeSession());
+			const session = makeSession();
+			session.settings.set("tools.maxTimeout", 9.5);
+			const tool = new DisasmTool(session);
 			const opened = await tool.execute("open", {
 				action: "open",
 				backend: adapter.id,
 				file: "./sample.bin",
-				output_idb: "./sample.i64",
-				timeout: 9,
+				output_db: "./sample.i64",
+				program: "/firmware/sample.bin",
+				timeout: 9.5,
 			});
 			expect(opened.details?.target).toBe("ghidra-opened");
 			expect(opened.details?.opened?.label).toBe("./sample.bin");
-			expect(openOptions).toEqual({ file: "./sample.bin", outputIdb: "./sample.i64", timeoutSec: 9 });
+			expect(openOptions).toEqual({
+				file: "./sample.bin",
+				outputDb: "./sample.i64",
+				program: "/firmware/sample.bin",
+				timeoutSec: 9,
+			});
 
 			const listed = await tool.execute("list", { action: "list", backend: adapter.id });
 			expect(listed.details?.targets?.[0]?.id).toBe("ghidra-1");
@@ -309,14 +317,65 @@ describe("disasm tool adapter boundary", () => {
 				target: "ghidra-1",
 				code: "currentProgram.getName()",
 			});
-			expect(executed.details?.execution).toEqual({ result: { language: "native" }, stdout: "ok" });
+			expect(executed.details?.execution).toEqual({
+				result: { language: "native" },
+				stdout: "ok",
+				truncated: true,
+			});
+			expect(executed.content[0]).toMatchObject({
+				type: "text",
+				text: expect.stringContaining("output truncated"),
+			});
 			expect(calls).toEqual([
 				{ kind: "query", options: { stateful: true, sessionId: "analysis-session", timeoutSec: 9 } },
-				{ kind: "execute", options: { stateful: undefined, sessionId: undefined, timeoutSec: 60 } },
+				{ kind: "execute", options: { stateful: undefined, sessionId: undefined, timeoutSec: 9 } },
 			]);
 			expect(tool.approval?.({ action: "list" })).toBe("read");
 			expect(tool.approval?.({ action: "query" })).toBe("exec");
 			expect(tool.approval?.({ action: "open" })).toBe("exec");
+		} finally {
+			unregister();
+		}
+	});
+
+	it("normalizes backend names and rejects mismatched backend overrides", async () => {
+		const backendId = `test-normalized-${crypto.randomUUID()}`;
+		const unregister = registerDisassemblerAdapter({
+			id: backendId,
+			label: "Normalized test",
+			create: () => ({
+				id: backendId,
+				label: "Normalized test",
+				capabilities: {
+					executionLanguage: "test",
+					statefulExecution: false,
+					open: false,
+					reset: false,
+					save: false,
+					close: false,
+				},
+				async list() {
+					return [];
+				},
+				async query() {
+					return { columns: [], rows: [] };
+				},
+				async execute() {
+					return {};
+				},
+				dispose() {},
+			}),
+		});
+		try {
+			const tool = new DisasmTool(makeSession());
+			const listed = await tool.execute("list", { action: "list", backend: `  ${backendId.toUpperCase()}  ` });
+			expect(listed.details?.backend).toBe(backendId);
+			await expect(
+				tool.execute("list", { action: "list", backend: "ghidra", endpoint: "ws://127.0.0.1:1" }),
+			).rejects.toThrow("endpoint is not valid for the ghidra backend");
+			await expect(
+				tool.execute("open", { action: "open", backend: "ida", file: "./sample.bin", java_home: "/jdk" }),
+			).rejects.toThrow("java_home is not valid for the ida backend");
 		} finally {
 			unregister();
 		}

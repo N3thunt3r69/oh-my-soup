@@ -30,7 +30,7 @@ export interface IdaRuntimeOptions {
 
 export interface IdaOpenRequest {
 	file: string;
-	outputIdb?: string;
+	outputDb?: string;
 	timeoutSec?: number;
 }
 
@@ -104,15 +104,15 @@ export async function openIdaTarget(
 
 		const inputPath = resolveInputFile(request.file, runtime.cwd);
 		const inputIsDatabase = IDB_EXTENSIONS.has(path.extname(inputPath).toLowerCase());
-		if (inputIsDatabase && request.outputIdb?.trim()) {
-			throw new Error("output_idb is not valid when opening an existing IDA database");
+		if (inputIsDatabase && request.outputDb?.trim()) {
+			throw new Error("output_db is not valid when opening an existing IDA database");
 		}
 
 		let databasePath: string;
 		if (inputIsDatabase) {
 			databasePath = inputPath;
-		} else if (request.outputIdb?.trim()) {
-			databasePath = resolveOutputDatabase(request.outputIdb, runtime.cwd);
+		} else if (request.outputDb?.trim()) {
+			databasePath = resolveOutputDatabase(request.outputDb, runtime.cwd);
 		} else {
 			temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-disasm-"));
 			databasePath = path.join(temporaryDir, "database.i64");
@@ -282,10 +282,10 @@ function resolveInputFile(value: string, cwd: string): string {
 function resolveOutputDatabase(value: string, cwd: string): string {
 	const resolved = resolveConfiguredPath(value.trim(), cwd);
 	if (!IDB_EXTENSIONS.has(path.extname(resolved).toLowerCase())) {
-		throw new Error(`output_idb must end in .i64 or .idb: ${resolved}`);
+		throw new Error(`output_db must end in .i64 or .idb: ${resolved}`);
 	}
 	if (!fs.existsSync(path.dirname(resolved))) {
-		throw new Error(`output_idb parent directory does not exist: ${path.dirname(resolved)}`);
+		throw new Error(`output_db parent directory does not exist: ${path.dirname(resolved)}`);
 	}
 	if (fs.existsSync(resolved)) throw new Error(`Refusing to overwrite existing IDA database: ${resolved}`);
 	return resolved;
