@@ -3,6 +3,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	type DisassemblerAdapter,
 	type DisassemblerExecutionOptions,
+	type DisassemblerOpenOptions,
 	IdaDisassemblerAdapter,
 	registerDisassemblerAdapter,
 } from "@oh-my-pi/pi-coding-agent/disasm";
@@ -238,20 +239,26 @@ describe("IDA disassembler adapter", () => {
 });
 
 describe("disasm tool adapter boundary", () => {
-	it("runs a third-party backend through the same query and execution contract", async () => {
+	it("runs a third-party backend through the same lifecycle, query, and execution contract", async () => {
 		const calls: Array<{ kind: "query" | "execute"; options: DisassemblerExecutionOptions }> = [];
+		let openOptions: DisassemblerOpenOptions | undefined;
 		const adapter: DisassemblerAdapter = {
 			id: "test-ghidra",
 			label: "Test Ghidra",
 			capabilities: {
 				executionLanguage: "Ghidra Java",
 				statefulExecution: true,
+				open: true,
 				reset: false,
 				save: false,
 				close: false,
 			},
 			async list() {
 				return [{ id: "ghidra-1", backend: "test-ghidra", label: "sample", metadata: {} }];
+			},
+			async open(options) {
+				openOptions = options;
+				return { id: "ghidra-opened", backend: "test-ghidra", label: options.file, metadata: {} };
 			},
 			async query(_target, _sql, options = {}) {
 				calls.push({ kind: "query", options });
@@ -270,6 +277,17 @@ describe("disasm tool adapter boundary", () => {
 		});
 		try {
 			const tool = new DisasmTool(makeSession());
+			const opened = await tool.execute("open", {
+				action: "open",
+				backend: adapter.id,
+				file: "./sample.bin",
+				output_idb: "./sample.i64",
+				timeout: 9,
+			});
+			expect(opened.details?.target).toBe("ghidra-opened");
+			expect(opened.details?.opened?.label).toBe("./sample.bin");
+			expect(openOptions).toEqual({ file: "./sample.bin", outputIdb: "./sample.i64", timeoutSec: 9 });
+
 			const listed = await tool.execute("list", { action: "list", backend: adapter.id });
 			expect(listed.details?.targets?.[0]?.id).toBe("ghidra-1");
 
@@ -298,6 +316,7 @@ describe("disasm tool adapter boundary", () => {
 			]);
 			expect(tool.approval?.({ action: "list" })).toBe("read");
 			expect(tool.approval?.({ action: "query" })).toBe("exec");
+			expect(tool.approval?.({ action: "open" })).toBe("exec");
 		} finally {
 			unregister();
 		}
@@ -314,6 +333,7 @@ describe("disasm tool adapter boundary", () => {
 				capabilities: {
 					executionLanguage: "test",
 					statefulExecution: true,
+					open: false,
 					reset: false,
 					save: false,
 					close: false,

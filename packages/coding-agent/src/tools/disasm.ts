@@ -40,11 +40,15 @@ import { ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout } from "./tool-timeouts";
 
-const disasmActionSchema = type.enumerated("backends", "list", "query", "execute", "reset", "save", "close");
+const disasmActionSchema = type.enumerated("backends", "open", "list", "query", "execute", "reset", "save", "close");
 const disasmSchema = type({
 	action: disasmActionSchema,
 	"backend?": type("string").describe("native adapter id; defaults to disasm.defaultBackend (ida)"),
 	"endpoint?": type("string").describe("one-call backend endpoint override"),
+	"file?": type("string").describe("open only: binary or existing .i64/.idb path, relative to the session cwd"),
+	"output_idb?": type("string").describe("open only: persistent .i64/.idb output path for a raw binary"),
+	"python?": type("string").describe("open only: one-call Python executable override"),
+	"ida_dir?": type("string").describe("open only: one-call IDA installation directory override"),
 	"target?": type("string").describe("target id returned by list"),
 	"sql?": type("string").describe("backend-neutral SQL query or scoped SQL mutation"),
 	"code?": type("string").describe("backend-native code (IDAPython for ida)"),
@@ -67,6 +71,7 @@ export interface DisasmToolDetails {
 	backends?: Array<{ id: string; label: string }>;
 	capabilities?: DisassemblerAdapterCapabilities;
 	targets?: DisassemblerTarget[];
+	opened?: DisassemblerTarget;
 	query?: DisassemblerQueryResult;
 	execution?: DisassemblerExecutionResult;
 	meta?: OutputMeta;
@@ -78,6 +83,7 @@ function summarizeDisasmCall(args: DisasmRenderArgs): string {
 	const action = args.action ?? "request";
 	const backend = args.backend ? ` ${args.backend}` : "";
 	if (args.target) return `${action}${backend} ${truncateToWidth(args.target, TRUNCATE_LENGTHS.TITLE)}`;
+	if (args.file) return `${action}${backend} ${truncateToWidth(args.file, TRUNCATE_LENGTHS.TITLE)}`;
 	if (args.sql) return `${action}${backend} ${truncateToWidth(firstLine(args.sql), TRUNCATE_LENGTHS.TITLE)}`;
 	if (args.code) return `${action}${backend} ${truncateToWidth(firstLine(args.code), TRUNCATE_LENGTHS.TITLE)}`;
 	return `${action}${backend}`;
@@ -144,7 +150,7 @@ export const disasmToolRenderer = {
 export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDetails> {
 	readonly name = "disasm";
 	readonly label = "Disassembler";
-	readonly summary = "Query disassemblers via SQL or execute backend-native analysis code";
+	readonly summary = "Open binaries and query headless disassemblers via SQL or native analysis code";
 	readonly description: string;
 	readonly parameters = disasmSchema;
 	readonly strict = true;
@@ -158,12 +164,20 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 		const params = args as Partial<DisasmParams>;
 		const lines = [`Action: ${params.action ?? "(missing)"}`, `Backend: ${params.backend ?? "default"}`];
 		if (params.target) lines.push(`Target: ${truncateForPrompt(params.target)}`);
+		if (params.file) lines.push(`File: ${truncateForPrompt(params.file)}`);
+		if (params.output_idb) lines.push(`Output IDB: ${truncateForPrompt(params.output_idb)}`);
+		if (params.python) lines.push(`Python: ${truncateForPrompt(params.python)}`);
+		if (params.ida_dir) lines.push(`IDA directory: ${truncateForPrompt(params.ida_dir)}`);
 		if (params.sql) lines.push(`SQL: ${truncateForPrompt(firstLine(params.sql))}`);
 		if (params.code) lines.push(`Code: ${truncateForPrompt(firstLine(params.code))}`);
 		return lines;
 	};
 
 	readonly examples: readonly ToolExample<DisasmParams>[] = [
+		{
+			caption: "Open a binary in a managed headless IDA worker",
+			call: { action: "open", backend: "ida", file: "./sample.exe", output_idb: "./sample.i64" },
+		},
 		{ caption: "Discover IDA databases", call: { action: "list", backend: "ida" } },
 		{
 			caption: "Find named functions through the shared SQL interface",
@@ -216,7 +230,13 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 		const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 		let adapter: DisassemblerAdapter;
 		try {
-			adapter = createDisassemblerAdapter(backend, { endpoint });
+			adapter = createDisassemblerAdapter(backend, {
+				endpoint,
+				idaDir:
+					params.ida_dir ?? (backend === "ida" ? this.session.settings.get("disasm.ida.installDir") : undefined),
+				python: params.python ?? (backend === "ida" ? this.session.settings.get("disasm.ida.python") : undefined),
+				cwd: this.session.cwd,
+			});
 		} catch (error) {
 			throw asToolError(error);
 		}
@@ -229,6 +249,23 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 				throw new ToolError(`${adapter.label} does not support stateful execution`);
 			}
 			switch (params.action) {
+				case "open": {
+					if (!adapter.open) throw new ToolError(`${adapter.label} does not support opening files`);
+					const opened = await adapter.open(
+						{ file: params.file as string, outputIdb: params.output_idb, timeoutSec },
+						combinedSignal,
+					);
+					details.target = opened.id;
+					details.opened = opened;
+					return result
+						.text(
+							await capDisasmOutput(
+								this.session,
+								`Opened and analyzed ${opened.id}.\n${formatTargets(adapter.id, [opened])}`,
+							),
+						)
+						.done();
+				}
 				case "list": {
 					const targets = await adapter.list(combinedSignal);
 					details.targets = targets;
@@ -313,6 +350,18 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 	}
 }
 function validateActionParameters(params: DisasmParams): void {
+	const openOnly = [
+		["file", params.file],
+		["output_idb", params.output_idb],
+		["python", params.python],
+		["ida_dir", params.ida_dir],
+	] as const;
+	if (params.action === "open") {
+		if (!params.file?.trim()) throw new ToolError("file is required for open");
+	} else {
+		const invalid = openOnly.find(([, value]) => value !== undefined);
+		if (invalid) throw new ToolError(`${invalid[0]} is only valid for open`);
+	}
 	const supportsExecutionState = params.action === "query" || params.action === "execute" || params.action === "save";
 	if (!supportsExecutionState && params.stateful !== undefined) {
 		throw new ToolError(`stateful is not valid for ${params.action}`);

@@ -3944,6 +3944,28 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"disasm.ida.installDir": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "IDA Installation Directory",
+			description: "IDA Pro 9.x directory containing idalib and its bundled idapro package",
+		},
+	},
+
+	"disasm.ida.python": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "IDA Python Executable",
+			description: "Python executable with ida-bridge installed; defaults to python/python3 on PATH",
+		},
+	},
+
 	"launch.enabled": {
 		type: "boolean",
 		default: true,

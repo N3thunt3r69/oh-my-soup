@@ -2,13 +2,16 @@ import { type } from "@oh-my-pi/omptype";
 import type {
 	DisassemblerAdapter,
 	DisassemblerAdapterCapabilities,
+	DisassemblerAdapterOptions,
 	DisassemblerExecutionOptions,
 	DisassemblerExecutionResult,
+	DisassemblerOpenOptions,
 	DisassemblerQueryResult,
 	DisassemblerResetOptions,
 	DisassemblerTarget,
 } from "../types";
 import { IdaBridgeClient, type IdaBridgeClientInfo, type IdaBridgeExecOptions } from "./client";
+import { ensureIdaBridge, managedIdaTargetInfo, openIdaTarget, releaseIdaRuntime, releaseIdaTarget } from "./runtime";
 
 const queryResultSchema = type({
 	"+": "reject",
@@ -22,23 +25,25 @@ export class IdaDisassemblerAdapter implements DisassemblerAdapter {
 	readonly capabilities: DisassemblerAdapterCapabilities = {
 		executionLanguage: "IDAPython",
 		statefulExecution: true,
+		open: true,
 		reset: true,
 		save: true,
 		close: true,
 	};
 
-	readonly #endpoint?: string;
+	readonly #options: DisassemblerAdapterOptions;
 
-	constructor(options: { endpoint?: string } = {}) {
-		this.#endpoint = options.endpoint;
+	constructor(options: DisassemblerAdapterOptions = {}) {
+		this.#options = options;
 	}
 
 	async list(signal?: AbortSignal): Promise<DisassemblerTarget[]> {
 		return this.#withClient(signal, async client => {
 			const clients = await client.list(signal);
 			return clients.filter(isHeadlessIdaClient).map(client => {
-				const databasePath = stringMeta(client.meta, "idb_path");
-				const inputPath = stringMeta(client.meta, "input_file");
+				const managed = managedIdaTargetInfo(client.clientId);
+				const databasePath = managed?.databasePath ?? stringMeta(client.meta, "idb_path");
+				const inputPath = managed?.inputPath ?? stringMeta(client.meta, "input_file");
 				return {
 					id: client.clientId,
 					backend: this.id,
@@ -51,7 +56,9 @@ export class IdaDisassemblerAdapter implements DisassemblerAdapter {
 					bits: numberMeta(client.meta, "bits"),
 					pid: numberMeta(client.meta, "pid"),
 					sessionId: client.sessionId,
-					metadata: client.meta,
+					metadata: managed
+						? { ...client.meta, managed_by_omp: true, temporary_database: managed.temporaryDatabase }
+						: client.meta,
 				};
 			});
 		});
@@ -74,6 +81,9 @@ export class IdaDisassemblerAdapter implements DisassemblerAdapter {
 		signal?: AbortSignal,
 	): Promise<DisassemblerExecutionResult> {
 		return this.#exec(target, code, options, signal);
+	}
+	async open(options: DisassemblerOpenOptions, signal?: AbortSignal): Promise<DisassemblerTarget> {
+		return openIdaTarget(this.#options, options, signal);
 	}
 
 	async reset(target: string, options: DisassemblerResetOptions, signal?: AbortSignal): Promise<void> {
@@ -103,10 +113,11 @@ export class IdaDisassemblerAdapter implements DisassemblerAdapter {
 		await this.#withHeadlessTarget(target, signal, async client => {
 			await client.quit(target, timeoutSec, signal);
 		});
+		await releaseIdaTarget(target);
 	}
 
 	dispose(): void {
-		// Connections are operation-scoped; there is no adapter-owned process to stop.
+		releaseIdaRuntime(this.#options.endpoint);
 	}
 
 	async #exec(
@@ -147,7 +158,8 @@ export class IdaDisassemblerAdapter implements DisassemblerAdapter {
 		signal: AbortSignal | undefined,
 		operation: (client: IdaBridgeClient) => Promise<T>,
 	): Promise<T> {
-		const client = new IdaBridgeClient({ url: this.#endpoint });
+		await ensureIdaBridge(this.#options, signal);
+		const client = new IdaBridgeClient({ url: this.#options.endpoint });
 		try {
 			await client.connect(signal);
 			return await operation(client);

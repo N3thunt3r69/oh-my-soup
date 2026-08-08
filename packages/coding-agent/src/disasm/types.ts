@@ -43,9 +43,16 @@ export interface DisassemblerAdapterCapabilities {
 	/** Human-readable language accepted by execute(). */
 	executionLanguage: string;
 	statefulExecution: boolean;
+	open: boolean;
 	reset: boolean;
 	save: boolean;
 	close: boolean;
+}
+
+export interface DisassemblerOpenOptions {
+	file: string;
+	outputIdb?: string;
+	timeoutSec?: number;
 }
 
 export interface DisassemblerAdapter {
@@ -65,6 +72,7 @@ export interface DisassemblerAdapter {
 		options?: DisassemblerExecutionOptions,
 		signal?: AbortSignal,
 	): Promise<DisassemblerExecutionResult>;
+	open?(options: DisassemblerOpenOptions, signal?: AbortSignal): Promise<DisassemblerTarget>;
 	reset?(target: string, options: DisassemblerResetOptions, signal?: AbortSignal): Promise<void>;
 	save?(
 		target: string,
@@ -77,6 +85,9 @@ export interface DisassemblerAdapter {
 
 export interface DisassemblerAdapterOptions {
 	endpoint?: string;
+	idaDir?: string;
+	python?: string;
+	cwd?: string;
 }
 
 export interface DisassemblerAdapterFactory {
