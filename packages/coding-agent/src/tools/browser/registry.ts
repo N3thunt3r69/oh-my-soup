@@ -224,7 +224,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions,
 			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
 		});
 		return {
-		key,
+			key,
 			kind,
 			browser,
 			cdpUrl,

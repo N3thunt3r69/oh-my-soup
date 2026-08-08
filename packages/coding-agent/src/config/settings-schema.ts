@@ -2157,7 +2157,8 @@ export const SETTINGS_SCHEMA = {
 			tab: "context",
 			group: "Compaction",
 			label: "Agent-Callable Compaction",
-			description: "Let the agent inspect context usage and schedule compaction from eval cells (compact.status/compact.run)",
+			description:
+				"Let the agent inspect context usage and schedule compaction from eval cells (compact.status/compact.run)",
 		},
 	},
 
@@ -3907,6 +3908,39 @@ export const SETTINGS_SCHEMA = {
 			group: "Available Tools",
 			label: "Debug",
 			description: "Enable the debug tool for DAP-based debugging",
+		},
+	},
+
+	"disasm.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			group: "Available Tools",
+			label: "Disassembler",
+			description: "Enable backend-neutral SQL and native-code access to disassemblers and decompilers",
+		},
+	},
+
+	"disasm.defaultBackend": {
+		type: "string",
+		default: "ida",
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "Default Backend",
+			description: "Backend used when disasm calls omit backend (currently ida)",
+		},
+	},
+
+	"disasm.ida.url": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "IDA Bridge URL",
+			description: "Headless idalib bridge endpoint (default ws://127.0.0.1:8765)",
 		},
 	},
 

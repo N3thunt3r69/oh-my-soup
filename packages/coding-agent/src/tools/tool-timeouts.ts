@@ -16,6 +16,7 @@ export const TOOL_TIMEOUTS = {
 	fetch: { default: 20, min: 1, max: 45 },
 	lsp: { default: 20, min: 5, max: 300 },
 	debug: { default: 30, min: 5, max: 300 },
+	disasm: { default: 60, min: 5, max: 600 },
 } as const satisfies Record<string, ToolTimeoutConfig>;
 
 export type ToolWithTimeout = keyof typeof TOOL_TIMEOUTS;

@@ -23,6 +23,12 @@
   - `packages/coding-agent/src/debug/terminal-info.ts` — terminal state collection/formatting
   - `packages/coding-agent/src/debug/protocol-probe.ts` — terminal protocol probe panel and sample image
 
+## Disassembler boundary
+
+`debug` remains the live-process DAP tool. Static and interactive reverse engineering uses the separate discoverable `disasm` tool, whose exported adapter interface keeps backend code out of the DAP session manager. The built-in `ida` adapter speaks cellebrite-labs/ida-bridge protocol v4 directly over WebSocket; it does not register an MCP shim or shell out for each query.
+
+IDA setup follows [cellebrite-labs/ida-bridge](https://github.com/cellebrite-labs/ida-bridge): install its host CLI and `idapro`/idalib runtime, start `ida-bridge server`, then launch a headless target with `ida-bridge supervisor start-idalib`. The built-in adapter has no launch path and exposes only clients whose bridge metadata reports `runtime: "idalib"`. `disasm({ action: "list", backend: "ida" })` discovers connected headless targets. `disasm.ida.url` overrides the default `ws://127.0.0.1:8765`; a call-level `endpoint` overrides the setting. Prefer `query` for the bridge's shared SQL interface and reserve backend-native `execute` (IDAPython for IDA) for operations SQL cannot express.
+
 ## Inputs
 
 | Field | Type | Required | Description |

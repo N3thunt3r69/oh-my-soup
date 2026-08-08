@@ -50,7 +50,6 @@ export async function loadPuppeteerInWorker(safeDir: string): Promise<typeof Pup
 	}
 }
 
-
 // =====================================================================
 // Camoufox engine
 // =====================================================================

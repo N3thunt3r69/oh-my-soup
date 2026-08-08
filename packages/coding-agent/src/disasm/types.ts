@@ -1,0 +1,86 @@
+export interface DisassemblerTarget {
+	id: string;
+	backend: string;
+	label?: string;
+	databasePath?: string;
+	inputPath?: string;
+	runtime?: string;
+	version?: string;
+	processor?: string;
+	bits?: number;
+	pid?: number;
+	sessionId?: string;
+	metadata: Record<string, unknown>;
+}
+
+/** Backend-neutral SQL result. Address formatting is owned by each adapter. */
+export interface DisassemblerQueryResult {
+	columns: string[];
+	rows: Array<Record<string, unknown>>;
+}
+
+/** Result of backend-native execution (IDAPython for IDA, a future Ghidra script for Ghidra). */
+export interface DisassemblerExecutionResult {
+	result?: unknown;
+	stdout?: string;
+	stderr?: string;
+}
+
+export interface DisassemblerExecutionOptions {
+	stateful?: boolean;
+	sessionId?: string;
+	timeoutSec?: number;
+}
+
+export interface DisassemblerResetOptions {
+	sessionId: string;
+	takeover?: boolean;
+	release?: boolean;
+	timeoutSec?: number;
+}
+
+export interface DisassemblerAdapterCapabilities {
+	/** Human-readable language accepted by execute(). */
+	executionLanguage: string;
+	statefulExecution: boolean;
+	reset: boolean;
+	save: boolean;
+	close: boolean;
+}
+
+export interface DisassemblerAdapter {
+	readonly id: string;
+	readonly label: string;
+	readonly capabilities: DisassemblerAdapterCapabilities;
+	list(signal?: AbortSignal): Promise<DisassemblerTarget[]>;
+	query(
+		target: string,
+		sql: string,
+		options?: DisassemblerExecutionOptions,
+		signal?: AbortSignal,
+	): Promise<DisassemblerQueryResult>;
+	execute(
+		target: string,
+		code: string,
+		options?: DisassemblerExecutionOptions,
+		signal?: AbortSignal,
+	): Promise<DisassemblerExecutionResult>;
+	reset?(target: string, options: DisassemblerResetOptions, signal?: AbortSignal): Promise<void>;
+	save?(
+		target: string,
+		options?: DisassemblerExecutionOptions,
+		signal?: AbortSignal,
+	): Promise<DisassemblerExecutionResult>;
+	close?(target: string, timeoutSec?: number, signal?: AbortSignal): Promise<void>;
+	dispose(): void;
+}
+
+export interface DisassemblerAdapterOptions {
+	endpoint?: string;
+}
+
+export interface DisassemblerAdapterFactory {
+	readonly id: string;
+	readonly label: string;
+	create(options?: DisassemblerAdapterOptions): DisassemblerAdapter;
+}

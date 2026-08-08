@@ -45,6 +45,7 @@ import { type BuiltinToolName, type HiddenToolName, normalizeToolNames } from ".
 import { type CheckpointState, CheckpointTool, type CompletedRewindState, RewindTool } from "./checkpoint";
 import { ComputerTool } from "./computer";
 import { DebugTool } from "./debug";
+import { DisasmTool } from "./disasm";
 import { EvalTool } from "./eval";
 import { resolveEvalBackends } from "./eval-backends";
 import { GithubTool } from "./gh";
@@ -67,6 +68,7 @@ import { WriteTool } from "./write";
 import { isMountableUnderXdev, type XdevState } from "./xdev";
 import { YieldTool } from "./yield";
 
+export * from "../disasm";
 export * from "../edit";
 export * from "../goals";
 export * from "../lsp";
@@ -82,6 +84,7 @@ export * from "./checkpoint";
 export * from "./computer";
 export * from "./computer/supervisor";
 export * from "./debug";
+export * from "./disasm";
 export * from "./essential-tools";
 export * from "./eval";
 export * from "./eval-backends";
@@ -429,6 +432,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	ast_edit: s => new AstEditTool(s),
 	ask: AskTool.createIf,
 	debug: DebugTool.createIf,
+	disasm: DisasmTool.createIf,
 	eval: s => new EvalTool(s),
 	github: GithubTool.createIf,
 	glob: s => new GlobTool(s, { rootPathAlias: true }),
@@ -603,6 +607,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "bash") return session.settings.get("bash.enabled");
 		if (name === "eval") return allowEval;
 		if (name === "debug") return session.settings.get("debug.enabled");
+		if (name === "disasm") return session.settings.get("disasm.enabled");
 		if (name === "todo")
 			return (!includeYield || session.prewalkArmed === true) && session.settings.get("todo.enabled");
 		if (name === "glob") return session.settings.get("glob.enabled");

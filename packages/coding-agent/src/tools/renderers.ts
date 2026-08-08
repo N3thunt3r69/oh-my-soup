@@ -18,6 +18,7 @@ import { bashToolRenderer } from "./bash";
 import { browserToolRenderer } from "./browser/render";
 import { computerToolRenderer } from "./computer-renderer";
 import { debugToolRenderer } from "./debug";
+import { disasmToolRenderer } from "./disasm";
 import { evalToolRenderer } from "./eval-render";
 import { githubToolRenderer } from "./gh-renderer";
 import { globToolRenderer } from "./glob";
@@ -85,6 +86,7 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	browser: browserToolRenderer as ToolRenderer,
 	computer: computerToolRenderer as ToolRenderer,
 	debug: debugToolRenderer as ToolRenderer,
+	disasm: disasmToolRenderer as ToolRenderer,
 	eval: evalToolRenderer as ToolRenderer,
 	edit: editToolRenderer as ToolRenderer,
 	apply_patch: editToolRenderer as ToolRenderer,
