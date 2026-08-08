@@ -61,6 +61,7 @@ process.env.CAMOUFOX_INSTALL_DIR ??= getCamoufoxDir();
 
 interface CamoufoxPkgman {
 	camoufoxPath(downloadIfMissing?: boolean): unknown;
+	CamoufoxFetcher: new () => { install(): Promise<void> };
 }
 
 let camoufoxEnginePromise: Promise<string> | undefined;
@@ -84,7 +85,9 @@ export async function ensureCamoufoxEngine(): Promise<string> {
 				installDir: process.env.CAMOUFOX_INSTALL_DIR,
 			});
 			try {
-				return String(pkgman.camoufoxPath(true));
+				const fetcher = new pkgman.CamoufoxFetcher();
+				await fetcher.install();
+				return String(pkgman.camoufoxPath(false));
 			} catch (err) {
 				throw new ToolError(`Failed to install the Camoufox engine: ${(err as Error).message}`);
 			}

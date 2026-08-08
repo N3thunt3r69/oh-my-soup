@@ -124,7 +124,7 @@ export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOpti
 	// would still fire and its result would land in `browsers` below.
 	if (opts.signal?.aborted) throw new ToolAbortError("Browser open aborted");
 
-	const handle = await openBrowserHandle(kind, opts);
+	const handle = await openBrowserHandle(kind, opts, key);
 	// The launch may resolve AFTER the caller has already aborted (the outer
 	// `untilAborted` rejects immediately on abort but does not cancel the
 	// inner promise). Without this branch the completed handle sits in
@@ -154,12 +154,12 @@ export function normalizeConnectedCdpUrl(rawCdpUrl: string): string {
 	return cdpUrl;
 }
 
-async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions): Promise<BrowserHandle> {
+async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions, key: string): Promise<BrowserHandle> {
 	if (kind.kind === "cmux") {
 		const client = new CmuxSocketClient({ socketPath: kind.socketPath, password: kind.password });
 		await client.connect();
 		return {
-			key: browserKey(kind),
+			key,
 			kind,
 			client,
 			surface: kind.surface,
@@ -171,7 +171,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 		// registry handle starts pid-less and is stamped from the worker's
 		// ready info by the supervisor.
 		return {
-			key: browserKey(kind),
+			key,
 			kind,
 			refCount: 0,
 		};
@@ -186,7 +186,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
 		});
 		return {
-			key: browserKey(kind),
+			key,
 			kind,
 			browser,
 			cdpUrl,
@@ -224,7 +224,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
 		});
 		return {
-			key: browserKey(kind),
+		key,
 			kind,
 			browser,
 			cdpUrl,
@@ -283,7 +283,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 		throw new ToolError(`Connected to ${cdpUrl} but puppeteer.connect failed: ${(err as Error).message}`);
 	}
 	return {
-		key: browserKey(kind),
+		key,
 		kind,
 		browser,
 		cdpUrl,
