@@ -74,6 +74,7 @@
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@opentelemetry/sdk-trace-node": "catalog:",
     "camoufox-js": "catalog:",
+    "chromium-bidi": "catalog:",
     "mupdf": "catalog:",
     "puppeteer-core": "catalog:"
   },
