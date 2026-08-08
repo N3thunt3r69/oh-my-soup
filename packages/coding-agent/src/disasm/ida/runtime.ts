@@ -3,11 +3,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { $which, type ChildProcess, postmortem, ptree } from "@oh-my-pi/pi-utils";
 import type { DisassemblerTarget } from "../types";
+import { type BundledIdaBridgeRuntime, ensureBundledIdaBridge, resolveBundledIdaBridge } from "./bridge-runtime";
 import { IdaBridgeClient, type IdaBridgeClientInfo, resolveIdaBridgeUrl } from "./client";
 
 const BRIDGE_PROBE_TIMEOUT_MS = 500;
 const BRIDGE_START_TIMEOUT_MS = 15_000;
 const PROCESS_EXIT_TIMEOUT_MS = 5_000;
+const PROCESS_OUTPUT_TAIL_CHARS = 32 * 1024;
 const TARGET_POLL_INTERVAL_MS = 100;
 const IDB_EXTENSIONS = new Set([".i64", ".idb"]);
 // idapro normally prefers its user-global JSON config over IDADIR. Inject only
@@ -44,14 +46,18 @@ interface ResolvedIdaRuntime {
 	endpoint: string;
 	url: URL;
 	python: string;
+	batchAnalyzer?: string;
 	idaDir?: string;
 	cwd: string;
 	env: Record<string, string | undefined>;
+	bridgeRuntime: BundledIdaBridgeRuntime;
 }
 
 interface ManagedProcess {
 	process: ChildProcess;
 	exitSettled: Promise<number>;
+	outputTail: string;
+	outputSettled: Promise<void>;
 }
 
 interface BridgeRecord extends ManagedProcess {
@@ -84,6 +90,7 @@ export async function ensureIdaBridge(options: IdaRuntimeOptions, signal?: Abort
 	const endpoint = resolveIdaBridgeUrl(options.endpoint);
 	if (await probeBridge(endpoint, signal)) return;
 	const runtime = resolveRuntime(options, endpoint);
+	await ensureBundledIdaBridge(runtime.bridgeRuntime, runtime.env, runtime.cwd, signal);
 	await ensureResolvedBridge(runtime, signal);
 }
 
@@ -99,6 +106,7 @@ export async function openIdaTarget(
 	let worker: ManagedProcess | undefined;
 	try {
 		const runtime = resolveRuntime(options, endpoint);
+		await ensureBundledIdaBridge(runtime.bridgeRuntime, runtime.env, runtime.cwd, signal);
 		await ensureResolvedBridge(runtime, signal);
 		throwIfAborted(signal);
 
@@ -117,13 +125,17 @@ export async function openIdaTarget(
 			temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-disasm-"));
 			databasePath = path.join(temporaryDir, "database.i64");
 		}
+		const prebuiltDatabase = !inputIsDatabase && runtime.batchAnalyzer !== undefined;
+		if (prebuiltDatabase) {
+			await createIdaDatabase(runtime, inputPath, databasePath, signal);
+		}
 		const existingTargetIds = await listTargetIds(runtime.endpoint, signal);
 
 		const args = runtime.idaDir
 			? [runtime.python, "-c", IDAPRO_CONFIG_BOOTSTRAP]
 			: [runtime.python, "-m", "ida_bridge.idalib_runner"];
-		if (inputIsDatabase) {
-			args.push("--idb", inputPath);
+		if (inputIsDatabase || prebuiltDatabase) {
+			args.push("--idb", databasePath);
 		} else {
 			args.push("--input", inputPath, "--out-idb", databasePath);
 		}
@@ -134,7 +146,6 @@ export async function openIdaTarget(
 			env: runtime.env,
 			detached: true,
 		});
-		void drain(process.stdout);
 		worker = managedProcess(process);
 		const clientInfo = await waitForTarget(runtime.endpoint, databasePath, existingTargetIds, worker, signal);
 		const targetId = clientInfo.clientId;
@@ -183,8 +194,10 @@ export function releaseIdaRuntime(endpoint?: string): void {
 
 function resolveRuntime(options: IdaRuntimeOptions, endpoint: string): ResolvedIdaRuntime {
 	const cwd = path.resolve(options.cwd?.trim() || process.cwd());
-	const python = resolvePython(options.python, cwd);
+	const basePython = resolvePython(options.python, cwd);
 	const idaDir = resolveIdaDir(options.idaDir, cwd);
+	const batchAnalyzer = idaDir && process.platform === "win32" ? resolveBatchAnalyzer(idaDir) : undefined;
+	const bridgeRuntime = resolveBundledIdaBridge(basePython);
 	const url = new URL(endpoint);
 	assertLocalBridgeUrl(url);
 	const host = url.hostname.replace(/^\[|\]$/g, "");
@@ -196,12 +209,14 @@ function resolveRuntime(options: IdaRuntimeOptions, endpoint: string): ResolvedI
 		IDA_IS_INTERACTIVE: "0",
 		PYTHONUNBUFFERED: "1",
 	};
+	const pythonPaths = [bridgeRuntime.sourceDirectory];
 	if (idaDir) {
 		env.IDADIR = idaDir;
-		const bundledPython = path.join(idaDir, "idalib", "python");
-		env.PYTHONPATH = [bundledPython, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter);
+		pythonPaths.push(path.join(idaDir, "idalib", "python"));
 	}
-	return { endpoint, url, python, idaDir, cwd, env };
+	if (process.env.PYTHONPATH) pythonPaths.push(process.env.PYTHONPATH);
+	env.PYTHONPATH = pythonPaths.join(path.delimiter);
+	return { endpoint, url, python: bridgeRuntime.python, idaDir, batchAnalyzer, cwd, env, bridgeRuntime };
 }
 
 function resolvePython(configured: string | undefined, cwd: string): string {
@@ -255,6 +270,14 @@ function resolveIdaDir(configured: string | undefined, cwd: string): string | un
 	return resolved;
 }
 
+function resolveBatchAnalyzer(idaDir: string): string {
+	const executable = path.join(idaDir, "idat.exe");
+	if (!fs.existsSync(executable)) {
+		throw new Error(`Configured IDA installation does not contain idat.exe: ${idaDir}`);
+	}
+	return executable;
+}
+
 function resolveConfiguredPath(value: string, cwd: string): string {
 	const expanded =
 		value === "~"
@@ -291,6 +314,43 @@ function resolveOutputDatabase(value: string, cwd: string): string {
 	return resolved;
 }
 
+async function createIdaDatabase(
+	runtime: ResolvedIdaRuntime,
+	inputPath: string,
+	databasePath: string,
+	signal?: AbortSignal,
+): Promise<void> {
+	const analyzer = runtime.batchAnalyzer;
+	if (!analyzer) throw new Error("IDA batch analyzer is unavailable");
+	const assemblyPath = `${databasePath.slice(0, -path.extname(databasePath).length)}.asm`;
+	const child = ptree.spawn([analyzer, "-A", "-B", `-o${databasePath}`, inputPath], {
+		cwd: runtime.cwd,
+		env: runtime.env,
+		detached: true,
+	});
+	const managed = managedProcess(child);
+	try {
+		await awaitWithSignal(managed.exitSettled, signal);
+		await managed.outputSettled;
+		if (child.exitCode !== 0) {
+			const output = managed.outputTail.trim();
+			const stderr = child.peekStderr().trim();
+			const detail = [output, stderr].filter(Boolean).join("\n");
+			throw new Error(
+				`IDA batch analysis failed (code ${child.exitCode ?? "unknown"})${detail ? `\n${detail}` : ""}`,
+			);
+		}
+		if (!fs.existsSync(databasePath)) {
+			throw new Error(`IDA batch analysis completed without creating its database: ${databasePath}`);
+		}
+	} catch (error) {
+		if (child.exitCode === null) await terminate(managed);
+		throw error;
+	} finally {
+		fs.rmSync(assemblyPath, { force: true });
+	}
+}
+
 async function ensureResolvedBridge(runtime: ResolvedIdaRuntime, signal?: AbortSignal): Promise<void> {
 	if (await probeBridge(runtime.endpoint, signal)) return;
 	let starting = bridgeStarts.get(runtime.endpoint);
@@ -311,7 +371,6 @@ async function startBridge(runtime: ResolvedIdaRuntime): Promise<void> {
 		env: runtime.env,
 		detached: true,
 	});
-	void drain(process.stdout);
 	const managed = managedProcess(process);
 	const deadline = Date.now() + BRIDGE_START_TIMEOUT_MS;
 	try {
@@ -440,10 +499,14 @@ function targetFromClient(client: IdaBridgeClientInfo, record: TargetRecord): Di
 }
 
 function managedProcess(process: ChildProcess): ManagedProcess {
-	return {
+	const managed: ManagedProcess = {
 		process,
 		exitSettled: process.exited.catch(() => process.exitCode ?? -1),
+		outputTail: "",
+		outputSettled: Promise.resolve(),
 	};
+	managed.outputSettled = drain(process.stdout, managed);
+	return managed;
 }
 
 function monitorBridge(record: BridgeRecord): void {
@@ -483,10 +546,13 @@ async function waitForExit(managed: ManagedProcess, timeoutMs: number): Promise<
 }
 
 async function prematureExit(label: string, managed: ManagedProcess): Promise<Error> {
-	await managed.exitSettled;
+	await Promise.all([managed.exitSettled, managed.outputSettled]);
+	const output = managed.outputTail.trim();
 	const stderr = managed.process.peekStderr().trim();
-	const suffix = stderr ? `\n${stderr}` : "";
-	return new Error(`${label} exited before becoming ready (code ${managed.process.exitCode ?? "unknown"})${suffix}`);
+	const detail = [output, stderr].filter(Boolean).join("\n");
+	return new Error(
+		`${label} exited before becoming ready (code ${managed.process.exitCode ?? "unknown"})${detail ? `\n${detail}` : ""}`,
+	);
 }
 
 function assertLocalBridgeUrl(url: URL): void {
@@ -509,11 +575,16 @@ function decrementPendingOpen(key: string): void {
 	else pendingOpens.delete(key);
 }
 
-async function drain(stream: ReadableStream<Uint8Array>): Promise<void> {
+async function drain(stream: ReadableStream<Uint8Array>, managed: ManagedProcess): Promise<void> {
+	const decoder = new TextDecoder();
 	try {
-		for await (const _chunk of stream) {
-			// Drain without retaining unbounded process output.
+		for await (const chunk of stream) {
+			managed.outputTail += decoder.decode(chunk, { stream: true });
+			if (managed.outputTail.length > PROCESS_OUTPUT_TAIL_CHARS) {
+				managed.outputTail = managed.outputTail.slice(-PROCESS_OUTPUT_TAIL_CHARS);
+			}
 		}
+		managed.outputTail += decoder.decode();
 	} catch {
 		// Process teardown closes streams abruptly on some platforms.
 	}
