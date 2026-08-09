@@ -108,11 +108,15 @@ jobs:
          matrix:
             os: [ubuntu-22.04, macos-14]
       runs-on: ${{ matrix.os }}
-      # mise lists the repository's releases through the GitHub API. Runner IPs
-      # are shared, so an unauthenticated list gets rate-limited — which mise
-      # 2026.8.3 reports as the misleading "no versions found matching date
-      # filter". A real user's machine does not need this.
       env:
+         # mise's `minimum_release_age` defaults to 24h, so a release published
+         # minutes ago is refused with "no versions found matching date filter".
+         # That delay is mise's global supply-chain default for every tool, not
+         # something oms controls — waive it so this job can verify the release
+         # it was triggered by. Users installing a day-old release never see it.
+         MISE_MINIMUM_RELEASE_AGE: 0s
+         # Runner IPs are shared; an unauthenticated release list gets
+         # rate-limited. A real user's machine does not need this.
          GITHUB_TOKEN: ${{ github.token }}
       steps:
          - name: Install mise
