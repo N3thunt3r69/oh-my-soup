@@ -1,5 +1,11 @@
 //! Standard builtins.
 
+// `stat` reports the Windows volume serial, hard-link count, and file index,
+// which `std::os::windows::fs::MetadataExt` still gates behind this feature.
+// The workspace pins a nightly toolchain (rust-toolchain.toml, and bazel forces
+// `--@rules_rust//rust/toolchain/channel=nightly`), so it is available.
+#![cfg_attr(windows, feature(windows_by_handle))]
+
 #[cfg(feature = "builtin.alias")]
 mod alias;
 #[cfg(feature = "builtin.bg")]

@@ -1,5 +1,8 @@
 //! Runtime-agnostic brush shell execution.
 
+// Only the Windows `PATH` merge de-duplicates segments.
+#[cfg(windows)]
+use std::collections::HashSet;
 use std::{
 	collections::HashMap,
 	fs,

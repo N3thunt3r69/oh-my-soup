@@ -172,9 +172,12 @@ jobs:
            run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
          # The bazel-cache action only restores; without an explicit save every
          # hosted run rebuilds the Rust graph from scratch (~2 h). Paths must
-         # mirror the restore list in the bazel-cache action.
+         # mirror the restore list in the bazel-cache action. `always()`: a build
+         # that dies on the last target still produced hours of valid,
+         # content-addressed entries, and throwing them away makes the retry pay
+         # the same cold cost again.
          - name: Save bazel disk cache
-           if: steps.cache.outputs.save-needed == 'true'
+           if: always() && steps.cache.outputs.save-needed == 'true'
            uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: |
@@ -233,8 +236,10 @@ jobs:
               summary=$(sed -E 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/bazel-build.log" | grep -E '[0-9]+ processes:' | tail -1 || true)
               echo "::notice title=Bazel build summary::${summary:-no process summary found}"
 
+         # `always()`: see the identical step in rust_validate — a failed target
+         # must not discard the entries every earlier target produced.
          - name: Save bazel disk cache
-           if: steps.cache.outputs.save-needed == 'true'
+           if: always() && steps.cache.outputs.save-needed == 'true'
            uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: |

@@ -11,7 +11,11 @@ use std::{
 
 use brush_core::{ShellExtensions, builtins::Registration};
 use clap::{Arg, ArgAction, ArgMatches, Command, builder::ValueParser, parser::ValuesRef};
-use uucore::{display::Quotable, fs, mode};
+use uucore::{display::Quotable, fs};
+// `uucore::mode` is gated `#[cfg(all(not(windows), feature = "mode"))]`; both
+// callers below (`get_mode`, the umask-derived parent mode) are non-Windows.
+#[cfg(not(windows))]
+use uucore::mode;
 #[cfg(all(unix, target_os = "linux"))]
 use uucore::fsxattr;
 

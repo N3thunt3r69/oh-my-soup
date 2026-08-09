@@ -6,6 +6,8 @@ mod count_fast {
 	use std::io::{self, ErrorKind, Read};
 	#[cfg(unix)]
 	use std::os::fd::AsRawFd;
+	#[cfg(windows)]
+	use std::os::windows::fs::MetadataExt;
 	
 	#[cfg(unix)]
 	use libc::{_SC_PAGESIZE, S_IFREG, sysconf};

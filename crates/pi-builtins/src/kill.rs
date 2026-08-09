@@ -140,7 +140,7 @@ impl builtins::Command for KillCommand {
 			ProcInfo::all()
 				.into_iter()
 				.filter(|process| process.status() == ProcessStatus::Running)
-				.map(ProcInfo::pid)
+				.map(|process| process.pid())
 				.collect()
 		};
 		#[cfg(unix)]
