@@ -196,10 +196,14 @@ jobs:
       steps:
          - uses: actions/checkout@v4
 
+         # Not `linux`: rust_validate shares that scope, finishes first, and
+         # claims the key with a host-only archive — actions/cache never
+         # overwrites an existing key, so the six cross-compiled addon targets
+         # would never be saved and every run would rebuild them cold.
          - id: cache
            uses: ./.github/actions/bazel-cache
            with:
-              scope: linux
+              scope: natives-linux
          - name: Build native addons once
            run: |
               set -eo pipefail
