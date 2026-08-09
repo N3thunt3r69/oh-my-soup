@@ -743,9 +743,14 @@ jobs:
            env:
               GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
            run: |
+              set -euo pipefail
               bun scripts/ci-update-brew-formula.ts "${{ needs.release_metadata.outputs.release-tag }}" --out homebrew-tap/Formula/oms.rb
               cd homebrew-tap
-              if git diff --quiet -- Formula/oms.rb; then
+              # Stage first: on the tap's very first release the formula is an
+              # untracked file, which `git diff` does not see — the step then
+              # reported "already up to date" and pushed nothing.
+              git add Formula/oms.rb
+              if git diff --cached --quiet -- Formula/oms.rb; then
                 echo "formula already up to date for ${{ needs.release_metadata.outputs.release-tag }}"
                 exit 0
               fi

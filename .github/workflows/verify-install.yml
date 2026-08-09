@@ -108,6 +108,12 @@ jobs:
          matrix:
             os: [ubuntu-22.04, macos-14]
       runs-on: ${{ matrix.os }}
+      # mise lists the repository's releases through the GitHub API. Runner IPs
+      # are shared, so an unauthenticated list gets rate-limited — which mise
+      # 2026.8.3 reports as the misleading "no versions found matching date
+      # filter". A real user's machine does not need this.
+      env:
+         GITHUB_TOKEN: ${{ github.token }}
       steps:
          - name: Install mise
            run: curl -fsSL https://mise.run | sh
