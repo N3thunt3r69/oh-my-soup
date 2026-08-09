@@ -31,7 +31,7 @@ Prefer a schema parse at the boundary when a validator is available — validate
 once, then read from a fully typed value:
 
 ```ts
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 
 const Resp = type({ data: { id: "string" } });
 

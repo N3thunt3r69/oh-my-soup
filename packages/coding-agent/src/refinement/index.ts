@@ -2,7 +2,7 @@
  * /refine continual harness: audited, rollback-able trajectory-review loop.
  *
  * `runRefinementPass` plans ops with one oneshot LLM call and applies them to
- * omp's existing stores; `rollbackRefinement` reverse-applies a logged pass.
+ * oms's existing stores; `rollbackRefinement` reverse-applies a logged pass.
  * Every applied pass appends to `<state>/refinements.jsonl`.
  */
 import {

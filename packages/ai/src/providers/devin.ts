@@ -4,11 +4,11 @@ import {
 	ChatMessageRequestType,
 	GetChatMessageRequestSchema,
 	GetChatMessageResponseSchema,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/api_server_pb/api_server_pb";
+} from "@oh-my-soup/pi-catalog/discovery/devin-gen/exa/api_server_pb/api_server_pb";
 import {
 	GetUserJwtRequestSchema,
 	GetUserJwtResponseSchema,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/auth_pb/auth_pb";
+} from "@oh-my-soup/pi-catalog/discovery/devin-gen/exa/auth_pb/auth_pb";
 import {
 	CacheControlType,
 	type ChatMessagePrompt,
@@ -16,7 +16,7 @@ import {
 	ChatToolChoiceSchema,
 	ChatToolDefinitionSchema,
 	PromptCacheOptionsSchema,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/chat_pb/chat_pb";
+} from "@oh-my-soup/pi-catalog/discovery/devin-gen/exa/chat_pb/chat_pb";
 import {
 	ChatMessageSource,
 	type ChatToolCall,
@@ -26,9 +26,9 @@ import {
 	ImageDataSchema,
 	MetadataSchema,
 	StopReason,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/codeium_common_pb/codeium_common_pb";
-import { calculateCost } from "@oh-my-pi/pi-catalog/models";
-import { logger, parseStreamingJson, parseStreamingJsonThrottled } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-catalog/discovery/devin-gen/exa/codeium_common_pb/codeium_common_pb";
+import { calculateCost } from "@oh-my-soup/pi-catalog/models";
+import { logger, parseStreamingJson, parseStreamingJsonThrottled } from "@oh-my-soup/pi-utils";
 import * as AIError from "../error";
 import type {
 	Api,
@@ -551,7 +551,7 @@ function buildDevinChatRequest(
 	});
 }
 
-/** Map omp `Message` history onto Cascade `ChatMessagePrompt`s (USER / SYSTEM / TOOL channels). */
+/** Map oms `Message` history onto Cascade `ChatMessagePrompt`s (USER / SYSTEM / TOOL channels). */
 function buildChatMessagePrompts(
 	messages: Message[],
 	cascadeId: string,

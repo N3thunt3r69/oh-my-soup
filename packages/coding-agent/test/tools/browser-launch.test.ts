@@ -25,7 +25,7 @@ describe("Camoufox engine installation", () => {
 			'    return "/mock/camoufox";',
 			"  },",
 			"}));",
-			'const { ensureCamoufoxEngine } = await import("@oh-my-pi/pi-coding-agent/tools/browser/launch");',
+			'const { ensureCamoufoxEngine } = await import("@oh-my-soup/pi-coding-agent/tools/browser/launch");',
 			"const enginePath = await ensureCamoufoxEngine();",
 			"process.stdout.write(JSON.stringify({ enginePath, cacheState, installCalls }));",
 		].join("\n");

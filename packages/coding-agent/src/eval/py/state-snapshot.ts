@@ -23,7 +23,7 @@ const RESULT_MARKER = "__OMP_PY_KERNEL_STATE__";
 
 /**
  * Names re-created by the runner bootstrap (`runner.py`'s `_install_builtins`)
- * and the OMP prelude on every kernel start. Snapshotting them would pickle
+ * and the OMS prelude on every kernel start. Snapshotting them would pickle
  * stale bridge closures that must never shadow the fresh ones after restore.
  * The restore path additionally refuses to overwrite any name that already
  * exists in the fresh namespace, so drift in this list stays harmless.
@@ -109,7 +109,7 @@ export function buildSnapshotCode(
 	// All builtins are sourced via the locally-imported _b alias so the helper keeps
 	// working even when the user namespace shadows names like list/open/print/len.
 	return `
-def _omp_snapshot_kernel_state():
+def _oms_snapshot_kernel_state():
     import builtins as _b, json, os, sys, datetime
     try:
         import dill
@@ -182,9 +182,9 @@ def _omp_snapshot_kernel_state():
 
 
 try:
-    _omp_snapshot_kernel_state()
+    _oms_snapshot_kernel_state()
 finally:
-    del _omp_snapshot_kernel_state
+    del _oms_snapshot_kernel_state
 `.trim();
 }
 
@@ -199,7 +199,7 @@ export function buildRestoreCode(inPath: string): string {
 	// Builtins via the local _b alias so a shadowed name in the user namespace
 	// (list/open/print/…) can't break the restore path.
 	return `
-def _omp_restore_kernel_state():
+def _oms_restore_kernel_state():
     import builtins as _b, json, os
     if not os.path.exists(${pyStr(inPath)}):
         _b.print(${pyStr(RESULT_MARKER)} + json.dumps({"restored": [], "failed": []}))
@@ -242,9 +242,9 @@ def _omp_restore_kernel_state():
 
 
 try:
-    _omp_restore_kernel_state()
+    _oms_restore_kernel_state()
 finally:
-    del _omp_restore_kernel_state
+    del _oms_restore_kernel_state
 `.trim();
 }
 

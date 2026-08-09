@@ -4,10 +4,10 @@
  * `refine.auto = "compact"` runs one guarded refinement pass after compaction,
  * throttled by prime-agent's 20-minute cooldown (`refine.cooldownMinutes`).
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { serializeConversation } from "@oh-my-pi/pi-agent-core/compaction";
-import type { Message, Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import { serializeConversation } from "@oh-my-soup/pi-agent-core/compaction";
+import type { Message, Model } from "@oh-my-soup/pi-ai";
+import { logger } from "@oh-my-soup/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
 import { resolveRefinementStorePaths, runRefinementPass } from ".";

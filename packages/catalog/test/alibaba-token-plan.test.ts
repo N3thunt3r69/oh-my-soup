@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { CATALOG_PROVIDERS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
+import { Effort } from "@oh-my-soup/pi-catalog/effort";
+import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
+import { CATALOG_PROVIDERS } from "@oh-my-soup/pi-catalog/provider-models/descriptors";
 import {
 	ALIBABA_TOKEN_PLAN_BASE_URL,
 	ALIBABA_TOKEN_PLAN_STATIC_MODELS,
 	alibabaTokenPlanModelManagerOptions,
-} from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
-import { serializeAlibabaTokenPlanCredential } from "@oh-my-pi/pi-catalog/wire/alibaba-token-plan";
+} from "@oh-my-soup/pi-catalog/provider-models/openai-compat";
+import type { FetchImpl } from "@oh-my-soup/pi-catalog/types";
+import { serializeAlibabaTokenPlanCredential } from "@oh-my-soup/pi-catalog/wire/alibaba-token-plan";
 
 describe("QwenCloud Token Plan provider", () => {
 	test("ships the documented Individual text-model allowlist", () => {

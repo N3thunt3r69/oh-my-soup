@@ -16,7 +16,7 @@ interface GitTreeResponse {
 	tree: GitTreeEntry[];
 }
 
-function applyOmpPatches(sourcePath: string, content: string): string {
+function applyOmsPatches(sourcePath: string, content: string): string {
 	if (sourcePath !== "src/ida_bridge/idalib_runner.py") return content;
 	const importAnchor = "import fcntl\n";
 	if (!content.includes(importAnchor)) throw new Error("ida-bridge fcntl import changed upstream");
@@ -67,7 +67,7 @@ except ModuleNotFoundError:
 
 const treeResponse = await fetch(
 	`https://api.github.com/repos/${UPSTREAM_REPOSITORY}/git/trees/${UPSTREAM_REVISION}?recursive=1`,
-	{ headers: { Accept: "application/vnd.github+json", "User-Agent": "oh-my-pi-build" } },
+	{ headers: { Accept: "application/vnd.github+json", "User-Agent": "oh-my-soup-build" } },
 );
 if (!treeResponse.ok) {
 	throw new Error(`Failed to read ida-bridge tree: HTTP ${treeResponse.status}`);
@@ -86,7 +86,7 @@ const files = Object.fromEntries(
 				`https://raw.githubusercontent.com/${UPSTREAM_REPOSITORY}/${UPSTREAM_REVISION}/${sourcePath}`,
 			);
 			if (!response.ok) throw new Error(`Failed to read ${sourcePath}: HTTP ${response.status}`);
-			return [sourcePath.slice("src/".length), applyOmpPatches(sourcePath, await response.text())] as const;
+			return [sourcePath.slice("src/".length), applyOmsPatches(sourcePath, await response.text())] as const;
 		}),
 	),
 );

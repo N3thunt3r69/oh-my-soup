@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "bun:test";
 import { join } from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import { BrowserTool } from "@oh-my-pi/pi-coding-agent/tools/browser";
-import { ensureCamoufoxEngine } from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
-import { getTabsMapForTest } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
-import * as logger from "@oh-my-pi/pi-utils/logger";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import type { ToolSession } from "@oh-my-soup/pi-coding-agent/sdk";
+import { BrowserTool } from "@oh-my-soup/pi-coding-agent/tools/browser";
+import { ensureCamoufoxEngine } from "@oh-my-soup/pi-coding-agent/tools/browser/launch";
+import { getTabsMapForTest } from "@oh-my-soup/pi-coding-agent/tools/browser/tab-supervisor";
+import * as logger from "@oh-my-soup/pi-utils/logger";
 
 function makeSession(): ToolSession {
 	return {

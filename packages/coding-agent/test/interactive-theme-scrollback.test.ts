@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
+import { Agent } from "@oh-my-soup/pi-agent-core";
+import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
+import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { InteractiveMode } from "@oh-my-soup/pi-coding-agent/modes/interactive-mode";
 import {
 	enableAutoTheme,
 	getCurrentThemeName,
@@ -12,13 +12,13 @@ import {
 	previewTheme,
 	setTheme,
 	stopThemeWatcher,
-} from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { TUI } from "@oh-my-pi/pi-tui";
-import type { TerminalAppearance, TerminalAppearanceRequestToken } from "@oh-my-pi/pi-tui/terminal";
-import { TempDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import { TUI } from "@oh-my-soup/pi-tui";
+import type { TerminalAppearance, TerminalAppearanceRequestToken } from "@oh-my-soup/pi-tui/terminal";
+import { TempDir } from "@oh-my-soup/pi-utils";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 
 const MULTIPLEXER_ENV_KEYS = [

@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $which, type ChildProcess, postmortem, ptree } from "@oh-my-pi/pi-utils";
+import { $which, type ChildProcess, postmortem, ptree } from "@oh-my-soup/pi-utils";
 import type { DisassemblerExecutionResult, DisassemblerQueryResult, DisassemblerTarget } from "../types";
 import {
 	GHIDRA_BRIDGE_SCRIPT,
@@ -17,7 +17,7 @@ const PROBE_INTERVAL_MS = 100;
 const PROBE_TIMEOUT_MS = 500;
 const OUTPUT_TAIL_CHARS = 32 * 1024;
 const MANIFEST_VERSION = 1;
-const BRIDGE_TOKEN_ENV = "OMP_GHIDRA_BRIDGE_TOKEN";
+const BRIDGE_TOKEN_ENV = "OMS_GHIDRA_BRIDGE_TOKEN";
 
 export interface GhidraRuntimeOptions {
 	installDir?: string;
@@ -109,7 +109,7 @@ export async function openGhidraTarget(
 			databasePath = resolveOutputProject(request.outputDb, runtime.cwd);
 			assertNewProject(databasePath);
 		} else {
-			temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-disasm-ghidra-"));
+			temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-disasm-ghidra-"));
 			databasePath = path.join(temporaryDir, "database.gpr");
 		}
 		projectKey = reserveProject(databasePath);
@@ -119,7 +119,7 @@ export async function openGhidraTarget(
 		fs.mkdirSync(projectDirectory, { recursive: true });
 		const manifest = inputIsProject ? readManifest(databasePath) : undefined;
 		const plugin = installGhidraPlugin();
-		scriptDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "omp-ghidra-scripts-"));
+		scriptDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "oms-ghidra-scripts-"));
 		fs.copyFileSync(plugin.path, path.join(scriptDirectory, GHIDRA_BRIDGE_SCRIPT));
 		fs.copyFileSync(plugin.listProgramsPath, path.join(scriptDirectory, GHIDRA_LIST_PROGRAMS_SCRIPT));
 		fs.copyFileSync(plugin.watchParentPath, path.join(scriptDirectory, GHIDRA_WATCH_PARENT_SCRIPT));
@@ -180,7 +180,7 @@ export async function openGhidraTarget(
 			env: {
 				...runtime.env,
 				[BRIDGE_TOKEN_ENV]: token,
-				OMP_GHIDRA_PARENT_PID: String(process.pid),
+				OMS_GHIDRA_PARENT_PID: String(process.pid),
 			},
 			detached: true,
 		});
@@ -542,7 +542,7 @@ async function enumerateProjectPrograms(
 		],
 		{
 			cwd: runtime.cwd,
-			env: { ...runtime.env, OMP_GHIDRA_PARENT_PID: String(process.pid) },
+			env: { ...runtime.env, OMS_GHIDRA_PARENT_PID: String(process.pid) },
 			detached: true,
 		},
 	);
@@ -591,7 +591,7 @@ async function enumerateProjectPrograms(
 }
 
 function manifestPath(databasePath: string): string {
-	return `${databasePath}.omp.json`;
+	return `${databasePath}.oms.json`;
 }
 
 function readManifest(databasePath: string): ProjectManifest | undefined {

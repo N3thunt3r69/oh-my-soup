@@ -2,19 +2,19 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as cleanseAgent from "@oh-my-pi/pi-coding-agent/cleanse/agent";
-import { balanceDiagnostics } from "@oh-my-pi/pi-coding-agent/cleanse/balance";
-import * as cleanseCheckers from "@oh-my-pi/pi-coding-agent/cleanse/checkers";
-import { runCleanseCommand } from "@oh-my-pi/pi-coding-agent/cleanse/index";
-import { runCleanseLoop } from "@oh-my-pi/pi-coding-agent/cleanse/loop";
-import { parseCleanseDiagnostics } from "@oh-my-pi/pi-coding-agent/cleanse/parsers";
-import { createCleanseProgressReporter } from "@oh-my-pi/pi-coding-agent/cleanse/progress";
+import * as cleanseAgent from "@oh-my-soup/pi-coding-agent/cleanse/agent";
+import { balanceDiagnostics } from "@oh-my-soup/pi-coding-agent/cleanse/balance";
+import * as cleanseCheckers from "@oh-my-soup/pi-coding-agent/cleanse/checkers";
+import { runCleanseCommand } from "@oh-my-soup/pi-coding-agent/cleanse/index";
+import { runCleanseLoop } from "@oh-my-soup/pi-coding-agent/cleanse/loop";
+import { parseCleanseDiagnostics } from "@oh-my-soup/pi-coding-agent/cleanse/parsers";
+import { createCleanseProgressReporter } from "@oh-my-soup/pi-coding-agent/cleanse/progress";
 import type {
 	CleanseAgentOutcome,
 	CleanseDiagnostic,
 	CleanseDiagnosticReport,
-} from "@oh-my-pi/pi-coding-agent/cleanse/types";
-import { resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
+} from "@oh-my-soup/pi-coding-agent/cleanse/types";
+import { resolveCliArgv } from "@oh-my-soup/pi-coding-agent/cli-commands";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -84,7 +84,7 @@ describe("cleanse diagnostics", () => {
 	});
 
 	test("discovers package test scripts only when test mode is enabled", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cleanse-tests-"));
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "oms-cleanse-tests-"));
 		try {
 			await Bun.write(
 				path.join(root, "package.json"),
@@ -112,7 +112,7 @@ describe("cleanse diagnostics", () => {
 	});
 
 	test("excludes generated Bazel trees from checker discovery", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cleanse-ignore-"));
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "oms-cleanse-ignore-"));
 		try {
 			await Bun.write(path.join(root, "src", "index.ts"), "export const value = 1;\n");
 			await Bun.write(

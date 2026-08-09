@@ -2,9 +2,9 @@
  * The /refine LLM pass: one oneshot completion over the serialized recent
  * trajectory + current continual-harness state, returning structured CRUD ops.
  */
-import { type } from "@oh-my-pi/omptype";
-import { type ApiKey, completeSimple, type Model } from "@oh-my-pi/pi-ai";
-import { prompt } from "@oh-my-pi/pi-utils";
+import { type } from "@oh-my-soup/omstype";
+import { type ApiKey, completeSimple, type Model } from "@oh-my-soup/pi-ai";
+import { prompt } from "@oh-my-soup/pi-utils";
 import refinerSystemPrompt from "./prompts/refiner-system.md" with { type: "text" };
 import { type RefinementProposal, refinementProposalSchema } from "./types";
 

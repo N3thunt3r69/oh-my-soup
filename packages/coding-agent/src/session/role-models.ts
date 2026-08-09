@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { ThinkingLevel } from "@oh-my-soup/pi-agent-core";
+import type { Model } from "@oh-my-soup/pi-ai";
 import type { ModelRegistry } from "../config/model-registry";
 import {
 	extractExplicitThinkingSelector,

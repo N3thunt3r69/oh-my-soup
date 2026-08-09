@@ -2,19 +2,19 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type } from "@oh-my-pi/omptype";
-import { AuthStorage, type completeSimple, Effort, type ImageContent, type Model } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { InspectImageTool } from "@oh-my-pi/pi-coding-agent/tools/inspect-image";
-import { inspectImageToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/inspect-image-renderer";
-import { toolRenderers } from "@oh-my-pi/pi-coding-agent/tools/renderers";
-import { removeSyncWithRetries, sanitizeText } from "@oh-my-pi/pi-utils";
+import { type } from "@oh-my-soup/omstype";
+import { AuthStorage, type completeSimple, Effort, type ImageContent, type Model } from "@oh-my-soup/pi-ai";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
+import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { getThemeByName } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { createAgentSession } from "@oh-my-soup/pi-coding-agent/sdk";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import type { ToolSession } from "@oh-my-soup/pi-coding-agent/tools";
+import { InspectImageTool } from "@oh-my-soup/pi-coding-agent/tools/inspect-image";
+import { inspectImageToolRenderer } from "@oh-my-soup/pi-coding-agent/tools/inspect-image-renderer";
+import { toolRenderers } from "@oh-my-soup/pi-coding-agent/tools/renderers";
+import { removeSyncWithRetries, sanitizeText } from "@oh-my-soup/pi-utils";
 
 const TINY_PNG_BASE64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
@@ -165,7 +165,7 @@ describe("InspectImageTool", () => {
 	let testDir: string;
 
 	beforeEach(() => {
-		testDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-inspect-image-"));
+		testDir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-inspect-image-"));
 	});
 
 	afterEach(() => {

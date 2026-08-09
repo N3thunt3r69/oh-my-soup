@@ -9,11 +9,11 @@ import { describe, expect, it, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
-import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createSessionManager, SessionResolutionError, writeStartupNotice } from "@oh-my-pi/pi-coding-agent/main";
-import * as sessionListingModule from "@oh-my-pi/pi-coding-agent/session/session-listing";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import type { Args } from "@oh-my-soup/pi-coding-agent/cli/args";
+import type { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { createSessionManager, SessionResolutionError, writeStartupNotice } from "@oh-my-soup/pi-coding-agent/main";
+import * as sessionListingModule from "@oh-my-soup/pi-coding-agent/session/session-listing";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 
 function buildResumeArgs(resume: string, sessionDir?: string): Args {
 	return {
@@ -108,7 +108,7 @@ describe("createSessionManager — missing session (#2084)", () => {
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
 				message: 'Session "019ea530-0000-7000-0000-000000000000" not found.',
-				hint: expect.stringContaining("omp --resume"),
+				hint: expect.stringContaining("oms --resume"),
 			});
 
 			// Confirm it's the exported class so `runRootCommand`'s `instanceof` check works.
@@ -124,7 +124,7 @@ describe("createSessionManager — missing session (#2084)", () => {
 	});
 
 	it("rejects --resume with unknown id instead of falling back to latest persisted session", async () => {
-		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-resume-unknown-id-"));
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "oms-resume-unknown-id-"));
 		const sessionDir = path.join(cwd, "sessions");
 		const missingId = "019ea530-ffff-7000-8000-000000000000";
 		try {
@@ -139,7 +139,7 @@ describe("createSessionManager — missing session (#2084)", () => {
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
 				message: `Session "${missingId}" not found.`,
-				hint: expect.stringContaining("omp --resume"),
+				hint: expect.stringContaining("oms --resume"),
 			});
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
@@ -147,7 +147,7 @@ describe("createSessionManager — missing session (#2084)", () => {
 	});
 
 	it("rejects --continue followed by an unknown session id instead of falling back to latest", async () => {
-		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-continue-unknown-id-"));
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "oms-continue-unknown-id-"));
 		const sessionDir = path.join(cwd, "sessions");
 		const missingId = "019ea530-ffff-7000-8000-000000000000";
 		try {
@@ -161,7 +161,7 @@ describe("createSessionManager — missing session (#2084)", () => {
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
 				message: `Session "${missingId}" not found.`,
-				hint: expect.stringContaining("omp --resume"),
+				hint: expect.stringContaining("oms --resume"),
 			});
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
@@ -180,7 +180,7 @@ describe("createSessionManager — missing session (#2084)", () => {
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
 				message: 'Session "019ea530-0000-7000-0000-000000000000" not found.',
-				hint: expect.stringContaining("omp --resume"),
+				hint: expect.stringContaining("oms --resume"),
 			});
 		} finally {
 			vi.restoreAllMocks();

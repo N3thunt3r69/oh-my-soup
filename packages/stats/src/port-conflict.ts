@@ -1,13 +1,13 @@
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { $which } from "@oh-my-pi/pi-utils";
+import { $which } from "@oh-my-soup/pi-utils";
 import { $ } from "bun";
 
 const STATS_PROBE_TIMEOUT_MS = 500;
 const PROCESS_EXIT_POLL_MS = 50;
 const PROCESS_EXIT_POLLS = 10;
-const STATS_RUNTIME_IMAGES: Record<string, true> = { bun: true, node: true, omp: true, "omp-stats": true };
+const STATS_RUNTIME_IMAGES: Record<string, true> = { bun: true, node: true, oms: true, "oms-stats": true };
 
 interface PortHolder {
 	pid: number;
@@ -16,7 +16,7 @@ interface PortHolder {
 }
 
 /** Header stamped on every dashboard response so reuse probes can identify us. */
-export const STATS_DASHBOARD_HEADER = "x-omp-stats-dashboard";
+export const STATS_DASHBOARD_HEADER = "x-oms-stats-dashboard";
 
 /** Identity-header value for dashboards enforcing loopback-only, same-origin access. */
 export const STATS_DASHBOARD_SECURITY_VERSION = "2";
@@ -228,14 +228,14 @@ async function reclaimStatsPort(port: number): Promise<"retry"> {
 		.replace(/ \(deleted\)$/, "");
 	const normalizedCommand = holder.commandLine.toLowerCase().replaceAll("\\", "/");
 	const hasStatsIdentity =
-		normalizedImage === "omp-stats" ||
-		/(?:^|[/"'\s])omp-stats(?:\.exe)?(?:["'\s]|$)/.test(normalizedCommand) ||
+		normalizedImage === "oms-stats" ||
+		/(?:^|[/"'\s])oms-stats(?:\.exe)?(?:["'\s]|$)/.test(normalizedCommand) ||
 		/\/packages\/stats\/src\/index\.ts(?:["'\s]|$)/.test(normalizedCommand) ||
-		(normalizedImage === "omp" && /(?:^|\s)stats(?:\s|$)/.test(normalizedCommand)) ||
-		/(?:^|\/)omp(?:\.exe)?["'\s]+stats(?:["'\s]|$)/.test(normalizedCommand);
+		(normalizedImage === "oms" && /(?:^|\s)stats(?:\s|$)/.test(normalizedCommand)) ||
+		/(?:^|\/)oms(?:\.exe)?["'\s]+stats(?:["'\s]|$)/.test(normalizedCommand);
 	if (!STATS_RUNTIME_IMAGES[normalizedImage] || !hasStatsIdentity) {
 		throw new Error(
-			`Port ${port} is in use by ${holder.image} (PID ${holder.pid}), which is not identifiable as an omp stats dashboard; refusing to stop it.`,
+			`Port ${port} is in use by ${holder.image} (PID ${holder.pid}), which is not identifiable as an oms stats dashboard; refusing to stop it.`,
 		);
 	}
 

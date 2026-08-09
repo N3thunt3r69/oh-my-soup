@@ -1,22 +1,22 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
-import { createSessionRuntime } from "@oh-my-pi/pi-coding-agent/autoresearch/state";
+import type { ImageContent, TextContent } from "@oh-my-soup/pi-ai";
+import { createSessionRuntime } from "@oh-my-soup/pi-coding-agent/autoresearch/state";
 import {
 	type AutoresearchStorage,
 	closeAllAutoresearchStorages,
 	openAutoresearchStorage,
 	type SessionRow,
-} from "@oh-my-pi/pi-coding-agent/autoresearch/storage";
-import { createInitExperimentTool } from "@oh-my-pi/pi-coding-agent/autoresearch/tools/init-experiment";
-import { createLogExperimentTool } from "@oh-my-pi/pi-coding-agent/autoresearch/tools/log-experiment";
-import { createRunExperimentTool } from "@oh-my-pi/pi-coding-agent/autoresearch/tools/run-experiment";
-import { createUpdateNotesTool } from "@oh-my-pi/pi-coding-agent/autoresearch/tools/update-notes";
-import type { ASIData, LogDetails, NumericMetricMap, RunDetails } from "@oh-my-pi/pi-coding-agent/autoresearch/types";
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import { TempDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/autoresearch/storage";
+import { createInitExperimentTool } from "@oh-my-soup/pi-coding-agent/autoresearch/tools/init-experiment";
+import { createLogExperimentTool } from "@oh-my-soup/pi-coding-agent/autoresearch/tools/log-experiment";
+import { createRunExperimentTool } from "@oh-my-soup/pi-coding-agent/autoresearch/tools/run-experiment";
+import { createUpdateNotesTool } from "@oh-my-soup/pi-coding-agent/autoresearch/tools/update-notes";
+import type { ASIData, LogDetails, NumericMetricMap, RunDetails } from "@oh-my-soup/pi-coding-agent/autoresearch/types";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-soup/pi-coding-agent/extensibility/extensions";
+import * as git from "@oh-my-soup/pi-coding-agent/utils/git";
+import { TempDir } from "@oh-my-soup/pi-utils";
 import { $ } from "bun";
 
 afterEach(() => {
@@ -168,11 +168,11 @@ describe("init_experiment", () => {
 
 	beforeEach(() => {
 		dbOverride = makeTempDir("@pi-autoresearch-init-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		process.env.OMS_AUTORESEARCH_DB_DIR = dbOverride.path();
 	});
 
 	afterEach(async () => {
-		delete process.env.OMP_AUTORESEARCH_DB_DIR;
+		delete process.env.OMS_AUTORESEARCH_DB_DIR;
 		closeAllAutoresearchStorages();
 		await Bun.sleep(0);
 		await dbOverride.remove();
@@ -348,11 +348,11 @@ describe("run_experiment", () => {
 
 	beforeEach(() => {
 		dbOverride = makeTempDir("@pi-autoresearch-run-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		process.env.OMS_AUTORESEARCH_DB_DIR = dbOverride.path();
 	});
 
 	afterEach(async () => {
-		delete process.env.OMP_AUTORESEARCH_DB_DIR;
+		delete process.env.OMS_AUTORESEARCH_DB_DIR;
 		closeAllAutoresearchStorages();
 		await Bun.sleep(0);
 		await dbOverride.remove();
@@ -439,11 +439,11 @@ describe("log_experiment", () => {
 
 	beforeEach(() => {
 		dbOverride = makeTempDir("@pi-autoresearch-log-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		process.env.OMS_AUTORESEARCH_DB_DIR = dbOverride.path();
 	});
 
 	afterEach(async () => {
-		delete process.env.OMP_AUTORESEARCH_DB_DIR;
+		delete process.env.OMS_AUTORESEARCH_DB_DIR;
 		closeAllAutoresearchStorages();
 		await Bun.sleep(0);
 		await dbOverride.remove();
@@ -843,11 +843,11 @@ describe("update_notes", () => {
 
 	beforeEach(() => {
 		dbOverride = makeTempDir("@pi-autoresearch-notes-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		process.env.OMS_AUTORESEARCH_DB_DIR = dbOverride.path();
 	});
 
 	afterEach(async () => {
-		delete process.env.OMP_AUTORESEARCH_DB_DIR;
+		delete process.env.OMS_AUTORESEARCH_DB_DIR;
 		closeAllAutoresearchStorages();
 		await Bun.sleep(0);
 		await dbOverride.remove().catch(() => {});

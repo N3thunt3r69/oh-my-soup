@@ -2,11 +2,11 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentDashboard } from "@oh-my-pi/pi-coding-agent/modes/components/agent-dashboard";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import * as discovery from "@oh-my-pi/pi-coding-agent/task/discovery";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { AgentDashboard } from "@oh-my-soup/pi-coding-agent/modes/components/agent-dashboard";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import * as discovery from "@oh-my-soup/pi-coding-agent/task/discovery";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const tempDirs: string[] = [];
@@ -18,7 +18,7 @@ const settingsStub = {
 } as unknown as Settings;
 
 async function makeTempCwd(): Promise<string> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-dashboard-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-agent-dashboard-"));
 	tempDirs.push(dir);
 	return dir;
 }

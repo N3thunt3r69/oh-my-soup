@@ -1,4 +1,4 @@
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 
 const PROTOCOL_VERSION = 4;
 const DEFAULT_HOST = "127.0.0.1";
@@ -275,7 +275,7 @@ export class IdaBridgeClient {
 
 	constructor(options: { url?: string; clientId?: string } = {}) {
 		this.url = resolveIdaBridgeUrl(options.url);
-		this.clientId = options.clientId ?? `omp-${process.pid}-${crypto.randomUUID()}`;
+		this.clientId = options.clientId ?? `oms-${process.pid}-${crypto.randomUUID()}`;
 		if (this.clientId.trim().length === 0) {
 			throw new IdaBridgeConnectionError("IDA bridge client id must not be empty");
 		}
@@ -306,7 +306,7 @@ export class IdaBridgeClient {
 						type: "hello",
 						role: "agent",
 						client_id: this.clientId,
-						meta: { client: "omp", pid: process.pid },
+						meta: { client: "oms", pid: process.pid },
 					}),
 				);
 			} catch (error) {

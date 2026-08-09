@@ -1,13 +1,13 @@
 /**
  * Entry-kind backends for the /refine continual harness.
  *
- * Each backend maps a {@link RefinementKind} onto an EXISTING omp store; none
+ * Each backend maps a {@link RefinementKind} onto an EXISTING oms store; none
  * of them introduce a parallel content store. All paths are injectable
  * (`cwd` + `agentDir`) so op application and reversal are testable on temp dirs.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, getProjectAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getProjectAgentDir, isEnoent } from "@oh-my-soup/pi-utils";
 import {
 	getManagedSkillsDir,
 	sanitizeManagedDescription,
@@ -27,7 +27,7 @@ export function resolveRefinementStorePaths(cwd: string, agentDir: string = getA
 	return { cwd, agentDir };
 }
 
-/** Per-project refinement state dir (`~/.omp/agent/refinement/--<project>--`). */
+/** Per-project refinement state dir (`~/.oms/agent/refinement/--<project>--`). */
 export function getRefinementStateDir(paths: RefinementStorePaths): string {
 	return path.join(paths.agentDir, "refinement", encodeProjectPath(paths.cwd));
 }
@@ -40,7 +40,7 @@ export function getSubagentSpecsPath(paths: RefinementStorePaths): string {
 	return path.join(getRefinementStateDir(paths), "subagent-specs.json");
 }
 
-/** Project supplemental instructions file omp's builtin discovery already reads. */
+/** Project supplemental instructions file oms's builtin discovery already reads. */
 export function getPromptNotesPath(paths: RefinementStorePaths): string {
 	return path.join(getProjectAgentDir(paths.cwd), "AGENTS.md");
 }
@@ -84,16 +84,16 @@ export function slugifyEntryId(raw: string, fallback: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// promptNote — managed block inside the project `.omp/AGENTS.md`
+// promptNote — managed block inside the project `.oms/AGENTS.md`
 // ---------------------------------------------------------------------------
 
-const NOTES_BEGIN = "<!-- omp-refine:notes:begin -->";
-const NOTES_END = "<!-- omp-refine:notes:end -->";
-const NOTE_MARKER = /^<!-- omp-refine:note:([a-z0-9-]+) -->$/;
+const NOTES_BEGIN = "<!-- oms-refine:notes:begin -->";
+const NOTES_END = "<!-- oms-refine:notes:end -->";
+const NOTE_MARKER = /^<!-- oms-refine:note:([a-z0-9-]+) -->$/;
 
 function renderPromptNote(note: RefinementEntrySnapshot): string {
 	const title = note.title?.trim() || note.id;
-	return `<!-- omp-refine:note:${note.id} -->\n### ${title}\n\n${note.content.trim()}`;
+	return `<!-- oms-refine:note:${note.id} -->\n### ${title}\n\n${note.content.trim()}`;
 }
 
 function renderNotesBlock(notes: RefinementEntrySnapshot[]): string {

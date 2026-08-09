@@ -1,7 +1,7 @@
 /**
  * Host-side handler for the eval `agent()` helper.
  */
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 import {
 	buildStructuredSubagentRecoveryHint,
 	type EffectiveSubagentPolicy,

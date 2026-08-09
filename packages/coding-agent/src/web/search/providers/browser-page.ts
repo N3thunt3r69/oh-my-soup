@@ -1,5 +1,5 @@
-import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { untilAborted } from "@oh-my-pi/pi-utils";
+import type { FetchImpl } from "@oh-my-soup/pi-ai";
+import { untilAborted } from "@oh-my-soup/pi-utils";
 import type { Browser, Page } from "puppeteer-core";
 import { adoptInitialPage, launchCamoufoxBrowser, loadPuppeteer } from "../../../tools/browser/launch";
 import { buildBrowserNavigationHeaders } from "./browser-headers";

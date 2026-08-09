@@ -4,8 +4,8 @@
  * Implements JSON-RPC 2.0 over HTTP POST with optional SSE streaming.
  * Based on MCP spec 2025-03-26.
  */
-import * as AIError from "@oh-my-pi/pi-ai/error";
-import { logger, readSseJson } from "@oh-my-pi/pi-utils";
+import * as AIError from "@oh-my-soup/pi-ai/error";
+import { logger, readSseJson } from "@oh-my-soup/pi-utils";
 import type {
 	JsonRpcError,
 	JsonRpcMessage,
@@ -26,7 +26,7 @@ const HTTP_SSE_CONNECT_TIMEOUT_MS = 1_000;
  * Best-effort startup deadline for the optional Streamable HTTP GET SSE listener.
  *
  * Returns `0` (disabled) when the operator has explicitly disabled MCP client-side
- * timeouts via `timeout: 0` or `OMP_MCP_TIMEOUT_MS=0`, mirroring the rest of the
+ * timeouts via `timeout: 0` or `OMS_MCP_TIMEOUT_MS=0`, mirroring the rest of the
  * MCP timeout surface. Otherwise caps the wait at one second and scales below
  * short request timeouts so connect-time never exceeds the request budget.
  */

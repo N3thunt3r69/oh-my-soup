@@ -1,18 +1,18 @@
 {
   "type": "module",
-  "name": "@oh-my-pi/pi-utils",
+  "name": "@oh-my-soup/pi-utils",
   "version": "17.2.12",
   "description": "Shared utilities for pi packages",
-  "homepage": "https://omp.sh",
+  "homepage": "https://github.com/pickpocket/oh-my-soup",
   "author": "Can Boluk",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/can1357/oh-my-pi.git",
+    "url": "git+https://github.com/pickpocket/oh-my-soup.git",
     "directory": "packages/utils"
   },
   "bugs": {
-    "url": "https://github.com/can1357/oh-my-pi/issues"
+    "url": "https://github.com/pickpocket/oh-my-soup/issues"
   },
   "keywords": [
     "utilities",
@@ -31,7 +31,7 @@
     "fmt": "biome format --write ."
   },
   "dependencies": {
-    "@oh-my-pi/pi-natives": "catalog:"
+    "@oh-my-soup/pi-natives": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:"

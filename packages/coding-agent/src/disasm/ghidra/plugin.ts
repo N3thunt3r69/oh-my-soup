@@ -1,13 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getConfigRootDir } from "@oh-my-pi/pi-utils";
-import pluginSource from "./OmpGhidraBridge.java" with { type: "text" };
-import listProgramsSource from "./OmpGhidraListPrograms.java" with { type: "text" };
-import watchParentSource from "./OmpGhidraWatchParent.java" with { type: "text" };
+import { getConfigRootDir } from "@oh-my-soup/pi-utils";
+import pluginSource from "./OmsGhidraBridge.java" with { type: "text" };
+import listProgramsSource from "./OmsGhidraListPrograms.java" with { type: "text" };
+import watchParentSource from "./OmsGhidraWatchParent.java" with { type: "text" };
 
-export const GHIDRA_BRIDGE_SCRIPT = "OmpGhidraBridge.java";
-export const GHIDRA_LIST_PROGRAMS_SCRIPT = "OmpGhidraListPrograms.java";
-export const GHIDRA_WATCH_PARENT_SCRIPT = "OmpGhidraWatchParent.java";
+export const GHIDRA_BRIDGE_SCRIPT = "OmsGhidraBridge.java";
+export const GHIDRA_LIST_PROGRAMS_SCRIPT = "OmsGhidraListPrograms.java";
+export const GHIDRA_WATCH_PARENT_SCRIPT = "OmsGhidraWatchParent.java";
 
 export interface InstalledGhidraPlugin {
 	directory: string;
@@ -16,7 +16,7 @@ export interface InstalledGhidraPlugin {
 	watchParentPath: string;
 }
 
-/** Install the embedded OMP bridge script into a stable user-writable script directory. */
+/** Install the embedded OMS bridge script into a stable user-writable script directory. */
 export function installGhidraPlugin(): InstalledGhidraPlugin {
 	const directory = path.join(getConfigRootDir(), "ghidra", "scripts");
 	fs.mkdirSync(directory, { recursive: true });

@@ -1,4 +1,4 @@
-import { Container, Text } from "@oh-my-pi/pi-tui";
+import { Container, Text } from "@oh-my-soup/pi-tui";
 import { formatDiagnostics } from "../../tools/render-utils";
 import { getLanguageFromPath, theme } from "../theme/theme";
 

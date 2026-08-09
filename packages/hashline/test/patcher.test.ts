@@ -13,7 +13,7 @@ import {
 	Patch,
 	Patcher,
 	type WriteResult,
-} from "@oh-my-pi/hashline";
+} from "@oh-my-soup/hashline";
 
 const PATH = "a.ts";
 

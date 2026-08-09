@@ -1,16 +1,16 @@
 /**
- * Resolve auth-broker connection configuration for the local omp client.
+ * Resolve auth-broker connection configuration for the local oms client.
  *
  * This is a thin coding-agent wrapper around the shared resolver in
- * `@oh-my-pi/pi-ai/auth-broker/discover` that preserves the process-lifetime
+ * `@oh-my-soup/pi-ai/auth-broker/discover` that preserves the process-lifetime
  * memoization expected by the CLI and injects the full `resolveConfigValue`
  * (including `!command` config indirection) from coding-agent's config layer.
  *
  * Precedence (highest first):
- *   1. `OMP_AUTH_BROKER_URL` / `OMP_AUTH_BROKER_TOKEN` env vars.
- *   2. `auth.broker.url` / `auth.broker.token` in `~/.omp/agent/config.yml`
+ *   1. `OMS_AUTH_BROKER_URL` / `OMS_AUTH_BROKER_TOKEN` env vars.
+ *   2. `auth.broker.url` / `auth.broker.token` in `~/.oms/agent/config.yml`
  *      (hidden from the settings UI; `!command` resolution supported).
- *   3. Token file `~/.omp/auth-broker.token` (paired with URL from env or config).
+ *   3. Token file `~/.oms/auth-broker.token` (paired with URL from env or config).
  *
  * Returns null when no broker URL is configured — caller falls back to the
  * local SQLite store.
@@ -27,8 +27,8 @@ import {
 	discoverAuthStorage as discoverAuthStorageShared,
 	getAuthBrokerTokenFilePath,
 	resolveAuthBrokerConfig as resolveAuthBrokerConfigShared,
-} from "@oh-my-pi/pi-ai/auth-broker/discover";
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-ai/auth-broker/discover";
+import { getAgentDir } from "@oh-my-soup/pi-utils";
 import { resolveConfigValue } from "../config/resolve-config-value";
 import type { AuthStorage } from "./auth-storage";
 
@@ -37,7 +37,7 @@ export { type AuthBrokerClientConfig, getAuthBrokerTokenFilePath };
 /**
  * Process-lifetime memo for {@link resolveAuthBrokerConfig}. Keyed on the env
  * inputs (plus agent dir, which decides which config.yml is read) so tests
- * that flip `OMP_AUTH_BROKER_*` between cases still observe the change, while
+ * that flip `OMS_AUTH_BROKER_*` between cases still observe the change, while
  * repeated resolution within one CLI invocation (startup, subagent sessions)
  * skips the config.yml read and any `!command` token resolution.
  */
@@ -55,7 +55,7 @@ let cachedConfigPromise: Promise<AuthBrokerClientConfig | null> | null = null;
  * retried. Concurrent callers share one in-flight resolution.
  */
 export function resolveAuthBrokerConfig(): Promise<AuthBrokerClientConfig | null> {
-	const key = `${process.env.OMP_AUTH_BROKER_URL ?? ""}\u0000${process.env.OMP_AUTH_BROKER_TOKEN ?? ""}\u0000${getAgentDir()}`;
+	const key = `${process.env.OMS_AUTH_BROKER_URL ?? ""}\u0000${process.env.OMS_AUTH_BROKER_TOKEN ?? ""}\u0000${getAgentDir()}`;
 	if (cachedConfigPromise && cachedConfigKey === key) return cachedConfigPromise;
 	const promise = resolveAuthBrokerConfigShared({
 		agentDir: getAgentDir(),

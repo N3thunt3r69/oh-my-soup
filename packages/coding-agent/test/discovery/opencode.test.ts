@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type MCPServer, mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
-import { loadCapability } from "@oh-my-pi/pi-coding-agent/discovery";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { type MCPServer, mcpCapability } from "@oh-my-soup/pi-coding-agent/capability/mcp";
+import { loadCapability } from "@oh-my-soup/pi-coding-agent/discovery";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 async function loadOpenCodeMcpConfig(cwd: string): Promise<MCPServer[]> {
 	const result = await loadCapability<MCPServer>(mcpCapability.id, {
@@ -18,7 +18,7 @@ describe("OpenCode MCP discovery", () => {
 	let tempDir = "";
 
 	beforeEach(async () => {
-		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-opencode-mcp-"));
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-opencode-mcp-"));
 	});
 
 	afterEach(async () => {

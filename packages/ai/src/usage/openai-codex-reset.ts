@@ -18,7 +18,7 @@
  * (the `/usage reset` command + auto-redeem) and any out-of-band tooling can
  * share one wire contract.
  */
-import { toNumber } from "@oh-my-pi/pi-catalog/utils";
+import { toNumber } from "@oh-my-soup/pi-catalog/utils";
 import type { FetchImpl } from "../types";
 import { isRecord } from "../utils";
 import { normalizeCodexBaseUrl } from "./openai-codex-base-url";

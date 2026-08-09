@@ -29,7 +29,7 @@ export function exportSecurityBundleToSarif(bundle: SecurityScanBundle): Record<
 					driver: {
 						name: bundle.scan.producer.name,
 						version: bundle.scan.producer.version,
-						informationUri: "https://omp.sh",
+						informationUri: "https://github.com/pickpocket/oh-my-soup",
 						rules: [...rules.values()].map(finding => ({
 							id: finding.ruleId,
 							name: finding.ruleId,
@@ -59,7 +59,7 @@ export function exportSecurityBundleToSarif(bundle: SecurityScanBundle): Record<
 							},
 						})),
 					),
-					fingerprints: { "omp-security/v1": finding.fingerprint },
+					fingerprints: { "oms-security/v1": finding.fingerprint },
 					properties: {
 						findingId: finding.id,
 						confidence: finding.confidence.level,

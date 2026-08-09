@@ -7,7 +7,7 @@
  * hashline DSL form. Other tools and surfaces fall through to
  * abort-and-retry handled by the agent loop.
  */
-import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
+import { preferredDialect } from "@oh-my-soup/pi-catalog/identity";
 import type { AssistantMessage, Model, ToolCall } from "../types";
 
 // Single source of truth for the marker pattern. `M` in the errata.
@@ -371,7 +371,7 @@ export function createHarmonyAuditEvent(params: {
 		removedLen: params.removed.length,
 		removedSha8: sha8(params.removed),
 		removedPreview: redactedJunkPreview(params.removed),
-		removedBlob: Bun.env.OMP_HARMONY_DEBUG === "1" ? params.removed : undefined,
+		removedBlob: Bun.env.OMS_HARMONY_DEBUG === "1" ? params.removed : undefined,
 	};
 }
 

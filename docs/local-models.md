@@ -76,7 +76,7 @@ fallback is used when that role is unset.
 | flan-t5-small | Rejected — just echoes the input    |
 
 **Shipped local options**: `lfm2-350m`, `qwen3-0.6b`, `gemma-270m`, `qwen2.5-0.5b`, `lfm2-700m`.
-**Default setting**: `online`. The default local download for `omp tiny-models` is `lfm2-700m`.
+**Default setting**: `online`. The default local download for `oms tiny-models` is `lfm2-700m`.
 
 ## Task 2: Mnemopi memory (`providers.memoryModel`)
 

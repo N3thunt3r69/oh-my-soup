@@ -23,7 +23,7 @@ const KERNEL_STATE_PROBE_TIMEOUT_MS = 5_000;
 const KERNEL_STATE_NAME_LIMIT = 50;
 
 const PY_NAME_MARKER = "\x00OMPNS\x00";
-const PY_NAME_PROBE = `print(${JSON.stringify(PY_NAME_MARKER)} + __import__("json").dumps(__omp_list_new_globals__(${KERNEL_STATE_NAME_LIMIT})) + ${JSON.stringify(PY_NAME_MARKER)})`;
+const PY_NAME_PROBE = `print(${JSON.stringify(PY_NAME_MARKER)} + __import__("json").dumps(__oms_list_new_globals__(${KERNEL_STATE_NAME_LIMIT})) + ${JSON.stringify(PY_NAME_MARKER)})`;
 
 export interface KernelStateSnapshot {
 	language: "Python" | "JavaScript";

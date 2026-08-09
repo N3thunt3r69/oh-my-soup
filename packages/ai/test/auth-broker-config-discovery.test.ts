@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { discoverAuthStorage, resolveAuthBrokerConfig } from "@oh-my-pi/pi-ai/auth-broker";
+import { discoverAuthStorage, resolveAuthBrokerConfig } from "@oh-my-soup/pi-ai/auth-broker";
 import { removeWithRetries } from "../../utils/src/temp";
 import { withEnv } from "./helpers";
 
 const SUPPRESS_AUTH_BROKER_ENV = {
-	OMP_AUTH_BROKER_URL: undefined,
-	OMP_AUTH_BROKER_TOKEN: undefined,
-	OMP_AUTH_BROKER_ACCOUNT_POOL_FILE: undefined,
+	OMS_AUTH_BROKER_URL: undefined,
+	OMS_AUTH_BROKER_TOKEN: undefined,
+	OMS_AUTH_BROKER_ACCOUNT_POOL_FILE: undefined,
 } as const;
 
 describe("resolveAuthBrokerConfig config discovery", () => {
@@ -62,14 +62,14 @@ describe("resolveAuthBrokerConfig config discovery", () => {
 		const poolPath = path.join(agentDir, "account-pool.json");
 		const brokerEnv = {
 			...SUPPRESS_AUTH_BROKER_ENV,
-			OMP_AUTH_BROKER_URL: "http://127.0.0.1:1",
-			OMP_AUTH_BROKER_TOKEN: "test-token",
-			OMP_AUTH_BROKER_ACCOUNT_POOL_FILE: poolPath,
+			OMS_AUTH_BROKER_URL: "http://127.0.0.1:1",
+			OMS_AUTH_BROKER_TOKEN: "test-token",
+			OMS_AUTH_BROKER_ACCOUNT_POOL_FILE: poolPath,
 		} as const;
 
 		await withEnv(brokerEnv, async () => {
 			await expect(discoverAuthStorage({ agentDir })).rejects.toThrow(
-				"Unable to read OMP_AUTH_BROKER_ACCOUNT_POOL_FILE",
+				"Unable to read OMS_AUTH_BROKER_ACCOUNT_POOL_FILE",
 			);
 
 			const invalidFiles = [

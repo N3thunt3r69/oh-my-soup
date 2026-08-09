@@ -1,6 +1,6 @@
 import * as path from "node:path";
-import { formatHashlineHeader, formatNumberedLine, formatNumberedLines } from "@oh-my-pi/hashline";
-import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import { formatHashlineHeader, formatNumberedLine, formatNumberedLines } from "@oh-my-soup/hashline";
+import type { AgentToolResult } from "@oh-my-soup/pi-agent-core";
 import { canonicalSnapshotKey, getFileSnapshotStore, recordSeenLines } from "../edit/file-snapshot-store";
 import { normalizeToLF } from "../edit/normalize";
 import { isMarkdownPath } from "../modes/theme/theme";

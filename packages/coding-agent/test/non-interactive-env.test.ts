@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildNonInteractiveEnv } from "@oh-my-pi/pi-coding-agent/exec/non-interactive-env";
+import { buildNonInteractiveEnv } from "@oh-my-soup/pi-coding-agent/exec/non-interactive-env";
 
 describe("buildNonInteractiveEnv", () => {
 	it("defaults Windows child-process encoding to UTF-8 when inherited env is unset", () => {
@@ -62,12 +62,12 @@ describe("buildNonInteractiveEnv", () => {
 });
 
 it("filters expanded dotenv values while preserving matching launcher values", async () => {
-	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-env-"));
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "oms-env-"));
 	try {
 		await Bun.write(
 			path.join(tmp, ".env"),
 			[
-				"BASE=loaded-by-omp",
+				"BASE=loaded-by-oms",
 				"TEST_ENV_FROM_DOTENV=$BASE-suffix",
 				"NODE_ENV=development",
 				"export EXPORTED_SECRET=exported",
@@ -87,7 +87,7 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 			"	project: env.TEST_ENV_FROM_DOTENV ?? null,",
 			"	deployment: env.CONVEX_DEPLOYMENT ?? null,",
 			"	url: env.CONVEX_URL ?? null,",
-			"	inherited: env.OMP_TEST_INHERITED_MARKER ?? null,",
+			"	inherited: env.OMS_TEST_INHERITED_MARKER ?? null,",
 			"	matching: env.NODE_ENV ?? null,",
 			"	exported: env.EXPORTED_SECRET ?? null,",
 			"	commented: env.COMMENTED_SECRET ?? null,",
@@ -99,7 +99,7 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 				cwd: tmp,
 				env: {
 					HOME: process.env.HOME ?? "",
-					OMP_TEST_INHERITED_MARKER: "keep-me",
+					OMS_TEST_INHERITED_MARKER: "keep-me",
 					NODE_ENV: "development",
 					PATH: process.env.PATH ?? "",
 					SHELL: process.env.SHELL ?? "/bin/bash",
@@ -140,7 +140,7 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 });
 
 it("keeps an empty launcher value instead of the project dotenv value", async () => {
-	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-env-empty-"));
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "oms-env-empty-"));
 	try {
 		await Bun.write(path.join(tmp, ".env"), "EMPTY_PARENT_VAR=project-secret\n");
 		const procmgrPath = path.resolve(import.meta.dir, "../../utils/src/procmgr.ts");

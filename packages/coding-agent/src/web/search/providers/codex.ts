@@ -12,17 +12,17 @@ import {
 	type OAuthAccess,
 	withAuth,
 	withOAuthAccess,
-} from "@oh-my-pi/pi-ai";
-import { resolveCodexResponsesUrl } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+} from "@oh-my-soup/pi-ai";
+import { resolveCodexResponsesUrl } from "@oh-my-soup/pi-ai/providers/openai-codex-responses";
+import { getBundledModels } from "@oh-my-soup/pi-catalog/models";
 import {
 	CODEX_BASE_URL,
 	CODEX_CLIENT_VERSION,
 	getCodexAccountId,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
-} from "@oh-my-pi/pi-catalog/wire/codex";
-import { $env, readSseJson } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-catalog/wire/codex";
+import { $env, readSseJson } from "@oh-my-soup/pi-utils";
 import packageJson from "../../../../package.json" with { type: "json" };
 import type { ModelRegistry } from "../../../config/model-registry";
 import type { SearchResponse, SearchSource } from "../../../web/search/types";
@@ -716,7 +716,7 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 		const seed = await findCodexAuth(params.authStorage, params.sessionId, params.signal);
 		if (!seed) {
 			throw new Error(
-				"No Codex OAuth credentials found. Login with 'omp /login openai-codex' to enable Codex web search.",
+				"No Codex OAuth credentials found. Login with 'oms /login openai-codex' to enable Codex web search.",
 			);
 		}
 

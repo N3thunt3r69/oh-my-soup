@@ -27,9 +27,9 @@
 
 `debug` remains the live-process DAP tool. Static and interactive reverse engineering uses the separate discoverable `disasm` tool, whose exported adapter interface keeps backend code out of the DAP session manager. The built-in `ida` adapter speaks cellebrite-labs/ida-bridge protocol v4 directly over WebSocket; it does not register an MCP shim or shell out for each query.
 
-IDA setup requires IDA Pro with IDALib and Python 3.12 or newer. Configure `disasm.ida.installDir` and, when Python is not on `PATH`, `disasm.ida.python`. OMP embeds a pinned, Windows-compatible [cellebrite-labs/ida-bridge](https://github.com/cellebrite-labs/ida-bridge) runtime and provisions its binary dependencies in an OMP-owned private Python environment on first use; do not install `ida-bridge`, an IDA plugin, or a bridge server separately. `disasm({ action: "open", file: "/path/to/binary" })` starts the local bridge automatically, launches a dedicated IDALib worker, waits for analysis, and returns a target ID ready for `query` or `execute`; separate calls can keep multiple files open simultaneously. On Windows, OMP uses the configured IDA batch executable to import raw binaries before IDALib opens the generated database. No manual server startup or binary loading is required. Raw binaries use a temporary IDB deleted on `close` unless `output_db` names a persistent `.i64`/`.idb`; `save` and `close` operate on one target without affecting the others. The adapter exposes only clients whose bridge metadata marks them as OMP-managed.
+IDA setup requires IDA Pro with IDALib and Python 3.12 or newer. Configure `disasm.ida.installDir` and, when Python is not on `PATH`, `disasm.ida.python`. OMS embeds a pinned, Windows-compatible [cellebrite-labs/ida-bridge](https://github.com/cellebrite-labs/ida-bridge) runtime and provisions its binary dependencies in an OMS-owned private Python environment on first use; do not install `ida-bridge`, an IDA plugin, or a bridge server separately. `disasm({ action: "open", file: "/path/to/binary" })` starts the local bridge automatically, launches a dedicated IDALib worker, waits for analysis, and returns a target ID ready for `query` or `execute`; separate calls can keep multiple files open simultaneously. On Windows, OMS uses the configured IDA batch executable to import raw binaries before IDALib opens the generated database. No manual server startup or binary loading is required. Raw binaries use a temporary IDB deleted on `close` unless `output_db` names a persistent `.i64`/`.idb`; `save` and `close` operate on one target without affecting the others. The adapter exposes only clients whose bridge metadata marks them as OMS-managed.
 
-The built-in `ghidra` adapter owns its headless lifecycle. Install the latest official Ghidra release and a Java 21+ JDK, then configure `disasm.ghidra.installDir` and `disasm.ghidra.javaHome` or use the `ghidra_dir` and `java_home` call overrides. `open` accepts a raw binary or `.gpr`: raw binaries use a temporary project unless `output_db` names a persistent `.gpr`; an OMP-created project records its selected domain program for later reopen. An external project is inspected without analysis; a single program is selected automatically, while a multi-program project requires `program: "/domain/path/to/file"`. Each target gets an independent loopback-only, bearer-authenticated worker and may stay open alongside other projects. `query` exposes bounded, read-only SQL over materialized Ghidra tables under a restricted H2 principal. `execute` accepts native Ghidra Java with `_result_` as its return value. A timed-out request retires its worker; `save` persists mutations, and `close` saves persistent projects before cleanup.
+The built-in `ghidra` adapter owns its headless lifecycle. Install the latest official Ghidra release and a Java 21+ JDK, then configure `disasm.ghidra.installDir` and `disasm.ghidra.javaHome` or use the `ghidra_dir` and `java_home` call overrides. `open` accepts a raw binary or `.gpr`: raw binaries use a temporary project unless `output_db` names a persistent `.gpr`; an OMS-created project records its selected domain program for later reopen. An external project is inspected without analysis; a single program is selected automatically, while a multi-program project requires `program: "/domain/path/to/file"`. Each target gets an independent loopback-only, bearer-authenticated worker and may stay open alongside other projects. `query` exposes bounded, read-only SQL over materialized Ghidra tables under a restricted H2 principal. `execute` accepts native Ghidra Java with `_result_` as its return value. A timed-out request retires its worker; `save` persists mutations, and `close` saves persistent projects before cleanup.
 
 ## Inputs
 
@@ -123,7 +123,7 @@ Streaming/UI behavior:
 - The interactive selector is UI-driven instead of model-driven. It swaps TUI components, appends status lines to the chat pane, opens files in external viewers, writes archives/temp files, or starts the process-wide JavaScriptCore inspector socket.
 
 Side-channel artifacts outside the model tool result:
-- `createReportBundle()` writes `omp-report-<timestamp>.tar.gz` under the reports dir and returns the filesystem path to the UI handler.
+- `createReportBundle()` writes `oms-report-<timestamp>.tar.gz` under the reports dir and returns the filesystem path to the UI handler.
 - `#handleWorkReport()` writes `/tmp/work-profile-<Date.now()>.svg` before opening it.
 - `RawSseViewerComponent` and `DebugLogViewerComponent` can copy captured text to the clipboard.
 
@@ -169,7 +169,7 @@ Side-channel artifacts outside the model tool result:
   - `attach`: explicit `adapter` wins; otherwise remote `port` prefers `debugpy`, then native debuggers, then first available adapter.
 - **Custom adapter config**
   - Debug adapters can be added or overridden with `dap.json`, `.dap.json`, `dap.yaml`, `.dap.yaml`, `dap.yml`, or `.dap.yml`.
-  - Search order mirrors LSP config: project root, project config dirs (`.omp/`, `.claude/`, `.codex/`, `.gemini/`), user config dirs (`~/.omp/agent/`, `~/.claude/`, `~/.codex/`, `~/.gemini/`), plugin roots, then home-root fallback. Files are merged from lowest to highest priority.
+  - Search order mirrors LSP config: project root, project config dirs (`.oms/`, `.claude/`, `.codex/`, `.gemini/`), user config dirs (`~/.oms/agent/`, `~/.claude/`, `~/.codex/`, `~/.gemini/`), plugin roots, then home-root fallback. Files are merged from lowest to highest priority.
   - Config shape may be either `{ "adapters": { ... } }` or a top-level adapter map.
   - Adapter fields:
     - `command`: executable name or path. Required.
@@ -182,7 +182,7 @@ Side-channel artifacts outside the model tool result:
     - `connectMode`: `"stdio"` (default), `"socket"` (Delve-style platform-dependent socket/callback), or `"tcp"` (spawn a local DAP server with `${port}` substituted into `args`).
     - `acceptsDirectoryProgram`: set `true` for adapters such as `dlv` that can launch a package/project directory.
 
-Example `.omp/dap.json`:
+Example `.oms/dap.json`:
 
 ```json
 {
@@ -260,8 +260,8 @@ Example `.omp/dap.json`:
 - Subprocesses / native bindings
   - Spawns debugger adapters (`gdb`, `lldb-dap`, `python -m debugpy.adapter`, `dlv`, and others from `defaults.json`) detached.
   - Reverse DAP `runInTerminal` requests spawn the debuggee detached via `ptree.spawn()`.
-  - `getWorkProfile(30)` comes from `@oh-my-pi/pi-natives`.
-  - CPU profiling uses `node:inspector/promises`; heap snapshots use `Bun.generateHeapSnapshot("v8")`; raw/log viewers sanitize text via `sanitizeText()` from `@oh-my-pi/pi-utils`.
+  - `getWorkProfile(30)` comes from `@oh-my-soup/pi-natives`.
+  - CPU profiling uses `node:inspector/promises`; heap snapshots use `Bun.generateHeapSnapshot("v8")`; raw/log viewers sanitize text via `sanitizeText()` from `@oh-my-soup/pi-utils`.
   - `openPath()` launches the OS default file/browser handler for artifact dirs and SVGs.
   - Log/raw-SSE viewers can call `copyToClipboard()`.
 - Session state (transcript, memory, jobs, checkpoints, registries)
@@ -291,7 +291,7 @@ Example `.omp/dap.json`:
 - Raw SSE buffer caps in `packages/coding-agent/src/debug/raw-sse-buffer.ts`:
   - `MAX_RAW_SSE_EVENTS = 1_000`
   - `MAX_RAW_SSE_CHARS = 512_000`
-  - `MAX_RAW_SSE_EVENT_CHARS = 64_000` per event; over-budget events first get `tools` schemas compacted (name kept, schema/description elided), then a head+tail trim that keeps the first and last portions with a `: omp-debug-elided chars=...` comment in the middle and a final `: omp-debug-truncated originalChars=...` marker
+  - `MAX_RAW_SSE_EVENT_CHARS = 64_000` per event; over-budget events first get `tools` schemas compacted (name kept, schema/description elided), then a head+tail trim that keeps the first and last portions with a `: oms-debug-elided chars=...` comment in the middle and a final `: oms-debug-truncated originalChars=...` marker
 - Log viewer window in `packages/coding-agent/src/debug/log-viewer.ts`:
   - `INITIAL_LOG_CHUNK = 50`
   - `LOAD_OLDER_CHUNK = 50`
@@ -338,7 +338,7 @@ Example `.omp/dap.json`:
 
 ## Notes
 - `packages/coding-agent/src/prompts/tools/debug.md` tells the model only one active root session is supported. Adapter-requested child sessions belong to that root tree.
-- The default JavaScript/TypeScript adapter runs vscode-js-debug's `dapDebugServer.js` over TCP. Install it one of these ways; the first and last are auto-discovered by `resolveJsDebugServerPath()` in `packages/coding-agent/src/dap/config.ts`. (Don't try `npm i -g js-debug-adapter` — it 404s; `js-debug-adapter` is the omp adapter id, not an npm package.)
+- The default JavaScript/TypeScript adapter runs vscode-js-debug's `dapDebugServer.js` over TCP. Install it one of these ways; the first and last are auto-discovered by `resolveJsDebugServerPath()` in `packages/coding-agent/src/dap/config.ts`. (Don't try `npm i -g js-debug-adapter` — it 404s; `js-debug-adapter` is the oms adapter id, not an npm package.)
   - Release tarball, extracted so `dapDebugServer.js` lands at `~/.local/opt/js-debug/src/dapDebugServer.js`:
     ```sh
     curl -sL -o js-debug-dap.tar.gz \
@@ -348,7 +348,7 @@ Example `.omp/dap.json`:
     Replace `v1.117.0` with the latest tag from the [releases page](https://github.com/microsoft/vscode-js-debug/releases).
   - Any other location via `JS_DEBUG_DAP_SERVER=<path-to-dapDebugServer.js>`.
   - Neovim users with Mason: `:MasonInstall js-debug-adapter` → discovered at `~/.local/share/nvim/mason/packages/js-debug-adapter/js-debug/src/dapDebugServer.js`.
-- The adapter runs under `node` if on `PATH`, otherwise under the omp host (Bun); `resolveDefaultJsDebugAdapter()` falls back to `process.execPath`, so a Bun-only setup is supported.
+- The adapter runs under `node` if on `PATH`, otherwise under the oms host (Bun); `resolveDefaultJsDebugAdapter()` falls back to `process.execPath`, so a Bun-only setup is supported.
 - `configurationDone` is sent automatically during root and child launch/attach handshakes and lazily before later requests if the initial handshake did not complete.
 - `startDebugging` reverse requests create recursive child sessions on the same TCP server; a stopped child becomes the target for thread-level actions.
 - `output` exposes the active session’s merged `output` event stream only; the tool does not distinguish stdout, stderr, and console categories.

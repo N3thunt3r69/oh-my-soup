@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { isCompiledBinary, logger, Snowflake, withTimeout, workerHostEntry } from "@oh-my-pi/pi-utils";
+import { isCompiledBinary, logger, Snowflake, withTimeout, workerHostEntry } from "@oh-my-soup/pi-utils";
 import type { Subprocess } from "bun";
 import type { Browser } from "puppeteer-core";
 import { ToolAbortError, ToolError } from "../tool-errors";
@@ -213,8 +213,8 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions,
 			if (err instanceof Error && err.name === "AbortError") throw err;
 			throw new ToolError(
 				autoStarted
-					? `omp browser relay is serving at ${cdpUrl} but its extension never connected. Install it with \`omp browser-relay install\` and check the toolbar badge shows "on".`
-					: `omp browser relay is not reachable at ${cdpUrl}. Start it with \`omp browser-relay\` (or check the endpoint), and make sure the OMP Browser Relay extension is loaded in Chrome.`,
+					? `oms browser relay is serving at ${cdpUrl} but its extension never connected. Install it with \`oms browser-relay install\` and check the toolbar badge shows "on".`
+					: `oms browser relay is not reachable at ${cdpUrl}. Start it with \`oms browser-relay\` (or check the endpoint), and make sure the OMS Browser Relay extension is loaded in Chrome.`,
 			);
 		}
 		const puppeteer = await loadPuppeteer();

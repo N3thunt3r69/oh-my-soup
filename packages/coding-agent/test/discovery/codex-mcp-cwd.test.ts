@@ -4,20 +4,20 @@
  * The Codex `config.toml` MCP importer in `packages/coding-agent/src/discovery/codex.ts`
  * used to copy only `command`/`args`/`url` into the returned `MCPServer`, dropping
  * `cwd` and leaving relative `command` values verbatim. MCP stdio spawning then
- * resolved those relative values against the OMP session cwd, so the bundled Codex
+ * resolved those relative values against the OMS session cwd, so the bundled Codex
  * Computer Use server (a relative `command` with `cwd = "."`) failed with ENOENT.
  *
  * The importer now roots relative `command`/`cwd` at the config directory via
- * `resolvePluginStdioPaths`, matching the claude-plugins/omp-plugins fix in #5481.
+ * `resolvePluginStdioPaths`, matching the claude-plugins/oms-plugins fix in #5481.
  */
 import { afterEach, beforeEach, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { MCPServer } from "@oh-my-pi/pi-coding-agent/capability/mcp";
-import { mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
-import { loadCapability } from "@oh-my-pi/pi-coding-agent/discovery";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import type { MCPServer } from "@oh-my-soup/pi-coding-agent/capability/mcp";
+import { mcpCapability } from "@oh-my-soup/pi-coding-agent/capability/mcp";
+import { loadCapability } from "@oh-my-soup/pi-coding-agent/discovery";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 let tempHome = "";
 let tempCwd = "";
@@ -25,8 +25,8 @@ let originalHome: string | undefined;
 
 beforeEach(async () => {
 	originalHome = process.env.HOME;
-	tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-codex-mcp-home-"));
-	tempCwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-codex-mcp-cwd-"));
+	tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "oms-codex-mcp-home-"));
+	tempCwd = await fs.mkdtemp(path.join(os.tmpdir(), "oms-codex-mcp-cwd-"));
 	process.env.HOME = tempHome;
 	vi.spyOn(os, "homedir").mockReturnValue(tempHome);
 	await fs.mkdir(path.join(tempHome, ".codex"), { recursive: true });

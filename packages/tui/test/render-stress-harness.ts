@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { ProcessTerminal } from "@oh-my-pi/pi-tui/terminal";
+import { ProcessTerminal } from "@oh-my-soup/pi-tui/terminal";
 import {
 	type Component,
 	CURSOR_MARKER,
@@ -12,7 +12,7 @@ import {
 	type OverlayHandle,
 	type OverlayOptions,
 	TUI,
-} from "@oh-my-pi/pi-tui/tui";
+} from "@oh-my-soup/pi-tui/tui";
 import {
 	Ellipsis,
 	extractSegments,
@@ -21,8 +21,8 @@ import {
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
-} from "@oh-my-pi/pi-tui/utils";
-import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-tui/utils";
+import { setTerminalHeadless } from "@oh-my-soup/pi-utils";
 import { StressRenderScheduler } from "./render-stress-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
 
@@ -3568,7 +3568,7 @@ type ScenarioTemplate = Omit<
 function writeReplayLog(scenario: Scenario, operations: readonly OperationLogEntry[]): string {
 	const filePath = path.join(
 		os.tmpdir(),
-		`omp-tui-stress-${scenario.name}-${(scenario.seed >>> 0).toString(16)}-${Date.now().toString(36)}.json`,
+		`oms-tui-stress-${scenario.name}-${(scenario.seed >>> 0).toString(16)}-${Date.now().toString(36)}.json`,
 	);
 	fs.writeFileSync(filePath, JSON.stringify(operations, null, 2));
 	return filePath;

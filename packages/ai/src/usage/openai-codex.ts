@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { toNumber } from "@oh-my-pi/pi-catalog/utils";
+import { toNumber } from "@oh-my-soup/pi-catalog/utils";
 import type {
 	CredentialRankingContext,
 	CredentialRankingStrategy,

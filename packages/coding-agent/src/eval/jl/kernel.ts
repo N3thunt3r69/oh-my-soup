@@ -8,7 +8,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $flag, Snowflake } from "@oh-my-pi/pi-utils";
+import { $flag, Snowflake } from "@oh-my-soup/pi-utils";
 import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelStartOptions } from "../kernel-base";
@@ -32,7 +32,7 @@ const TRACE_IPC = $flag("PI_JULIA_IPC_TRACE");
 
 // Cache the runner script on disk so the subprocess loads it normally. Cached
 // per script hash so installs don't race across versions.
-const RUNNER_CACHE_DIR = path.join(os.tmpdir(), "omp-julia-runner");
+const RUNNER_CACHE_DIR = path.join(os.tmpdir(), "oms-julia-runner");
 let RUNNER_SCRIPT_PATH: string | null = null;
 
 async function ensureRunnerScript(): Promise<string> {
@@ -222,8 +222,8 @@ function buildInitScript(cwd: string, env?: Record<string, string | undefined>):
 		if (value !== undefined) envPayload[key] = value;
 	}
 	const lines = [
-		`__omp_init_cwd = String(Base64.base64decode("${Buffer.from(cwd).toString("base64")}"))`,
-		"try cd(__omp_init_cwd) catch; end",
+		`__oms_init_cwd = String(Base64.base64decode("${Buffer.from(cwd).toString("base64")}"))`,
+		"try cd(__oms_init_cwd) catch; end",
 	];
 	for (const key in envPayload) {
 		const k_b64 = Buffer.from(key).toString("base64");
@@ -231,6 +231,6 @@ function buildInitScript(cwd: string, env?: Record<string, string | undefined>):
 		lines.push(`ENV[String(Base64.base64decode("${k_b64}"))] = String(Base64.base64decode("${v_b64}"))`);
 	}
 	// Avoid modifying LOAD_PATH if not necessary, but if needed, prepend cwd
-	lines.push("if !(__omp_init_cwd in LOAD_PATH); pushfirst!(LOAD_PATH, __omp_init_cwd); end");
+	lines.push("if !(__oms_init_cwd in LOAD_PATH); pushfirst!(LOAD_PATH, __oms_init_cwd); end");
 	return lines.join("\n");
 }

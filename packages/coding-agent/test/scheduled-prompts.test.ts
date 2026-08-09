@@ -9,12 +9,12 @@ import {
 	SCHEDULED_PROMPTS_FILENAME,
 	type ScheduledPromptJob,
 	ScheduledPromptStore,
-} from "@oh-my-pi/pi-coding-agent/session/scheduled-prompts";
+} from "@oh-my-soup/pi-coding-agent/session/scheduled-prompts";
 
 const cleanup: string[] = [];
 
 function makeStore(): { store: ScheduledPromptStore; file: string } {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-scheduled-prompts-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-scheduled-prompts-"));
 	cleanup.push(dir);
 	const file = path.join(dir, SCHEDULED_PROMPTS_FILENAME);
 	return { store: new ScheduledPromptStore(file), file };

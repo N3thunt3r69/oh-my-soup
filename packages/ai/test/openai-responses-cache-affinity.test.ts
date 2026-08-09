@@ -2,18 +2,18 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	type AzureOpenAIResponsesOptions,
 	streamAzureOpenAIResponses,
-} from "@oh-my-pi/pi-ai/providers/azure-openai-responses";
+} from "@oh-my-soup/pi-ai/providers/azure-openai-responses";
 import {
 	buildParams,
 	type OpenAIResponsesOptions,
 	streamOpenAIResponses,
-} from "@oh-my-pi/pi-ai/providers/openai-responses";
-import { stream as streamModel, streamSimple } from "@oh-my-pi/pi-ai/stream";
-import type { Context, FetchImpl, Model, ProviderSessionState, SimpleStreamOptions } from "@oh-my-pi/pi-ai/types";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { buildOpenAIResponsesCompat } from "@oh-my-pi/pi-catalog/compat/openai";
+} from "@oh-my-soup/pi-ai/providers/openai-responses";
+import { stream as streamModel, streamSimple } from "@oh-my-soup/pi-ai/stream";
+import type { Context, FetchImpl, Model, ProviderSessionState, SimpleStreamOptions } from "@oh-my-soup/pi-ai/types";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
+import { buildOpenAIResponsesCompat } from "@oh-my-soup/pi-catalog/compat/openai";
 
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
 import { withEnv } from "./helpers";
 
 const model = getBundledModel("openai", "gpt-5-mini") as Model<"openai-responses">;

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import type { Api, Model } from "@oh-my-soup/pi-ai";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
+import { getBundledModels } from "@oh-my-soup/pi-catalog/models";
 import {
 	modelLacksWebpSupport,
 	normalizeModelContextImages,
 	webpExclusionForModel,
-} from "@oh-my-pi/pi-coding-agent/utils/image-loading";
+} from "@oh-my-soup/pi-coding-agent/utils/image-loading";
 
 // 1x1 red PNG seed, upscaled + re-encoded as WebP at test time so no binary
 // fixture is checked in. Bun.Image sniffs format from bytes.
@@ -77,7 +77,7 @@ describe("modelLacksWebpSupport", () => {
 		expect(modelLacksWebpSupport(undefined)).toBe(false);
 	});
 
-	test("webpExclusionForModel yields true|undefined so the OMP_NO_WEBP fallback survives", () => {
+	test("webpExclusionForModel yields true|undefined so the OMS_NO_WEBP fallback survives", () => {
 		// `true` forces exclusion for Ollama...
 		expect(webpExclusionForModel({ provider: "ollama", api: "openai-responses" })).toBe(true);
 		// ...but a capable model returns `undefined` (NOT `false`), so resizeImage's
@@ -87,15 +87,15 @@ describe("modelLacksWebpSupport", () => {
 });
 
 describe("normalizeModelContextImages model-aware WebP exclusion", () => {
-	const prior = Bun.env.OMP_NO_WEBP;
+	const prior = Bun.env.OMS_NO_WEBP;
 
 	beforeEach(() => {
-		delete (Bun.env as Record<string, string | undefined>).OMP_NO_WEBP;
+		delete (Bun.env as Record<string, string | undefined>).OMS_NO_WEBP;
 	});
 
 	afterEach(() => {
-		if (prior === undefined) delete (Bun.env as Record<string, string | undefined>).OMP_NO_WEBP;
-		else Bun.env.OMP_NO_WEBP = prior;
+		if (prior === undefined) delete (Bun.env as Record<string, string | undefined>).OMS_NO_WEBP;
+		else Bun.env.OMS_NO_WEBP = prior;
 	});
 
 	test("re-encodes a WebP image out of WebP for an Ollama-family model", async () => {
@@ -136,7 +136,7 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		expect(["image/png", "image/jpeg"]).toContain(mime);
 	});
 
-	test("keeps WebP for a WebP-capable model when OMP_NO_WEBP is unset", async () => {
+	test("keeps WebP for a WebP-capable model when OMS_NO_WEBP is unset", async () => {
 		const [anthropic] = getBundledModels("anthropic");
 		expect(anthropic).toBeDefined();
 		const webp = { type: "image" as const, data: await makeRedWebP(200, 200), mimeType: "image/webp" };

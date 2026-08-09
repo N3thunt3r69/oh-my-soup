@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
-import { type Component, TUI } from "@oh-my-pi/pi-tui";
-import { Markdown, type MarkdownTheme } from "@oh-my-pi/pi-tui/components/markdown";
+import { TranscriptContainer } from "@oh-my-soup/pi-coding-agent/modes/components/transcript-container";
+import { type Component, TUI } from "@oh-my-soup/pi-tui";
+import { Markdown, type MarkdownTheme } from "@oh-my-soup/pi-tui/components/markdown";
 import { StressRenderScheduler } from "../../tui/test/render-stress-scheduler";
 import { defaultMarkdownTheme } from "../../tui/test/test-themes.js";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";

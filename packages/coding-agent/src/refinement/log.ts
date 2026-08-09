@@ -7,7 +7,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { parseJsonlLenient } from "@oh-my-pi/pi-utils";
+import { parseJsonlLenient } from "@oh-my-soup/pi-utils";
 import { getRefinementLogPath, type RefinementStorePaths, readFileOrNull } from "./backends";
 import { isRefinementLogEntry, type RefinementLogEntry } from "./types";
 

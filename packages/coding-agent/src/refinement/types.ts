@@ -2,17 +2,17 @@
  * /refine continual-harness types.
  *
  * A refinement pass reviews the recent trajectory and emits structured CRUD
- * ops over four entry kinds, each backed by an EXISTING omp store:
+ * ops over four entry kinds, each backed by an EXISTING oms store:
  *
- * - promptNote       -> project supplemental instructions (`.omp/AGENTS.md` managed block)
+ * - promptNote       -> project supplemental instructions (`.oms/AGENTS.md` managed block)
  * - memory           -> local memories learned-lessons file (`learned.md`)
- * - skillDescription -> isolated managed skill metadata (`~/.omp/agent/managed-skills/<name>/SKILL.md`)
+ * - skillDescription -> isolated managed skill metadata (`~/.oms/agent/managed-skills/<name>/SKILL.md`)
  * - subagentSpec     -> refinement state store (`<state>/subagent-specs.json`)
  *
  * Every applied pass is appended to `<state>/refinements.jsonl` with enough
  * before-state to reverse it losslessly (`/refine rollback <id>`).
  */
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 
 export type RefinementKind = "promptNote" | "memory" | "skillDescription" | "subagentSpec";
 export type RefinementAction = "add" | "update" | "remove";

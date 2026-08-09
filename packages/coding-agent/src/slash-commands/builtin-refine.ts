@@ -5,7 +5,7 @@
  * `/refine [instructions]` runs one refiner pass; `/refine log` lists passes;
  * `/refine rollback <id>` reverse-applies a logged pass.
  */
-import { serializeConversation } from "@oh-my-pi/pi-agent-core/compaction";
+import { serializeConversation } from "@oh-my-soup/pi-agent-core/compaction";
 import {
 	formatRefinementLog,
 	loadRefinementLog,

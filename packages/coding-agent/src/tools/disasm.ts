@@ -1,4 +1,4 @@
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 import type {
 	AgentTool,
 	AgentToolContext,
@@ -6,10 +6,10 @@ import type {
 	AgentToolUpdateCallback,
 	RenderResultOptions,
 	ToolApprovalDecision,
-} from "@oh-my-pi/pi-agent-core";
-import type { ToolExample } from "@oh-my-pi/pi-ai";
-import { type Component, Text } from "@oh-my-pi/pi-tui";
-import { prompt } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-agent-core";
+import type { ToolExample } from "@oh-my-soup/pi-ai";
+import { type Component, Text } from "@oh-my-soup/pi-tui";
+import { prompt } from "@oh-my-soup/pi-utils";
 import {
 	createDisassemblerAdapter,
 	type DisassemblerAdapter,

@@ -8,7 +8,7 @@ skill descriptions, and subagent specs that lets the agent improve reusable
 behavior outside the token history.
 
 Continual harness components:
-- promptNote: supplemental prompt notes stored in the project's `.omp/AGENTS.md`. The base system prompt is immutable and MUST NOT be rewritten; ops targeting it are refused.
+- promptNote: supplemental prompt notes stored in the project's `.oms/AGENTS.md`. The base system prompt is immutable and MUST NOT be rewritten; ops targeting it are refused.
 - memory: durable facts, decisions, failures, preferences, and outcomes, stored as learned lessons the agent re-reads in future sessions.
 - skillDescription: metadata of an isolated managed skill. `title` is the one-line description of when to use the skill; `content` is the SKILL.md body in markdown (no frontmatter). Adds require both.
 - subagentSpec: reusable delegation specs usable as task templates. `id` is the spec name, `title` is a one-line description of when to delegate to it, `content` is the subagent prompt, and `model` optionally pins a preferred model.

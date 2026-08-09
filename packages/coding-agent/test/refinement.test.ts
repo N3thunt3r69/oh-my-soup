@@ -19,7 +19,7 @@ let root: string;
 let paths: RefinementStorePaths;
 
 beforeEach(async () => {
-	root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-refine-"));
+	root = await fs.mkdtemp(path.join(os.tmpdir(), "oms-refine-"));
 	paths = { cwd: path.join(root, "project"), agentDir: path.join(root, "agent") };
 	await fs.mkdir(paths.cwd, { recursive: true });
 });
@@ -49,7 +49,7 @@ describe("refinement op application", () => {
 		expect(applied[0].applied).toBe(true);
 		expect(applied[0].id).toBe("always-run-bun");
 		const text = await readOrNull(getPromptNotesPath(paths));
-		expect(text).toContain("omp-refine:notes:begin");
+		expect(text).toContain("oms-refine:notes:begin");
 		expect(text).toContain("### Always run bun");
 		expect(text).toContain("Use bun, not npm.");
 	});
@@ -70,7 +70,7 @@ describe("refinement op application", () => {
 		await applyRefinementOps(paths, [{ action: "remove", kind: "promptNote", id: "note" }]);
 		text = await readOrNull(notesPath);
 		expect(text).toContain("Hand-written guidance.");
-		expect(text).not.toContain("omp-refine:notes:begin");
+		expect(text).not.toContain("oms-refine:notes:begin");
 	});
 
 	it("refuses ops targeting the base system prompt", async () => {

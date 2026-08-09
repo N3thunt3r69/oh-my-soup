@@ -7,7 +7,7 @@
  * provider-facing compatibility wrapper and model/provider gating.
  */
 
-import { isDeepseekModelIdOrName } from "@oh-my-pi/pi-catalog/identity";
+import { isDeepseekModelIdOrName } from "@oh-my-soup/pi-catalog/identity";
 
 import { createInbandScanner } from "../dialect/factory";
 import { ThinkingInbandScanner } from "../dialect/thinking";

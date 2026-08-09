@@ -10,7 +10,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-soup/pi-utils";
 import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelStartOptions } from "../kernel-base";
@@ -40,7 +40,7 @@ const TRACE_IPC = $flag("PI_PYTHON_IPC_TRACE");
 
 // Cache the runner script on disk so the subprocess loads it normally. Cached
 // per script hash so installs don't race across versions.
-const RUNNER_CACHE_DIR = path.join(os.tmpdir(), "omp-python-runner");
+const RUNNER_CACHE_DIR = path.join(os.tmpdir(), "oms-python-runner");
 let RUNNER_SCRIPT_PATH: string | null = null;
 
 async function ensureRunnerScript(): Promise<string> {
@@ -226,10 +226,10 @@ function buildInitScript(cwd: string, env?: Record<string, string | undefined>):
 	const envPayload = Object.fromEntries(envEntries);
 	return [
 		"import os, sys",
-		`__omp_cwd = ${JSON.stringify(cwd)}`,
-		"os.chdir(__omp_cwd)",
-		`__omp_env = ${JSON.stringify(envPayload)}`,
-		"for __omp_key, __omp_val in __omp_env.items():\n    os.environ[__omp_key] = __omp_val",
-		"if __omp_cwd not in sys.path:\n    sys.path.insert(0, __omp_cwd)",
+		`__oms_cwd = ${JSON.stringify(cwd)}`,
+		"os.chdir(__oms_cwd)",
+		`__oms_env = ${JSON.stringify(envPayload)}`,
+		"for __oms_key, __oms_val in __oms_env.items():\n    os.environ[__oms_key] = __oms_val",
+		"if __oms_cwd not in sys.path:\n    sys.path.insert(0, __oms_cwd)",
 	].join("\n");
 }

@@ -10,11 +10,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { type } from "@oh-my-pi/omptype";
-import { usageReportSchema } from "@oh-my-pi/pi-ai";
-import { usageResponseSchema } from "@oh-my-pi/pi-ai/auth-broker/wire-schemas";
+import { type } from "@oh-my-soup/omstype";
+import { usageReportSchema } from "@oh-my-soup/pi-ai";
+import { usageResponseSchema } from "@oh-my-soup/pi-ai/auth-broker/wire-schemas";
 
-const DISCLAIMER = "OMP-observed spend only; OpenCode usage outside OMP is not included.";
+const DISCLAIMER = "OMS-observed spend only; OpenCode usage outside OMS is not included.";
 
 function reportWithNotes() {
 	return {

@@ -6,9 +6,9 @@ import {
 	type GoalGateExec,
 	type GoalGateExecResult,
 	runGoalGates,
-} from "@oh-my-pi/pi-coding-agent/goals/gates";
-import { GoalRuntime, type GoalRuntimeHost } from "@oh-my-pi/pi-coding-agent/goals/runtime";
-import type { GoalModeState, GoalTokenUsage } from "@oh-my-pi/pi-coding-agent/goals/state";
+} from "@oh-my-soup/pi-coding-agent/goals/gates";
+import { GoalRuntime, type GoalRuntimeHost } from "@oh-my-soup/pi-coding-agent/goals/runtime";
+import type { GoalModeState, GoalTokenUsage } from "@oh-my-soup/pi-coding-agent/goals/state";
 
 function execResult(overrides: Partial<GoalGateExecResult> = {}): GoalGateExecResult {
 	return { status: 0, signal: null, stdout: "", stderr: "", ...overrides };

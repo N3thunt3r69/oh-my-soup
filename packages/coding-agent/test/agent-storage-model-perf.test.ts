@@ -1,10 +1,10 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { createSubagentSettings } from "@oh-my-pi/pi-coding-agent/task/executor";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { AgentStorage } from "@oh-my-soup/pi-coding-agent/session/agent-storage";
+import { createSubagentSettings } from "@oh-my-soup/pi-coding-agent/task/executor";
+import { TempDir } from "@oh-my-soup/pi-utils";
 
 describe("AgentStorage model perf aggregates", () => {
 	let tempDir: TempDir;
@@ -20,7 +20,7 @@ describe("AgentStorage model perf aggregates", () => {
 	});
 
 	async function openStorage(): Promise<AgentStorage> {
-		tempDir = TempDir.createSync("@omp-agent-storage-perf-");
+		tempDir = TempDir.createSync("@oms-agent-storage-perf-");
 		return AgentStorage.open(path.join(tempDir.path(), "agent.db"));
 	}
 
@@ -41,7 +41,7 @@ describe("AgentStorage model perf aggregates", () => {
 	});
 
 	it("records task subagent samples in the shared model performance aggregate", async () => {
-		tempDir = TempDir.createSync("@omp-subagent-perf-");
+		tempDir = TempDir.createSync("@oms-subagent-perf-");
 		const parent = await Settings.loadIsolated({ cwd: tempDir.path(), agentDir: tempDir.path() });
 		const subagent = createSubagentSettings(parent);
 
@@ -115,7 +115,7 @@ describe("AgentStorage model perf aggregates", () => {
 		expect(storage.getModelPerf().get("openai/gpt-5")?.tps).toBeCloseTo(250, 5);
 	});
 
-	it("backfills perf aggregates from an omp stats database, excluding errored and stale turns", async () => {
+	it("backfills perf aggregates from an oms stats database, excluding errored and stale turns", async () => {
 		const storage = await openStorage();
 
 		// Minimal stats.db fixture: only the columns the backfill query reads.

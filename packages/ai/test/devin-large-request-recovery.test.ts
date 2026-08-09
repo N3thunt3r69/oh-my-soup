@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { create, toBinary } from "@bufbuild/protobuf";
-import * as AIError from "@oh-my-pi/pi-ai/error";
-import { streamDevin } from "@oh-my-pi/pi-ai/providers/devin";
-import type { Context, Model } from "@oh-my-pi/pi-ai/types";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { GetChatMessageResponseSchema } from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/api_server_pb/api_server_pb";
-import { GetUserJwtResponseSchema } from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/auth_pb/auth_pb";
+import * as AIError from "@oh-my-soup/pi-ai/error";
+import { streamDevin } from "@oh-my-soup/pi-ai/providers/devin";
+import type { Context, Model } from "@oh-my-soup/pi-ai/types";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
+import { GetChatMessageResponseSchema } from "@oh-my-soup/pi-catalog/discovery/devin-gen/exa/api_server_pb/api_server_pb";
+import { GetUserJwtResponseSchema } from "@oh-my-soup/pi-catalog/discovery/devin-gen/exa/auth_pb/auth_pb";
 
 const CONNECT_END_STREAM_FLAG = 0x02;
 const LARGE_TOOL_RESULT_BYTES = 160 * 1024;

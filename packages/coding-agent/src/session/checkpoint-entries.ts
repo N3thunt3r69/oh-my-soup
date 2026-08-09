@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
-import { stringProperty } from "@oh-my-pi/pi-utils";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import type { ImageContent, TextContent } from "@oh-my-soup/pi-ai";
+import { stringProperty } from "@oh-my-soup/pi-utils";
 import type { CompletedRewindState } from "../tools/checkpoint";
 import { writeDeviceDispatch } from "../tools/resolve";
 import type { SessionEntry } from "./session-entries";

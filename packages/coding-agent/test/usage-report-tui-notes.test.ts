@@ -15,9 +15,9 @@
 
 import { beforeAll, describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
-import type { UsageReport } from "@oh-my-pi/pi-ai";
-import { renderUsageReports } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { UsageReport } from "@oh-my-soup/pi-ai";
+import { renderUsageReports } from "@oh-my-soup/pi-coding-agent/modes/controllers/command-controller";
+import { initTheme, theme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 
 const HOUR = 3_600_000;
 
@@ -49,7 +49,7 @@ function report(provider: string, email: string, limits: UsageReport["limits"], 
 
 describe("renderUsageReports (#3268 TUI aggregate)", () => {
 	it("renders provider-wide UsageReport.notes exactly once for multiple accounts", () => {
-		const disclaimer = "OMP-observed spend only; OpenCode usage outside OMP is not included.";
+		const disclaimer = "OMS-observed spend only; OpenCode usage outside OMS is not included.";
 		const reports: UsageReport[] = [
 			report(
 				"opencode-go",

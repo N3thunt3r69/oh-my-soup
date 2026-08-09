@@ -1,4 +1,4 @@
-import { LRUCache } from "@oh-my-pi/pi-utils/lru";
+import { LRUCache } from "@oh-my-soup/pi-utils/lru";
 import {
 	Lexer,
 	Marked,
@@ -6,7 +6,7 @@ import {
 	Tokenizer,
 	type TokenizerAndRendererExtension,
 	type Tokens,
-} from "@oh-my-pi/pi-utils/marked";
+} from "@oh-my-soup/pi-utils/marked";
 import { latexToBlock } from "../latex-block";
 import { inlineMathSpanEnd, isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import type { SymbolTheme } from "../symbols";

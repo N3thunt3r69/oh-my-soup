@@ -77,7 +77,7 @@ function readLaunchEnv(): ReadonlyMap<string, string> | undefined {
 }
 
 const launchEnvValues = readLaunchEnv();
-const projectEnvNamesLoadedByOmp = new Set<string>();
+const projectEnvNamesLoadedByOms = new Set<string>();
 
 function expandDotenvValues(values: Record<string, string>, env: Record<string, string>): Record<string, string> {
 	const expanded: Record<string, string> = {};
@@ -125,9 +125,9 @@ export function filterChildShellEnv(
 			}
 			continue;
 		}
-		if (launchEnvValues || projectEnvNamesLoadedByOmp.has(key)) {
+		if (launchEnvValues || projectEnvNamesLoadedByOms.has(key)) {
 			// Strong provenance: the launch environment is known and this name is
-			// absent from it, or OMP itself injected the value — either way it came
+			// absent from it, or OMS itself injected the value — either way it came
 			// from a project dotenv file, not the parent shell.
 			delete result[key];
 		} else if (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key]) {
@@ -169,7 +169,7 @@ function parseEnvLine(line: string): { key: string; value: string } | undefined 
 /**
  * Parses a .env file synchronously into key-value string pairs using
  * {@link parseEnvLine} for Bun-compatible line semantics, then mirrors valid
- * `OMP_` variables to their `PI_` aliases.
+ * `OMS_` variables to their `PI_` aliases.
  */
 export function parseEnvFile(filePath: string): Record<string, string> {
 	const result: Record<string, string> = {};
@@ -183,9 +183,9 @@ export function parseEnvFile(filePath: string): Record<string, string> {
 		// File doesn't exist or can't be read - return empty result
 	}
 
-	// OMP_ overrides PI_
+	// OMS_ overrides PI_
 	for (const k in result) {
-		if (k.startsWith("OMP_")) {
+		if (k.startsWith("OMS_")) {
 			result[`PI_${k.slice(4)}`] = result[k];
 		}
 	}
@@ -210,7 +210,7 @@ for (const file of [projectEnv, agentEnv, piEnv, homeEnv]) {
 	for (const key in file) {
 		if (!isMacosMallocStackLoggingEnvName(key) && !Bun.env[key]) {
 			Bun.env[key] = file[key];
-			if (file === projectEnv) projectEnvNamesLoadedByOmp.add(key);
+			if (file === projectEnv) projectEnvNamesLoadedByOms.add(key);
 		}
 	}
 }
@@ -225,7 +225,7 @@ refreshDirsFromEnv();
 /**
  * Intentional re-export of Bun.env.
  *
- * All users should import this env module (import { $env } from "@oh-my-pi/pi-utils")
+ * All users should import this env module (import { $env } from "@oh-my-soup/pi-utils")
  * before using environment variables. This ensures that .env files have been loaded and
  * overrides (project, home) have been applied, so $env always reflects the correct values.
  */
@@ -352,7 +352,7 @@ export function setInteractiveHost(interactive: boolean): boolean {
  * history.db, stats.db).
  *
  * Interactive hosts tolerate a longer synchronous wait on lock contention
- * (SQLITE_BUSY during WAL recovery/checkpoint — see oh-my-pi#2421): the
+ * (SQLITE_BUSY during WAL recovery/checkpoint — see oh-my-soup#2421): the
  * operator sees a brief freeze and the statement eventually completes.
  * Headless hosts (print/RPC/ACP/eval/SDK) run a protocol on the same thread —
  * a multi-second synchronous busy-wait freezes their event loop and stalls

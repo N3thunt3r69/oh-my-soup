@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $which, type ChildProcess, postmortem, ptree } from "@oh-my-pi/pi-utils";
+import { $which, type ChildProcess, postmortem, ptree } from "@oh-my-soup/pi-utils";
 import type { DisassemblerTarget } from "../types";
 import { type BundledIdaBridgeRuntime, ensureBundledIdaBridge, resolveBundledIdaBridge } from "./bridge-runtime";
 import { IdaBridgeClient, type IdaBridgeClientInfo, resolveIdaBridgeUrl } from "./client";
@@ -13,7 +13,7 @@ const PROCESS_OUTPUT_TAIL_CHARS = 32 * 1024;
 const TARGET_POLL_INTERVAL_MS = 100;
 const IDB_EXTENSIONS = new Set([".i64", ".idb"]);
 // idapro normally prefers its user-global JSON config over IDADIR. Inject only
-// the one config symbol its package initializer consumes so an explicit OMP
+// the one config symbol its package initializer consumes so an explicit OMS
 // setting wins without mutating the user's global IDA configuration.
 const IDAPRO_CONFIG_BOOTSTRAP = [
 	"import os,runpy,sys,types",
@@ -122,7 +122,7 @@ export async function openIdaTarget(
 		} else if (request.outputDb?.trim()) {
 			databasePath = resolveOutputDatabase(request.outputDb, runtime.cwd);
 		} else {
-			temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-disasm-"));
+			temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-disasm-"));
 			databasePath = path.join(temporaryDir, "database.i64");
 		}
 		const prebuiltDatabase = !inputIsDatabase && runtime.batchAnalyzer !== undefined;

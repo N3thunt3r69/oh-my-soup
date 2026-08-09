@@ -6,8 +6,8 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { Process } from "@oh-my-pi/pi-natives";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Process } from "@oh-my-soup/pi-natives";
+import { TempDir } from "@oh-my-soup/pi-utils";
 import { startDaemonBrokerFromEnvironment } from "../../src/launch/broker";
 import { createDaemonBrokerClient, type DaemonBrokerClient } from "../../src/launch/client";
 import {
@@ -61,7 +61,7 @@ async function waitForState(
 
 describe("daemon broker restart settling", () => {
 	it("does not re-settle a restarting detached daemon on ops, keeping stop authoritative", async () => {
-		using tempDir = TempDir.createSync("@omp-launch-restart-");
+		using tempDir = TempDir.createSync("@oms-launch-restart-");
 		const projectDir = path.join(tempDir.path(), "project");
 		const runtimeDir = path.join(tempDir.path(), "runtime");
 		await fs.mkdir(projectDir);
@@ -122,7 +122,7 @@ describe("daemon broker restart settling", () => {
 	}, 20_000);
 
 	it("settles a recovered detached daemon once across concurrent refreshes", async () => {
-		using tempDir = TempDir.createSync("@omp-launch-recovered-restart-");
+		using tempDir = TempDir.createSync("@oms-launch-recovered-restart-");
 		const projectDir = path.join(tempDir.path(), "project");
 		const runtimeDir = path.join(tempDir.path(), "runtime");
 		await fs.mkdir(projectDir);

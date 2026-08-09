@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { extractLeadingCdTarget } from "@oh-my-pi/pi-coding-agent/tools/shell-tokenize";
+import { extractLeadingCdTarget } from "@oh-my-soup/pi-coding-agent/tools/shell-tokenize";
 
 describe("extractLeadingCdTarget", () => {
 	it("extracts a bare cd target and returns the remainder", () => {

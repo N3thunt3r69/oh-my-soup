@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import * as ai from "@oh-my-pi/pi-ai";
-import { Effort, type Model } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { ThinkingLevel } from "@oh-my-soup/pi-agent-core";
+import * as ai from "@oh-my-soup/pi-ai";
+import { Effort, type Model } from "@oh-my-soup/pi-ai";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
+import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
 import {
 	classifyDifficulty,
 	parseDifficultyBucket,
 	parseDifficultyLevel,
-} from "@oh-my-pi/pi-coding-agent/auto-thinking/classifier";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+} from "@oh-my-soup/pi-coding-agent/auto-thinking/classifier";
+import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import {
 	AUTO_THINKING,
 	clampAutoThinkingEffort,
@@ -22,10 +22,10 @@ import {
 	parseThinkingLevel,
 	resolveProvisionalAutoLevel,
 	resolveTaskEffortLevel,
-} from "@oh-my-pi/pi-coding-agent/thinking";
-import type { TinyMemoryLocalModelKey } from "@oh-my-pi/pi-coding-agent/tiny/models";
-import { tinyModelClient } from "@oh-my-pi/pi-coding-agent/tiny/title-client";
-import { TempDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/thinking";
+import type { TinyMemoryLocalModelKey } from "@oh-my-soup/pi-coding-agent/tiny/models";
+import { tinyModelClient } from "@oh-my-soup/pi-coding-agent/tiny/title-client";
+import { TempDir } from "@oh-my-soup/pi-utils";
 
 describe("auto thinking classifier helpers", () => {
 	afterEach(() => {

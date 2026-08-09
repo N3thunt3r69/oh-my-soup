@@ -19,7 +19,7 @@ For packaged user-facing extension CLIs/features, see [`user-facing-packages.md`
 An extension is a TS/JS module exporting a default factory. Factories may initialize synchronously or return a promise:
 
 ```ts
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-soup/pi-coding-agent";
 
 export default function myExtension(pi: ExtensionAPI) {
   // register handlers/tools/commands/renderers
@@ -67,7 +67,7 @@ Important constraint from `loader.ts`:
 ## Quick start
 
 ```ts
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-soup/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
   const z = pi.zod;
@@ -132,8 +132,8 @@ In interactive mode, `input` handlers run before the built-in first-message auto
 Also exposed:
 
 - `pi.logger`
-- `pi.arktype` (the omptype `type(...)` schema builder)
-- `pi.zod` (Zod-compatible builder backed by omptype)
+- `pi.arktype` (the omstype `type(...)` schema builder)
+- `pi.zod` (Zod-compatible builder backed by omstype)
 - `pi.typebox` (legacy TypeBox-compatible shim)
 - `pi.pi` (package exports)
 
@@ -302,7 +302,7 @@ Current runtime note: `ExtensionRunner.emitResourcesDiscover(...)` is implemente
 
 ## Tool authoring details
 
-`registerTool` uses `ToolDefinition` from `types.ts`. Its `parameters` field accepts omptype schemas; the injected TypeBox compatibility shim remains available for legacy extensions.
+`registerTool` uses `ToolDefinition` from `types.ts`. Its `parameters` field accepts omstype schemas; the injected TypeBox compatibility shim remains available for legacy extensions.
 
 Current `execute` signature:
 
@@ -457,7 +457,7 @@ Used by interactive rendering when custom messages are displayed.
 ## Assistant thinking renderer
 
 ```ts
-import { Container, Text } from "@oh-my-pi/pi-tui";
+import { Container, Text } from "@oh-my-soup/pi-tui";
 
 pi.registerAssistantThinkingRenderer((context, theme) => {
   const container = new Container();

@@ -1,6 +1,6 @@
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Text } from "@oh-my-pi/pi-tui";
-import { sanitizeText } from "@oh-my-pi/pi-utils";
+import type { Component } from "@oh-my-soup/pi-tui";
+import { Text } from "@oh-my-soup/pi-tui";
+import { sanitizeText } from "@oh-my-soup/pi-utils";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
 import { framedBlock, renderStatusLine } from "../tui";

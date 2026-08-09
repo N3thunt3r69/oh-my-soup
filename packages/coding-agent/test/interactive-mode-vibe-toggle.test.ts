@@ -9,21 +9,21 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { type } from "@oh-my-pi/omptype";
-import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { normalizeCustomMessagePayload } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { FileSessionStorage, type WriteTextAtomicOptions } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-import { VIBE_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/vibe";
-import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { VibeSessionRegistry } from "@oh-my-pi/pi-coding-agent/vibe/runtime";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { type } from "@oh-my-soup/omstype";
+import { Agent, type AgentTool } from "@oh-my-soup/pi-agent-core";
+import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
+import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { InteractiveMode } from "@oh-my-soup/pi-coding-agent/modes/interactive-mode";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
+import { normalizeCustomMessagePayload } from "@oh-my-soup/pi-coding-agent/session/messages";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import { FileSessionStorage, type WriteTextAtomicOptions } from "@oh-my-soup/pi-coding-agent/session/session-storage";
+import { VIBE_TOOL_NAMES } from "@oh-my-soup/pi-coding-agent/tools/vibe";
+import { EventBus } from "@oh-my-soup/pi-coding-agent/utils/event-bus";
+import { VibeSessionRegistry } from "@oh-my-soup/pi-coding-agent/vibe/runtime";
+import { TempDir } from "@oh-my-soup/pi-utils";
 
 function stubTool(name: string): AgentTool {
 	return {

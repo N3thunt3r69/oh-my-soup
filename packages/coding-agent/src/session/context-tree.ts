@@ -2,7 +2,7 @@
  * Hierarchical context/usage tree for the `/context` command.
  *
  * Ported from prime-agent's context-tree: per node, `ownTokens` counts only
- * that agent's direct assistant usage. omp's SessionStats folds completed
+ * that agent's direct assistant usage. oms's SessionStats folds completed
  * `task` tool-result usage into the parent's totals (the equivalent of
  * prime's `child_usage_attributed` entries), so own usage deliberately walks
  * assistant messages instead — descendant attributions are excluded and own
@@ -15,8 +15,8 @@
  * unreadable child transcripts simply surface as zero-usage disk nodes.
  */
 
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { isRecord } from "@oh-my-pi/pi-utils";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import { isRecord } from "@oh-my-soup/pi-utils";
 import { type AgentRef, AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { registerPersistedSubagents } from "../registry/persisted-agents";
 import type { AgentSession } from "./agent-session";

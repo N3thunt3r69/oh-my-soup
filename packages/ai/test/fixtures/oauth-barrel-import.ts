@@ -2,14 +2,14 @@ import {
 	AnthropicOAuthFlow as RootAnthropicOAuthFlow,
 	loginAnthropic as rootLoginAnthropic,
 	refreshAnthropicToken as rootRefreshAnthropicToken,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-soup/pi-ai";
 import {
 	AnthropicOAuthFlow as OAuthAnthropicOAuthFlow,
 	loginAnthropic as oauthLoginAnthropic,
 	refreshAnthropicToken as oauthRefreshAnthropicToken,
-} from "@oh-my-pi/pi-ai/registry/oauth";
-import "@oh-my-pi/pi-ai/providers/anthropic";
-import "@oh-my-pi/pi-ai/auth-storage";
+} from "@oh-my-soup/pi-ai/registry/oauth";
+import "@oh-my-soup/pi-ai/providers/anthropic";
+import "@oh-my-soup/pi-ai/auth-storage";
 
 const publicExports = [
 	RootAnthropicOAuthFlow,

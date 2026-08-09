@@ -1,11 +1,11 @@
 import { beforeAll, describe, expect, it, type Mock, vi } from "bun:test";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { TreeSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
-import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import { type KeyId, matchesKey } from "@oh-my-pi/pi-tui";
+import type { ImageContent } from "@oh-my-soup/pi-ai";
+import { TreeSelectorComponent } from "@oh-my-soup/pi-coding-agent/modes/components/tree-selector";
+import { InputController } from "@oh-my-soup/pi-coding-agent/modes/controllers/input-controller";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import type { InteractiveModeContext } from "@oh-my-soup/pi-coding-agent/modes/types";
+import type { SessionTreeNode } from "@oh-my-soup/pi-coding-agent/session/session-entries";
+import { type KeyId, matchesKey } from "@oh-my-soup/pi-tui";
 import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with { type: "text" };
 
 type FakeEditor = {

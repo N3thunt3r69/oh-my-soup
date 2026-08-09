@@ -7,13 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { invalidateGithubCacheForBashCommand } from "@oh-my-pi/pi-coding-agent/tools/gh-cache-invalidation";
+import { invalidateGithubCacheForBashCommand } from "@oh-my-soup/pi-coding-agent/tools/gh-cache-invalidation";
 import {
 	getCached,
 	putCached,
 	resetForTests as resetCacheForTests,
-} from "@oh-my-pi/pi-coding-agent/tools/github-cache";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/tools/github-cache";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 const REPO = "owner/example";
 
@@ -80,18 +80,18 @@ let tempDir: string;
 let originalEnv: string | undefined;
 
 beforeEach(async () => {
-	originalEnv = process.env.OMP_GITHUB_CACHE_DB;
+	originalEnv = process.env.OMS_GITHUB_CACHE_DB;
 	tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "gh-cache-inv-"));
-	process.env.OMP_GITHUB_CACHE_DB = path.join(tempDir, "github-cache.db");
+	process.env.OMS_GITHUB_CACHE_DB = path.join(tempDir, "github-cache.db");
 	resetCacheForTests();
 });
 
 afterEach(async () => {
 	resetCacheForTests();
 	if (originalEnv === undefined) {
-		delete process.env.OMP_GITHUB_CACHE_DB;
+		delete process.env.OMS_GITHUB_CACHE_DB;
 	} else {
-		process.env.OMP_GITHUB_CACHE_DB = originalEnv;
+		process.env.OMS_GITHUB_CACHE_DB = originalEnv;
 	}
 	await removeWithRetries(tempDir);
 });

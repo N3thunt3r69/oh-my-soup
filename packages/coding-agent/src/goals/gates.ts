@@ -1,7 +1,7 @@
 /**
  * Goal quality gates: shell commands that must exit 0 before a goal may
  * complete. Ported from prime-agent's autonomous-mode gate loop (MIT),
- * adapted to omp's goal mode.
+ * adapted to oms's goal mode.
  *
  * On goal-continuation boundaries the gates run with bounded per-command
  * retries; a failing gate's tail output feeds the continuation prompt

@@ -1,12 +1,12 @@
 import {
 	type ObjectOpts,
-	Type as OmpType,
-	type TypeBuilder as OmpTypeBuilder,
+	Type as OmsType,
+	type TypeBuilder as OmsTypeBuilder,
 	type TUnsafe,
-} from "@oh-my-pi/omptype/typebox";
-import { upgradeJsonSchemaTo202012, validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema";
+} from "@oh-my-soup/omstype/typebox";
+import { upgradeJsonSchemaTo202012, validateJsonSchemaValue } from "@oh-my-soup/pi-ai/utils/schema";
 
-export * from "@oh-my-pi/omptype/typebox";
+export * from "@oh-my-soup/omstype/typebox";
 
 const VALIDATION_FAILURE = Symbol("pi.typebox.validationFailure");
 
@@ -72,7 +72,7 @@ const object = ((properties: Record<string, unknown>, opts?: ObjectOpts) => {
 			break;
 		}
 	}
-	if (!hasRawProperty) return OmpType.Object(properties as Parameters<typeof OmpType.Object>[0], opts);
+	if (!hasRawProperty) return OmsType.Object(properties as Parameters<typeof OmsType.Object>[0], opts);
 
 	const propertySchemas: Record<string, unknown> = {};
 	const required: string[] = [];
@@ -92,10 +92,10 @@ const object = ((properties: Record<string, unknown>, opts?: ObjectOpts) => {
 				: opts.additionalProperties;
 	}
 	return unsafe(document);
-}) as typeof OmpType.Object;
+}) as typeof OmsType.Object;
 
-export const Type: OmpTypeBuilder = { ...OmpType, Object: object, Unsafe: unsafe } as unknown as OmpTypeBuilder;
-export type TypeBuilder = OmpTypeBuilder;
+export const Type: OmsTypeBuilder = { ...OmsType, Object: object, Unsafe: unsafe } as unknown as OmsTypeBuilder;
+export type TypeBuilder = OmsTypeBuilder;
 
-const legacyTypeBox: { Type: OmpTypeBuilder } = { Type };
+const legacyTypeBox: { Type: OmsTypeBuilder } = { Type };
 export default legacyTypeBox;

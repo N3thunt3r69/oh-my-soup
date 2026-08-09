@@ -1,9 +1,9 @@
-import type { type as ArkType } from "@oh-my-pi/omptype";
-import type * as TypeBox from "@oh-my-pi/omptype/typebox";
-import type * as zod from "@oh-my-pi/omptype/zod";
-import type { ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
-import type { Component, TUI } from "@oh-my-pi/pi-tui";
-import type { logger as PiLogger } from "@oh-my-pi/pi-utils";
+import type { type as ArkType } from "@oh-my-soup/omstype";
+import type * as TypeBox from "@oh-my-soup/omstype/typebox";
+import type * as zod from "@oh-my-soup/omstype/zod";
+import type { ImageContent, Message, Model, TextContent } from "@oh-my-soup/pi-ai";
+import type { Component, TUI } from "@oh-my-soup/pi-tui";
+import type { logger as PiLogger } from "@oh-my-soup/pi-utils";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { EditToolDetails } from "../../edit";
 import type { ExecOptions, ExecResult } from "../../exec/exec";
@@ -584,9 +584,9 @@ export interface HookAPI {
 	logger: typeof PiLogger;
 	/** Injected TypeBox shim (legacy/compat — prefer `arktype`). */
 	typebox: typeof TypeBox;
-	/** Injected omptype schema builder for hooks. */
+	/** Injected omstype schema builder for hooks. */
 	arktype: typeof ArkType;
-	/** Injected Zod-compatible omptype builder for hooks. */
+	/** Injected Zod-compatible omstype builder for hooks. */
 	zod: typeof zod;
 	/** Injected pi-coding-agent exports */
 	pi: typeof PiCodingAgent;

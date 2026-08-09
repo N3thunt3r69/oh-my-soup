@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { gunzipSync } from "node:zlib";
-import { getConfigRootDir, ptree } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, ptree } from "@oh-my-soup/pi-utils";
 import bundleText from "./ida-bridge.bundle.txt" with { type: "text" };
 
 const BUNDLE_FORMAT = 1;
@@ -25,7 +25,7 @@ const IMPORT_PROBE = [
 	"import websocket",
 	"import websockets",
 	"import ida_bridge.server",
-	"print('omp-ida-bridge-ready')",
+	"print('oms-ida-bridge-ready')",
 ].join(";");
 
 interface EmbeddedBundle {
@@ -61,7 +61,7 @@ const bundle = parseBundle();
 const bundleDigest = crypto.createHash("sha256").update(bundleText.trim()).digest("hex");
 const runtimePreparations = new Map<string, Promise<void>>();
 
-/** Resolve OMP-owned ida-bridge source and a private environment for one Python interpreter. */
+/** Resolve OMS-owned ida-bridge source and a private environment for one Python interpreter. */
 export function resolveBundledIdaBridge(basePython: string): BundledIdaBridgeRuntime {
 	const canonicalPython = fs.realpathSync(basePython);
 	const stat = fs.statSync(canonicalPython);
@@ -163,12 +163,12 @@ function installBundledSource(): string {
 				`Source: ${bundle.repository}`,
 				`Revision: ${bundle.revision}`,
 				`License declared by upstream: ${bundle.license}`,
-				"Bundled by Oh My Pi for its managed IDA backend.",
+				"Bundled by Oh My Soup for its managed IDA backend.",
 				"",
 			].join("\n"),
 			"utf8",
 		);
-		writeJson(path.join(temporary, ".omp-source.json"), {
+		writeJson(path.join(temporary, ".oms-source.json"), {
 			format: BUNDLE_FORMAT,
 			revision: bundle.revision,
 			digest: bundleDigest,
@@ -183,7 +183,7 @@ function installBundledSource(): string {
 }
 
 function sourceMarkerMatches(directory: string): boolean {
-	const marker = readJson<Partial<SourceMarker>>(path.join(directory, ".omp-source.json"));
+	const marker = readJson<Partial<SourceMarker>>(path.join(directory, ".oms-source.json"));
 	return marker?.format === BUNDLE_FORMAT && marker.revision === bundle.revision && marker.digest === bundleDigest;
 }
 
@@ -199,7 +199,7 @@ async function prepareRuntime(
 	try {
 		await runChecked(
 			[runtime.basePython, "-m", "venv", "--system-site-packages", temporary],
-			`create OMP's private IDA Python environment with ${runtime.basePython}`,
+			`create OMS's private IDA Python environment with ${runtime.basePython}`,
 			env,
 			cwd,
 		);
@@ -217,11 +217,11 @@ async function prepareRuntime(
 				"--no-warn-script-location",
 				...DEPENDENCIES,
 			],
-			"provision OMP's bundled ida-bridge dependencies",
+			"provision OMS's bundled ida-bridge dependencies",
 			env,
 			cwd,
 		);
-		writeJson(path.join(temporary, ".omp-runtime.json"), runtimeMarker(runtime));
+		writeJson(path.join(temporary, ".oms-runtime.json"), runtimeMarker(runtime));
 		if (!runtimeMarkerMatches(runtime)) {
 			fs.rmSync(runtime.environmentDirectory, { recursive: true, force: true });
 			fs.renameSync(temporary, runtime.environmentDirectory);
@@ -231,7 +231,7 @@ async function prepareRuntime(
 	}
 	if (!(await probeRuntime(runtime.python, env, cwd))) {
 		fs.rmSync(runtime.environmentDirectory, { recursive: true, force: true });
-		throw new Error(`OMP's bundled ida-bridge environment failed its import check: ${runtime.python}`);
+		throw new Error(`OMS's bundled ida-bridge environment failed its import check: ${runtime.python}`);
 	}
 }
 
@@ -246,7 +246,7 @@ function runtimeMarker(runtime: BundledIdaBridgeRuntime): RuntimeMarker {
 
 function runtimeMarkerMatches(runtime: BundledIdaBridgeRuntime): boolean {
 	if (!fs.existsSync(runtime.python)) return false;
-	const marker = readJson<Partial<RuntimeMarker>>(path.join(runtime.environmentDirectory, ".omp-runtime.json"));
+	const marker = readJson<Partial<RuntimeMarker>>(path.join(runtime.environmentDirectory, ".oms-runtime.json"));
 	return (
 		marker?.format === RUNTIME_FORMAT &&
 		marker.fingerprint === runtime.fingerprint &&
@@ -257,7 +257,7 @@ function runtimeMarkerMatches(runtime: BundledIdaBridgeRuntime): boolean {
 
 async function probeRuntime(python: string, env: Record<string, string | undefined>, cwd: string): Promise<boolean> {
 	try {
-		await runChecked([python, "-c", IMPORT_PROBE], "validate OMP's bundled ida-bridge runtime", env, cwd);
+		await runChecked([python, "-c", IMPORT_PROBE], "validate OMS's bundled ida-bridge runtime", env, cwd);
 		return true;
 	} catch {
 		return false;

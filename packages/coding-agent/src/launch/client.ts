@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getGlobalDaemonRuntimeDir, isEexist, isEisdir, isEnoent, logger, postmortem } from "@oh-my-pi/pi-utils";
+import { getGlobalDaemonRuntimeDir, isEexist, isEisdir, isEnoent, logger, postmortem } from "@oh-my-soup/pi-utils";
 import { hostHasInheritableConsole } from "../eval/py/spawn-options";
 import { resolveWorkerSpawnCmd, workerEnvFromParent } from "../subprocess/worker-client";
 import { daemonBrokerEndpoint, daemonRuntimeDir } from "./paths";
@@ -505,7 +505,7 @@ export async function daemonClientForGlobal(service: string): Promise<DaemonBrok
 	);
 }
 
-/** Close every project and machine-global broker connection held by this omp process. */
+/** Close every project and machine-global broker connection held by this oms process. */
 export async function closeDaemonClients(): Promise<void> {
 	const pending = [...sharedClients.values()];
 	sharedClients.clear();
@@ -516,8 +516,8 @@ export async function closeDaemonClients(): Promise<void> {
 
 /** Exercise worker-host broker startup and authenticated RPC for distribution smoke tests. */
 export async function smokeTestDaemonBroker(): Promise<void> {
-	const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-daemon-smoke-project-"));
-	const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-daemon-smoke-run-"));
+	const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-daemon-smoke-project-"));
+	const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-daemon-smoke-run-"));
 	const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 	try {
 		const ping = await client.request({ op: "ping" });

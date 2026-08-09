@@ -10,7 +10,7 @@ import {
 	parseRestoreResult,
 	parseSnapshotResult,
 	snapshotPathIn,
-} from "@oh-my-pi/pi-coding-agent/eval/py/state-snapshot";
+} from "@oh-my-soup/pi-coding-agent/eval/py/state-snapshot";
 
 const MARKER = "__OMP_PY_KERNEL_STATE__";
 const OUT = "C:\\tmp\\artifacts\\py-kernel-snapshot\\kernel-state.dill";
@@ -61,7 +61,7 @@ describe("buildSnapshotCode", () => {
 	});
 
 	it("cleans up its helper from the namespace", () => {
-		expect(code).toContain("del _omp_snapshot_kernel_state");
+		expect(code).toContain("del _oms_snapshot_kernel_state");
 	});
 });
 
@@ -90,7 +90,7 @@ describe("buildRestoreCode", () => {
 	});
 
 	it("cleans up its helper from the namespace", () => {
-		expect(code).toContain("del _omp_restore_kernel_state");
+		expect(code).toContain("del _oms_restore_kernel_state");
 	});
 });
 

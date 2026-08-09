@@ -1,6 +1,6 @@
 import * as http2 from "node:http2";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 import { isKimiK3ModelId } from "../identity";
 import { bareModelId, parseGlmModel, semverGte } from "../identity/classify";
 import { getBundledModels } from "../models";
@@ -384,7 +384,7 @@ function pickModelDisplayName(model: CursorModelDetailsValue, fallbackId: string
  * Infers input modalities for Cursor models without a bundled reference.
  *
  * `GetUsableModels` carries no per-model modality metadata, so classification
- * falls back to the model family: families that are multimodal in OMP's own
+ * falls back to the model family: families that are multimodal in OMS's own
  * native catalogs accept images, everything else stays text-only. Mirrors
  * `inferInputFromGeminiId` in ./gemini.ts.
  */

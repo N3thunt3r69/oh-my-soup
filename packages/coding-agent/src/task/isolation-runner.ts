@@ -19,7 +19,7 @@
  * before mutation); steps 2 and 3 are per-spawn.
  */
 import * as path from "node:path";
-import type * as natives from "@oh-my-pi/pi-natives";
+import type * as natives from "@oh-my-soup/pi-natives";
 import { AgentRegistry } from "../registry/agent-registry";
 import type { ToolSession } from "../tools";
 import { generateCommitMessage } from "../utils/commit-message-generator";
@@ -141,7 +141,7 @@ async function writeIsolationPatch(
 /**
  * Run a subagent inside an isolation worktree and capture its changes.
  *
- * Branch mode: on success, commits the diff onto `omp/task/${agentId}` and
+ * Branch mode: on success, commits the diff onto `oms/task/${agentId}` and
  * returns `branchName` + `nestedPatches`. On commit failure the branch is
  * deleted, the still-live isolation diff is written to `${artifactsDir}/${agentId}.patch`,
  * and `result.error` carries the merge-failure message.
@@ -190,7 +190,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				});
 			} catch (mergeErr) {
 				// Agent succeeded but branch commit failed — clean up stale branch.
-				const branchName = `omp/task/${opts.agentId}`;
+				const branchName = `oms/task/${opts.agentId}`;
 				await git.branch.tryDelete(opts.context.repoRoot, branchName);
 				const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
 				try {

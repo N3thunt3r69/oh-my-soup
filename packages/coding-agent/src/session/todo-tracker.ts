@@ -1,6 +1,6 @@
-import type { Agent, AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Message, Model, TextContent, ToolChoice } from "@oh-my-pi/pi-ai";
-import { isRecord, logger, prompt, stringProperty } from "@oh-my-pi/pi-utils";
+import type { Agent, AgentMessage, AgentTool } from "@oh-my-soup/pi-agent-core";
+import type { AssistantMessage, Message, Model, TextContent, ToolChoice } from "@oh-my-soup/pi-ai";
+import { isRecord, logger, prompt, stringProperty } from "@oh-my-soup/pi-utils";
 import type { Settings } from "../config/settings";
 import eagerTaskPrompt from "../prompts/system/eager-task.md" with { type: "text" };
 import eagerTodoPrompt from "../prompts/system/eager-todo.md" with { type: "text" };

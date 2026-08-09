@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
 import * as path from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { disposeAllVmContexts, probeLiveVmGlobals } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
-import { executeJs } from "@oh-my-pi/pi-coding-agent/eval/js/executor";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { disposeAllVmContexts, probeLiveVmGlobals } from "@oh-my-soup/pi-coding-agent/eval/js/context-manager";
+import { executeJs } from "@oh-my-soup/pi-coding-agent/eval/js/executor";
+import type { ToolSession } from "@oh-my-soup/pi-coding-agent/tools";
+import { TempDir } from "@oh-my-soup/pi-utils";
 
 // JS eval cold-starts a Bun worker; give worker-backed tests headroom above the
 // worker-init floor (context-manager WORKER_INIT_TIMEOUT_MS).

@@ -1,9 +1,9 @@
 {
   "type": "module",
-  "name": "@oh-my-pi/pi-ai",
+  "name": "@oh-my-soup/pi-ai",
   "version": "17.2.12",
   "description": "Unified LLM API with automatic model discovery and provider configuration",
-  "homepage": "https://omp.sh",
+  "homepage": "https://github.com/pickpocket/oh-my-soup",
   "author": "Can Boluk",
   "contributors": [
     "Mario Zechner"
@@ -11,11 +11,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/can1357/oh-my-pi.git",
+    "url": "git+https://github.com/pickpocket/oh-my-soup.git",
     "directory": "packages/ai"
   },
   "bugs": {
-    "url": "https://github.com/can1357/oh-my-pi/issues"
+    "url": "https://github.com/pickpocket/oh-my-soup/issues"
   },
   "keywords": [
     "ai",
@@ -38,10 +38,10 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "catalog:",
-    "@oh-my-pi/omptype": "catalog:",
-    "@oh-my-pi/pi-catalog": "catalog:",
-    "@oh-my-pi/pi-utils": "catalog:",
-    "@oh-my-pi/pi-wire": "catalog:"
+    "@oh-my-soup/omstype": "catalog:",
+    "@oh-my-soup/pi-catalog": "catalog:",
+    "@oh-my-soup/pi-utils": "catalog:",
+    "@oh-my-soup/pi-wire": "catalog:"
   },
   "devDependencies": {
     "@bufbuild/protoc-gen-es": "catalog:",

@@ -1,4 +1,4 @@
-# OMP Julia runner — subprocess wrapper used by the coding-agent host.
+# OMS Julia runner — subprocess wrapper used by the coding-agent host.
 # Persistent Julia process that speaks NDJSON over stdout and a custom TSV protocol on stdin.
 
 using Base64
@@ -498,9 +498,9 @@ function build_mime_bundle(value)
     return bundle
 end
 
-struct OmpDisplay <: AbstractDisplay end
+struct OmsDisplay <: AbstractDisplay end
 
-function Base.display(d::OmpDisplay, value)
+function Base.display(d::OmsDisplay, value)
     rid = current_rid
     if rid !== nothing
         bundle = build_mime_bundle(value)
@@ -509,7 +509,7 @@ function Base.display(d::OmpDisplay, value)
     return nothing
 end
 
-pushdisplay(OmpDisplay())
+pushdisplay(OmsDisplay())
 
 function emit_error(rid, err, bt)
     io = IOBuffer()

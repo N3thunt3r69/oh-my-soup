@@ -1,19 +1,19 @@
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { formatHashlineHeader } from "@oh-my-pi/hashline";
-import { type } from "@oh-my-pi/omptype";
+import { formatHashlineHeader } from "@oh-my-soup/hashline";
+import { type } from "@oh-my-soup/omstype";
 import type {
 	AgentTool,
 	AgentToolContext,
 	AgentToolResult,
 	AgentToolUpdateCallback,
 	ToolTier,
-} from "@oh-my-pi/pi-agent-core";
-import { type GrepMatch, GrepOutputMode, type GrepResult, grep } from "@oh-my-pi/pi-natives";
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Text } from "@oh-my-pi/pi-tui";
-import { prompt, untilAborted } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-agent-core";
+import { type GrepMatch, GrepOutputMode, type GrepResult, grep } from "@oh-my-soup/pi-natives";
+import type { Component } from "@oh-my-soup/pi-tui";
+import { Text } from "@oh-my-soup/pi-tui";
+import { prompt, untilAborted } from "@oh-my-soup/pi-utils";
 import { recordFileSnapshot, recordSeenLinesFromBody } from "../edit/file-snapshot-store";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { LocalProtocolOptions } from "../internal-urls/local-protocol";
@@ -289,7 +289,7 @@ async function resolveArchiveSearchPaths(
 		}
 
 		if (!tempDir) {
-			tempDir = await mkdtemp(path.join(tmpdir(), "omp-search-archive-"));
+			tempDir = await mkdtemp(path.join(tmpdir(), "oms-search-archive-"));
 		}
 		// Per-entry filename keeps the scratch path unique even when two selectors
 		// resolve to members with the same basename.
@@ -339,7 +339,7 @@ interface IndexedContentLines {
 	starts: number[];
 }
 
-const OMP_ROOT_URL_RE = /^omp:\/\/(?:\/?|docs\/?)$/i;
+const OMS_ROOT_URL_RE = /^oms:\/\/(?:\/?|docs\/?)$/i;
 
 function normalizeSearchLine(line: string): string {
 	return line.endsWith("\r") ? line.slice(0, -1) : line;
@@ -644,7 +644,7 @@ async function searchVirtualResources(
 	// `[[:digit:]]`) behaves identically on virtual/remote resources. The JS helpers
 	// below then rebuild the exact forward-only, range-trimmed context windows the
 	// virtual-search contract requires.
-	const dir = await mkdtemp(path.join(tmpdir(), "omp-search-virtual-"));
+	const dir = await mkdtemp(path.join(tmpdir(), "oms-search-virtual-"));
 	try {
 		for (let idx = 0; idx < resources.length; idx++) {
 			const resource = resources[idx];
@@ -739,15 +739,15 @@ async function expandVirtualInternalResource(
 	context: ResolveContext,
 	ranges: readonly LineRange[] | undefined,
 ): Promise<VirtualSearchResource[]> {
-	if (OMP_ROOT_URL_RE.test(rawPath)) {
-		const completions = await internalRouter.complete("omp", "");
+	if (OMS_ROOT_URL_RE.test(rawPath)) {
+		const completions = await internalRouter.complete("oms", "");
 		if (completions && completions.length > 0) {
 			const resources: VirtualSearchResource[] = [];
 			const seen = new Set<string>();
 			for (const completion of completions) {
 				if (seen.has(completion.value)) continue;
 				seen.add(completion.value);
-				const docUrl = `omp://${completion.value}`;
+				const docUrl = `oms://${completion.value}`;
 				const doc = await internalRouter.resolve(docUrl, context);
 				if (!doc.sourcePath) {
 					resources.push({ path: docUrl, content: doc.content, ranges });

@@ -1,6 +1,6 @@
 # browser
 
-> Open, reuse, close, and script browser tabs against headless Camoufox (stealth Firefox over WebDriver BiDi), CDP-attached apps, the user's Chrome through the OMP Browser Relay, or cmux surfaces.
+> Open, reuse, close, and script browser tabs against headless Camoufox (stealth Firefox over WebDriver BiDi), CDP-attached apps, the user's Chrome through the OMS Browser Relay, or cmux surfaces.
 
 ## Source
 - Entry: `packages/coding-agent/src/tools/browser.ts`
@@ -44,7 +44,7 @@
 | `viewport` | `{ width: number; height: number; scale?: number }` | No | Requested viewport. For headless launch this becomes the initial viewport; for a page it is applied with `page.setViewport()`. `scale` maps to Puppeteer `deviceScaleFactor`. |
 | `wait_until` | `"load" \| "domcontentloaded" \| "networkidle0" \| "networkidle2"` | No | Navigation wait condition. Defaults to `"load"` where omitted, including `open` navigation and later `tab.goto(...)`. |
 | `dialogs` | `"accept" \| "dismiss"` | No | Installs a page `dialog` handler that auto-accepts or auto-dismisses dialogs. Omitted means no handler. |
-| `app` | `{ path?: string; cdp_url?: string; relay?: boolean; args?: string[]; target?: string }` | No | Selects browser kind. Explicit `app.cdp_url` wins, then `app.path`, then relay selection. `app.relay: true` opts into the OMP Browser Relay; `app.relay: false` suppresses relay settings for this call. With no explicit app kind, `browser.relay` (overridden by `PI_BROWSER_RELAY`) precedes `browser.cdpUrl`, then cmux when available, then `browser.headless`. `browser.relayUrl` defaults to `http://127.0.0.1:9224`. `args` apply only to spawned `app.path`; `target` selects an attached/spawned/relay page by URL/title substring. |
+| `app` | `{ path?: string; cdp_url?: string; relay?: boolean; args?: string[]; target?: string }` | No | Selects browser kind. Explicit `app.cdp_url` wins, then `app.path`, then relay selection. `app.relay: true` opts into the OMS Browser Relay; `app.relay: false` suppresses relay settings for this call. With no explicit app kind, `browser.relay` (overridden by `PI_BROWSER_RELAY`) precedes `browser.cdpUrl`, then cmux when available, then `browser.headless`. `browser.relayUrl` defaults to `http://127.0.0.1:9224`. `args` apply only to spawned `app.path`; `target` selects an attached/spawned/relay page by URL/title substring. |
 
 ### `action: "close"`
 
@@ -157,7 +157,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
   - **Headless**: each tab worker launches its own Camoufox (stealth-patched Firefox) engine over WebDriver BiDi with a fresh per-tab fingerprint; anti-detection happens in the engine's C++ layer, not via injected JavaScript. `tab.observe()` uses a DOM interactive scan (no CDP AX tree on BiDi); `tab.evaluate` runs in the page's main world via `mainRealm()`; `aria/Name` selectors resolve through an in-page accname engine.
   - **Spawned app (`app.path`)**: reuses an existing CDP-enabled process for that executable when possible; otherwise kills same-path processes, spawns the executable with remote debugging enabled, then attaches.
   - **Connected browser (`app.cdp_url`, or the `browser.cdpUrl` setting when the call carries no `app`)**: attaches to an already-running CDP endpoint. No process ownership; close only disconnects.
-  - **OMP Browser Relay (`app.relay`, or `browser.relay`)**: attaches to the user's own Chrome tabs through the loopback relay and its MV3 extension. Install once with `omp browser-relay install`. CLI hosts auto-start the fixed-port relay daemon for loopback URLs; a remote/custom relay must already be serving. The relay is a connected browser: no process ownership. Without `app.target`, the visible usable tab is adopted without raising it; a matcher selects by URL/title substring.
+  - **OMS Browser Relay (`app.relay`, or `browser.relay`)**: attaches to the user's own Chrome tabs through the loopback relay and its MV3 extension. Install once with `oms browser-relay install`. CLI hosts auto-start the fixed-port relay daemon for loopback URLs; a remote/custom relay must already be serving. The relay is a connected browser: no process ownership. Without `app.target`, the visible usable tab is adopted without raising it; a matcher selects by URL/title substring.
   - **Cmux surface (`browser.cmux`)**: with no `app` and a cmux socket available (`CMUX_SOCKET_PATH`, enabled by the `browser.cmux` setting / `PI_BROWSER_CMUX` override), drives a cmux WKWebView surface over a unix-socket JSON-RPC client instead of Puppeteer. No Bun worker; `open` opens a split (owning that surface), `run` executes via `runCmuxCode()`, and `close` issues `surface.close` for surfaces it owns (leaving the workspace's last surface open).
 - **Target selection for attached/spawned/relay browsers**
   - With `app.target`, `pickElectronTarget()` returns the first page whose URL or title contains the case-insensitive substring.
@@ -177,19 +177,19 @@ The tool returns one result per call; no streaming partial output is emitted fro
 ## Side Effects
 - Filesystem
   - `loadPuppeteer()` writes `{}` to `<puppeteer-safe-dir>/package.json` before importing `puppeteer-core`.
-  - First headless use downloads the Camoufox engine (~490 MB) into `getCamoufoxDir()` (`~/.omp/camoufox`), sha256-verified via camoufox-js's pkgman.
+  - First headless use downloads the Camoufox engine (~490 MB) into `getCamoufoxDir()` (`~/.oms/camoufox`), sha256-verified via camoufox-js's pkgman.
   - `tab.screenshot()` creates parent directories and writes image files.
   - `tab.uploadFile()` resolves supplied paths against the session cwd.
 - Network
   - CDP attach paths poll `http://127.0.0.1:<port>/json/version` or the supplied `cdp_url` `/json/version`.
   - Browser-attach sessions create CDP websocket connections; headless sessions create a BiDi websocket to the worker-owned engine.
   - First-use Camoufox engine download fetches from the project's GitHub releases.
-  - Loopback relay mode may start the machine-global `omp.browser.relay` daemon. The extension connects outbound to the relay, and Puppeteer connects to its CDP-compatible endpoint.
+  - Loopback relay mode may start the machine-global `oms.browser.relay` daemon. The extension connects outbound to the relay, and Puppeteer connects to its CDP-compatible endpoint.
   - User `page` / `tab` operations perform normal browser network traffic.
 - Subprocesses / native bindings
   - Headless mode: the tab worker launches a per-tab Camoufox engine process.
   - `app.path` mode may spawn the target executable via `Bun.spawn()`.
-  - `killExistingByPath()` / `gracefulKillTreeOnce()` use `@oh-my-pi/pi-natives` process inspection/termination.
+  - `killExistingByPath()` / `gracefulKillTreeOnce()` use `@oh-my-soup/pi-natives` process inspection/termination.
   - Worker mode uses Bun `Worker`; fallback mode does not.
 - Session state (transcript, memory, jobs, checkpoints, registries)
   - Browser handles are cached in a process-global `Map` keyed by browser kind in `packages/coding-agent/src/tools/browser/registry.ts`.
@@ -228,7 +228,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
 - Spawned-app path validation requires an absolute executable path after cwd resolution, not an app bundle directory path.
 - Spawn/attach failures are wrapped into `ToolError`s such as `Timed out waiting for CDP endpoint ...`, `Failed to attach to ...`, or `Connected to ... but puppeteer.connect failed: ...`.
 - `app.cdp_url` must be the HTTP CDP discovery endpoint, not a `ws://` URL; otherwise `normalizeConnectedCdpUrl()` throws `browser app.cdp_url must be the HTTP CDP discovery endpoint ...`.
-- Relay mode rejects an unreachable endpoint or a relay whose extension never connects. Loopback CLI-host errors tell the user to run `omp browser-relay install` and check the extension badge; remote/non-auto-started errors tell the user to start `omp browser-relay` or check the endpoint.
+- Relay mode rejects an unreachable endpoint or a relay whose extension never connects. Loopback CLI-host errors tell the user to run `oms browser-relay install` and check the extension badge; remote/non-auto-started errors tell the user to start `oms browser-relay` or check the endpoint.
 - `tab` helper errors are user-visible `ToolError`s, including unsupported selector prefix, stale/unknown element id, invalid drag target, missing upload files, non-`<select>` for `tab.select()`, non-file-input for `tab.uploadFile()`, and screenshot selector misses.
 - On run timeout, the worker reports `Browser code execution timed out after <ms>ms` (with `(stalled on <op>)` naming the still-running helper); a single stalled per-op helper instead rejects with `tab.<op>(...) timed out after <ms>ms` before the cell budget is reached. The supervisor may escalate to `Browser code execution hung past grace; tab killed` if the worker does not respond after the grace window.
 

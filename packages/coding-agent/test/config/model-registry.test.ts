@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import type { AuthStorage } from "@oh-my-soup/pi-ai";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
 import { ModelRegistry } from "../../src/config/model-registry";
 
 /** Stub auth storage for registry lifecycle and missing-credential coverage. */
@@ -35,10 +35,10 @@ describe("ModelRegistry", () => {
 	let registry: ModelRegistry;
 
 	beforeEach(() => {
-		tmpDir = mkdtempSync(path.join(os.tmpdir(), "omp-reg-"));
+		tmpDir = mkdtempSync(path.join(os.tmpdir(), "oms-reg-"));
 		// Construct with an explicit modelsPath inside the temp dir so the
 		// constructor's #loadModels read returns "not-found" rather than
-		// touching the host's ~/.omp/agent/models.yaml. isBunTestRuntime()
+		// touching the host's ~/.oms/agent/models.yaml. isBunTestRuntime()
 		// auto-stubs #fetch in the constructor.
 		registry = new ModelRegistry(createStubAuthStorage(), path.join(tmpDir, "models.yaml"));
 	});

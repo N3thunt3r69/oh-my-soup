@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { computeDefaultSessionDir } from "@oh-my-pi/pi-coding-agent/session/session-paths";
-import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { computeDefaultSessionDir } from "@oh-my-soup/pi-coding-agent/session/session-paths";
+import { FileSessionStorage } from "@oh-my-soup/pi-coding-agent/session/session-storage";
 
 const cleanup: string[] = [];
 
@@ -27,8 +27,8 @@ afterEach(() => {
 
 describe("legacy session directory migration", () => {
 	test("keeps a colliding live legacy session reachable through its path", () => {
-		const sessionsRoot = makeTempDir("omp-session-root-");
-		const cwd = makeTempDir("omp-session-cwd-");
+		const sessionsRoot = makeTempDir("oms-session-root-");
+		const cwd = makeTempDir("oms-session-cwd-");
 		const storage = new FileSessionStorage();
 		const canonicalDir = computeDefaultSessionDir(cwd, storage, sessionsRoot);
 		const legacyDir = legacySessionDir(sessionsRoot, cwd);
@@ -48,8 +48,8 @@ describe("legacy session directory migration", () => {
 	});
 
 	test("preserves writes when an older process recreates its cached legacy directory", () => {
-		const sessionsRoot = makeTempDir("omp-session-root-");
-		const cwd = makeTempDir("omp-session-cwd-");
+		const sessionsRoot = makeTempDir("oms-session-root-");
+		const cwd = makeTempDir("oms-session-cwd-");
 		const storage = new FileSessionStorage();
 		const canonicalDir = computeDefaultSessionDir(cwd, storage, sessionsRoot);
 		const legacyDir = legacySessionDir(sessionsRoot, cwd);

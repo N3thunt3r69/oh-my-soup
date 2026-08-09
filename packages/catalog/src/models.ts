@@ -58,7 +58,7 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
  *
  * `model.cost.cacheWrite` is the 5-minute write rate (Anthropic bills 5m writes at
  * 1.25x base input). When `usage.cttl` is present the write mixes 5m and 1h
- * breakpoints — omp defaults to 1h retention on first-party Anthropic, and 1h writes
+ * breakpoints — oms defaults to 1h retention on first-party Anthropic, and 1h writes
  * bill at 2x base input — so each component is priced at its own rate instead of the
  * flat 5m rate. Deriving 1h from `input * 2` (Anthropic's published multiplier) is
  * model-independent and stays correct even for legacy entries whose stored

@@ -2,12 +2,12 @@ import * as nodeCrypto from "node:crypto";
 import * as fs from "node:fs";
 import { scheduler } from "node:timers/promises";
 import * as tls from "node:tls";
-import { isAnthropicSigningProxyUrl, isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
-import { hostMatchesUrl, isVertexRawPredictUrl } from "@oh-my-pi/pi-catalog/hosts";
-import { mapEffortToAnthropicAdaptiveEffort } from "@oh-my-pi/pi-catalog/model-thinking";
-import { calculateCost, getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { isAnthropicOAuthToken } from "@oh-my-pi/pi-catalog/utils";
-import { parseGitHubCopilotApiKey } from "@oh-my-pi/pi-catalog/wire/github-copilot";
+import { isAnthropicSigningProxyUrl, isOfficialAnthropicApiUrl } from "@oh-my-soup/pi-catalog/compat/anthropic";
+import { hostMatchesUrl, isVertexRawPredictUrl } from "@oh-my-soup/pi-catalog/hosts";
+import { mapEffortToAnthropicAdaptiveEffort } from "@oh-my-soup/pi-catalog/model-thinking";
+import { calculateCost, getBundledModel } from "@oh-my-soup/pi-catalog/models";
+import { isAnthropicOAuthToken } from "@oh-my-soup/pi-catalog/utils";
+import { parseGitHubCopilotApiKey } from "@oh-my-soup/pi-catalog/wire/github-copilot";
 import {
 	$env,
 	getInstallId,
@@ -16,7 +16,7 @@ import {
 	parseJsonWithRepair,
 	parseStreamingJsonThrottled,
 	readSseEvents,
-} from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-utils";
 import { renderDemotedThinking } from "../dialect/demotion";
 import * as AIError from "../error";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
@@ -691,8 +691,8 @@ export function generateClaudeCloakingUserId(): string {
 	return `user_${userHash}_account_${accountId}_session_${sessionId}`;
 }
 
-const CLAUDE_DEVICE_ID_INSTALL_HASH_DOMAIN = "omp-claude-device-id-v1:";
-const CLAUDE_DEVICE_ID_ACCOUNT_HASH_DOMAIN = "omp-claude-device-id-v2";
+const CLAUDE_DEVICE_ID_INSTALL_HASH_DOMAIN = "oms-claude-device-id-v1:";
+const CLAUDE_DEVICE_ID_ACCOUNT_HASH_DOMAIN = "oms-claude-device-id-v2";
 
 export function deriveClaudeDeviceId(installId: string, accountId?: string): string {
 	const hash = nodeCrypto.createHash("sha256");
@@ -2820,7 +2820,7 @@ type SystemBlockOptions = {
 /**
  * Place system-block cache breakpoints that survive volatile project context.
  *
- * omp normally appends its project footer (cwd, date, workspace tree) after the
+ * oms normally appends its project footer (cwd, date, workspace tree) after the
  * stable system prefix. When cwd is outside a single direct child repository,
  * an active-repo context block follows that footer. Caching up to the last three
  * eligible blocks therefore covers both layouts:
@@ -3741,7 +3741,7 @@ function toWellFormedDeep(value: unknown): unknown {
 }
 
 /**
- * Serialize omp {@link Message}s to Anthropic wire messages.
+ * Serialize oms {@link Message}s to Anthropic wire messages.
  *
  * `opts.serverSideFallbackEnabled` — when the CURRENT request itself
  * opts into the server-side-fallback beta chain. Only then may a persisted

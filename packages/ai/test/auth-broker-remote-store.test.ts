@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage, REMOTE_REFRESH_SENTINEL, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import { AuthStorage, REMOTE_REFRESH_SENTINEL, SqliteAuthCredentialStore } from "@oh-my-soup/pi-ai";
 import {
 	AuthBrokerClient,
 	type AuthBrokerServerHandle,
@@ -10,7 +10,7 @@ import {
 	RemoteAuthCredentialStore,
 	type SnapshotResponse,
 	startAuthBroker,
-} from "@oh-my-pi/pi-ai/auth-broker";
+} from "@oh-my-soup/pi-ai/auth-broker";
 import { removeWithRetries } from "../../utils/src/temp";
 import { withEnv } from "./helpers";
 
@@ -297,9 +297,9 @@ describe("RemoteAuthCredentialStore SSE integration", () => {
 
 		await withEnv(
 			{
-				OMP_AUTH_BROKER_URL: handle!.url,
-				OMP_AUTH_BROKER_TOKEN: token,
-				OMP_AUTH_BROKER_ACCOUNT_POOL_FILE: poolPath,
+				OMS_AUTH_BROKER_URL: handle!.url,
+				OMS_AUTH_BROKER_TOKEN: token,
+				OMS_AUTH_BROKER_ACCOUNT_POOL_FILE: poolPath,
 			},
 			async () => {
 				const discovered = await discoverAuthStorage({
@@ -326,9 +326,9 @@ describe("RemoteAuthCredentialStore SSE integration", () => {
 	test("prefers a programmatic SDK account pool over the environment file", async () => {
 		await withEnv(
 			{
-				OMP_AUTH_BROKER_URL: handle!.url,
-				OMP_AUTH_BROKER_TOKEN: token,
-				OMP_AUTH_BROKER_ACCOUNT_POOL_FILE: path.join(tempDir, "missing-account-pool.json"),
+				OMS_AUTH_BROKER_URL: handle!.url,
+				OMS_AUTH_BROKER_TOKEN: token,
+				OMS_AUTH_BROKER_ACCOUNT_POOL_FILE: path.join(tempDir, "missing-account-pool.json"),
 			},
 			async () => {
 				const discovered = await discoverAuthStorage({

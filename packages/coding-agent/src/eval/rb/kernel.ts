@@ -11,7 +11,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-soup/pi-utils";
 import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelRuntimeEnv, type KernelStartOptions } from "../kernel-base";
@@ -35,7 +35,7 @@ const TRACE_IPC = $flag("PI_RUBY_IPC_TRACE");
 
 // Cache the runner script on disk so the subprocess loads it normally. Cached
 // per script hash so installs don't race across versions.
-const RUNNER_CACHE_DIR = path.join(os.tmpdir(), "omp-ruby-runner");
+const RUNNER_CACHE_DIR = path.join(os.tmpdir(), "oms-ruby-runner");
 let RUNNER_SCRIPT_PATH: string | null = null;
 
 async function ensureRunnerScript(): Promise<string> {
@@ -222,10 +222,10 @@ function buildInitScript(cwd: string, env?: Record<string, string | undefined>):
 	// JSON string literals are valid Ruby string literals. Emit one
 	// `ENV["k"] = "v"` per key — a `{"k":"v"}` object literal would parse as a
 	// SYMBOL-keyed hash in Ruby (`:"k" => "v"`), which `ENV[]=` rejects.
-	const lines = [`__omp_init_cwd = ${JSON.stringify(cwd)}`, "Dir.chdir(__omp_init_cwd) rescue nil"];
+	const lines = [`__oms_init_cwd = ${JSON.stringify(cwd)}`, "Dir.chdir(__oms_init_cwd) rescue nil"];
 	for (const key in envPayload) {
 		lines.push(`ENV[${JSON.stringify(key)}] = ${JSON.stringify(envPayload[key])}`);
 	}
-	lines.push("$LOAD_PATH.delete(__omp_init_cwd)", "$LOAD_PATH.unshift(__omp_init_cwd)");
+	lines.push("$LOAD_PATH.delete(__oms_init_cwd)", "$LOAD_PATH.unshift(__oms_init_cwd)");
 	return lines.join("\n");
 }

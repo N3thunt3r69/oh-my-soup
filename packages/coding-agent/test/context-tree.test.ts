@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import { AgentRegistry } from "@oh-my-soup/pi-coding-agent/registry/agent-registry";
+import type { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
 import {
 	buildContextTree,
 	type ContextTreeNode,
 	computeOwnAndAttributedTokens,
 	finalizeContextTreeTotals,
 	renderContextTreeLines,
-} from "@oh-my-pi/pi-coding-agent/session/context-tree";
+} from "@oh-my-soup/pi-coding-agent/session/context-tree";
 
 /** Minimal live-session double: just the surface buildContextTree reads. */
 function fakeSession(args: {

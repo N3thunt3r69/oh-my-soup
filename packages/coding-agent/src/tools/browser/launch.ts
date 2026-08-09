@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getCamoufoxDir, getPuppeteerDir, logger } from "@oh-my-pi/pi-utils";
+import { getCamoufoxDir, getPuppeteerDir, logger } from "@oh-my-soup/pi-utils";
 import type { Browser, Page, default as Puppeteer } from "puppeteer-core";
 import { ToolError } from "../tool-errors";
 
@@ -55,7 +55,7 @@ export async function loadPuppeteerInWorker(safeDir: string): Promise<typeof Pup
 // =====================================================================
 
 // camoufox-js resolves its engine against CAMOUFOX_INSTALL_DIR at module load
-// time, so pin it to the omp cache before the first dynamic import.
+// time, so pin it to the oms cache before the first dynamic import.
 process.env.CAMOUFOX_INSTALL_DIR ??= getCamoufoxDir();
 
 interface CamoufoxPkgman {

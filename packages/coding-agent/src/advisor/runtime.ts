@@ -1,10 +1,10 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
-import * as AIError from "@oh-my-pi/pi-ai/error";
-import { raceWithSignal } from "@oh-my-pi/pi-ai/utils/abort";
-import { type CursorExecResolvedCarrier, kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import { estimateTokens } from "@oh-my-soup/pi-agent-core/compaction";
+import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-soup/pi-ai";
+import * as AIError from "@oh-my-soup/pi-ai/error";
+import { raceWithSignal } from "@oh-my-soup/pi-ai/utils/abort";
+import { type CursorExecResolvedCarrier, kCursorExecResolved } from "@oh-my-soup/pi-ai/utils/block-symbols";
+import { logger } from "@oh-my-soup/pi-utils";
 import { obfuscateToolArguments } from "../secrets/message-transform";
 import type { SecretObfuscator } from "../secrets/obfuscator";
 import {

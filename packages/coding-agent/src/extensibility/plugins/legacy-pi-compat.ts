@@ -6,7 +6,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 import type { ParseResult, ParserPlugin } from "@babel/parser";
 import { parse as parseBabel } from "@babel/parser";
-import { isCompiledBinary, stripWindowsExtendedLengthPathPrefix } from "@oh-my-pi/pi-utils";
+import { isCompiledBinary, stripWindowsExtendedLengthPathPrefix } from "@oh-my-soup/pi-utils";
 import { registerPluginCacheInvalidator } from "../../discovery/helpers";
 
 const IS_COMPILED_BINARY = isCompiledBinary();
@@ -20,14 +20,14 @@ const IS_COMPILED_BINARY = isCompiledBinary();
 // imports inside runtime-loaded extensions.
 //
 // Compiled builds retain lazy loaders for host packages and serve requested
-// surfaces through `omp-legacy-pi-bundled:<key>` synthetic modules.
+// surfaces through `oms-legacy-pi-bundled:<key>` synthetic modules.
 // `scripts/legacy-pi-virtual-module.ts` derives literal dynamic-import edges
 // from current package exports inside a Bun build plugin: no generated source
 // or duplicate key list exists on disk. Deferring each host module evaluation
 // avoids cycles with an extension-loading command that is itself in the
 // retained package graph.
-const BUNDLED_VIRTUAL_SCHEME = "omp-legacy-pi-bundled:";
-const BUNDLED_VIRTUAL_NAMESPACE = "omp-legacy-pi-bundled";
+const BUNDLED_VIRTUAL_SCHEME = "oms-legacy-pi-bundled:";
+const BUNDLED_VIRTUAL_NAMESPACE = "oms-legacy-pi-bundled";
 const BUNDLED_MODULES_GLOBAL = "__ompLegacyPiBundledModules";
 const TYPEBOX_BUNDLED_MODULE_KEY = "typebox";
 
@@ -560,10 +560,10 @@ let bundledModuleLoadersPromise: Promise<BundledModuleLoaders> | null = null;
  */
 function ensureBundledModuleLoadersLoaded(): Promise<BundledModuleLoaders> {
 	if (!IS_COMPILED_BINARY) {
-		return Promise.reject(new Error("omp:legacy-pi-shim: bundled modules are only available in compiled mode"));
+		return Promise.reject(new Error("oms:legacy-pi-shim: bundled modules are only available in compiled mode"));
 	}
 	if (!bundledModuleLoadersPromise) {
-		bundledModuleLoadersPromise = import("omp-legacy-pi-modules").then(module => {
+		bundledModuleLoadersPromise = import("oms-legacy-pi-modules").then(module => {
 			Reflect.set(globalThis, BUNDLED_MODULES_GLOBAL, loadedBundledModules);
 			return module.BUNDLED_PI_MODULE_LOADERS;
 		});
@@ -575,7 +575,7 @@ async function loadBundledModule(moduleKey: string): Promise<void> {
 	const loaders = await ensureBundledModuleLoadersLoaded();
 	const loader = loaders[moduleKey];
 	if (!loader) {
-		throw new Error(`omp:legacy-pi-shim: no bundled module registered for ${moduleKey}`);
+		throw new Error(`oms:legacy-pi-shim: no bundled module registered for ${moduleKey}`);
 	}
 	loadedBundledModules[moduleKey] = await loader();
 }
@@ -602,7 +602,7 @@ export function resolveBundledVirtualSpecifier(specifier: string): BundledVirtua
 		? specifier.slice(BUNDLED_VIRTUAL_SCHEME.length)
 		: specifier;
 	if (!registryKey) {
-		throw new Error("omp:legacy-pi-shim: bundled virtual specifier has no registry key");
+		throw new Error("oms:legacy-pi-shim: bundled virtual specifier has no registry key");
 	}
 	return { path: registryKey, namespace: BUNDLED_VIRTUAL_NAMESPACE };
 }
@@ -614,10 +614,10 @@ export function resolveBundledVirtualSpecifier(specifier: string): BundledVirtua
 function synthesizeBundledModuleSourceFromModules(moduleKey: string, modules: BundledModules): string {
 	const mod = modules[moduleKey];
 	if (!mod) {
-		throw new Error(`omp:legacy-pi-shim: no bundled module registered for ${moduleKey}`);
+		throw new Error(`oms:legacy-pi-shim: no bundled module registered for ${moduleKey}`);
 	}
 	const lines: string[] = [
-		`const __omp_bundled = globalThis[${JSON.stringify(BUNDLED_MODULES_GLOBAL)}][${JSON.stringify(moduleKey)}];`,
+		`const __oms_bundled = globalThis[${JSON.stringify(BUNDLED_MODULES_GLOBAL)}][${JSON.stringify(moduleKey)}];`,
 	];
 	let hasDefault = false;
 	for (const exportName in mod) {
@@ -625,10 +625,10 @@ function synthesizeBundledModuleSourceFromModules(moduleKey: string, modules: Bu
 			hasDefault = true;
 			continue;
 		}
-		lines.push(`export const ${exportName} = __omp_bundled[${JSON.stringify(exportName)}];`);
+		lines.push(`export const ${exportName} = __oms_bundled[${JSON.stringify(exportName)}];`);
 	}
 	if (hasDefault) {
-		lines.push("export default __omp_bundled.default;");
+		lines.push("export default __oms_bundled.default;");
 	}
 	lines.push("");
 	return lines.join("\n");
@@ -636,7 +636,7 @@ function synthesizeBundledModuleSourceFromModules(moduleKey: string, modules: Bu
 
 /**
  * Build the synthetic source served for one
- * `omp-legacy-pi-bundled:<key>` import.
+ * `oms-legacy-pi-bundled:<key>` import.
  */
 async function synthesizeBundledModuleSource(moduleKey: string): Promise<string> {
 	await loadBundledModule(moduleKey);
@@ -658,20 +658,20 @@ export function __getLegacyPiBundledModulesGlobal(): string {
 
 // Canonical scope for in-process pi packages. Plugins published against any of
 // the aliased scopes below (mariozechner's original publish, earendil-works'
-// fork, or the canonical @oh-my-pi scope itself) are remapped to this scope and
-// resolved against the bundled copy that ships inside the omp binary. This
+// fork, or the canonical @oh-my-soup scope itself) are remapped to this scope and
+// resolved against the bundled copy that ships inside the oms binary. This
 // keeps plugins running against the exact runtime state of the host (single
 // module registry, single tool registry, etc.) regardless of which historical
 // scope name they happened to declare in their peerDependencies.
-const CANONICAL_PI_SCOPE = "@oh-my-pi";
+const CANONICAL_PI_SCOPE = "@oh-my-soup";
 
 // Scopes that have historically been used to publish (or alias) the same set
-// of internal pi-* packages. `@oh-my-pi` is intentionally included so direct
+// of internal pi-* packages. `@oh-my-soup` is intentionally included so direct
 // canonical imports still pass through the same host-bundled package resolution
 // path instead of pulling a duplicate copy from plugin node_modules.
-const PI_SCOPE_ALIASES = ["oh-my-pi", "mariozechner", "earendil-works"] as const;
+const PI_SCOPE_ALIASES = ["oh-my-soup", "mariozechner", "earendil-works"] as const;
 
-// Internal pi-* package basenames bundled inside the omp binary.
+// Internal pi-* package basenames bundled inside the oms binary.
 const PI_PACKAGE_NAMES = ["pi-agent-core", "pi-ai", "pi-coding-agent", "pi-natives", "pi-tui", "pi-utils"] as const;
 
 const PI_SCOPE_ALTERNATION = PI_SCOPE_ALIASES.join("|");
@@ -735,15 +735,15 @@ function clearLegacyPiResolutionCaches(): void {
 registerPluginCacheInvalidator(clearLegacyPiResolutionCaches);
 const PACKAGE_IMPORT_EXCLUDED = Symbol("packageImportExcluded");
 
-// Extensions importing TypeBox directly are redirected to omptype's TypeBox
-// facade, keeping legacy builders while producing callable omptype schemas at
+// Extensions importing TypeBox directly are redirected to omstype's TypeBox
+// facade, keeping legacy builders while producing callable omstype schemas at
 // the tool wire boundary. Submodules such as `@sinclair/typebox/compiler` are
 // intentionally not remapped: plugins relying on those TypeBox-only APIs must
 // vendor TypeBox directly.
 const TYPEBOX_SPECIFIER_FILTER = /^(?:@sinclair\/typebox|typebox)$/;
 
 // Compat-shim path resolution. In compiled-binary mode every bundled surface
-// is served through the `omp-legacy-pi-bundled:` virtual namespace (see the
+// is served through the `oms-legacy-pi-bundled:` virtual namespace (see the
 // bundled-module block above) — bunfs paths are unreachable on Bun 1.3.14+, so the
 // pre-#3423 helpers that derived `/$bunfs/root/...` paths from
 // `import.meta.dir` are gone. Dev / source-link / installed-package modes
@@ -756,7 +756,7 @@ const TYPEBOX_SPECIFIER_FILTER = /^(?:@sinclair\/typebox|typebox)$/;
  *
  * `bundle-dist.ts` defines `process.env.PI_BUNDLED="true"`; after bundling,
  * `import.meta.dir` points at `<package>/dist`. Do not resolve the package via
- * bare `@oh-my-pi/pi-coding-agent` here: from a global install Bun can pick an
+ * bare `@oh-my-soup/pi-coding-agent` here: from a global install Bun can pick an
  * older cache entry, recreating mixed-runtime plugin loading.
  */
 export function __computeBundledSelfPackageRoot(metaDir: string, pathImpl: typeof path = path): string {
@@ -787,12 +787,12 @@ function sourceShimPath(file: string): string {
 }
 
 /**
- * Resolve the coding-agent compatibility surface that composes omptype's
+ * Resolve the coding-agent compatibility surface that composes omstype's
  * TypeBox facade with legacy `Type.Unsafe`, then drop the remap when that
  * entrypoint is missing.
  *
  * In compiled-binary mode the surface is served through the
- * `omp-legacy-pi-bundled:` virtual namespace (issue #3423). Dev, source-link,
+ * `oms-legacy-pi-bundled:` virtual namespace (issue #3423). Dev, source-link,
  * and installed-package modes use the shipped source module.
  *
  * Exported for tests; production callers use `TYPEBOX_SHIM_PATH`.
@@ -815,8 +815,8 @@ const TYPEBOX_SHIM_PATH = __resolveTypeBoxShimPath(IS_COMPILED_BINARY, sourceShi
 // export (see `packages/ai/CHANGELOG.md`), so the bare canonical specifier no
 // longer satisfies those imports. The override below redirects only the bare
 // pi-ai package root onto a sibling shim that re-exports the canonical surface
-// plus the borrowed `Type` runtime from the omptype TypeBox facade. Subpath
-// imports such as `@oh-my-pi/pi-ai/oauth` continue to resolve directly
+// plus the borrowed `Type` runtime from the omstype TypeBox facade. Subpath
+// imports such as `@oh-my-soup/pi-ai/oauth` continue to resolve directly
 // against the bundled pi-ai package.
 const LEGACY_PI_AI_SHIM_PATH = IS_COMPILED_BINARY
 	? bundledModuleVirtualSpecifier(`${CANONICAL_PI_SCOPE}/pi-ai`)
@@ -847,9 +847,9 @@ const LEGACY_PI_TUI_SHIM_PATH = IS_COMPILED_BINARY
 // module instance — in dev / source-link / installed-package mode the canonical
 // specifier resolves cleanly through `Bun.resolveSync` and hardcoding a
 // source-tree path would miss installs where bundled packages live at
-// `node_modules/@oh-my-pi/pi-*`.
+// `node_modules/@oh-my-soup/pi-*`.
 //
-// Compiled-binary entries are `omp-legacy-pi-bundled:<key>` specifiers handed
+// Compiled-binary entries are `oms-legacy-pi-bundled:<key>` specifiers handed
 // to the synthetic onLoad in `installLegacyPiSpecifierShim()` — bunfs paths
 // are unusable on Bun 1.3.14+ (issue #3423). Filesystem-shaped overrides are
 // still validated against on-disk presence so a missing dev-mode shim falls
@@ -857,7 +857,7 @@ const LEGACY_PI_TUI_SHIM_PATH = IS_COMPILED_BINARY
 
 /**
  * Drop overrides whose filesystem targets are missing so they can fall
- * through to the canonical-resolution path. Virtual `omp-legacy-pi-bundled:`
+ * through to the canonical-resolution path. Virtual `oms-legacy-pi-bundled:`
  * entries always pass — live bundled module references are the source of truth
  * in compiled mode where bunfs paths are unreachable (issue #3423).
  *
@@ -951,7 +951,7 @@ function getResolvedSpecifier(specifier: string): string {
 }
 
 /**
- * Resolve a canonical `@oh-my-pi/*` specifier to a filesystem path, preferring
+ * Resolve a canonical `@oh-my-soup/*` specifier to a filesystem path, preferring
  * a bundled compat shim when one is registered for the package root.
  *
  * Falls back to `getResolvedSpecifier` (which may throw under compiled binary
@@ -967,7 +967,7 @@ function resolveCanonicalPiSpecifier(remappedSpecifier: string): string {
 }
 
 function toImportSpecifier(resolvedPath: string): string {
-	// Virtual `omp-legacy-pi-bundled:` specifiers are served by the synthetic
+	// Virtual `oms-legacy-pi-bundled:` specifiers are served by the synthetic
 	// onLoad in `installLegacyPiSpecifierShim()`; wrapping them as `file://`
 	// would corrupt the scheme.
 	if (isBundledVirtualSpecifier(resolvedPath)) {
@@ -977,7 +977,7 @@ function toImportSpecifier(resolvedPath: string): string {
 }
 
 /**
- * Rewrite the extension-owned specifiers OMP must host-resolve — legacy
+ * Rewrite the extension-owned specifiers OMS must host-resolve — legacy
  * `@(scope)/pi-*`, bare TypeBox packages, package `imports` aliases like
  * `#src/*`, and extension-local bare dependencies — to absolute `file://` URLs
  * or compiled-mode virtual specifiers. Relative siblings and built-in modules
@@ -1953,7 +1953,7 @@ interface ExtensionModuleGraph {
 
 /**
  * Walk the extension's import graph starting at `entryRealPath`, returning the
- * realpath of every reachable source module OMP must rewrite at load time.
+ * realpath of every reachable source module OMS must rewrite at load time.
  * Relative imports, package `imports` aliases, and ESM bare dependencies are
  * graph-owned recursively because compiled Bun cannot resolve runtime
  * `node_modules` from those modules. Graph-owned CommonJS modules also own
@@ -2316,7 +2316,7 @@ function synthesizeCommonJsDefaultModule(modulePath: string, source: string, tar
 }
 
 /**
- * Linkedom's canvas bridge uses its bundled fallback because OMP does not ship
+ * Linkedom's canvas bridge uses its bundled fallback because OMS does not ship
  * native canvas.
  */
 async function prepareCommonJsDefaultModule(modulePath: string, source: string): Promise<string> {
@@ -2361,7 +2361,7 @@ async function installExtensionGraphHook(
 		const filter = new RegExp(`^(?:${alternation})(?:\\?mtime=\\d+)?$`);
 		const hookId = Bun.hash(`${entryRealPath}\0async\0${[...asyncModules.keys()].join("\0")}`).toString(36);
 		Bun.plugin({
-			name: `omp:legacy-pi-ext:${hookId}`,
+			name: `oms:legacy-pi-ext:${hookId}`,
 			setup(build) {
 				build.onLoad({ filter, namespace: "file" }, args => {
 					const queryIndex = args.path.indexOf("?mtime=");
@@ -2402,7 +2402,7 @@ async function installExtensionGraphHook(
 		const filter = new RegExp(`^(?:${alternation})(?:\\?mtime=\\d+)?$`);
 		const hookId = Bun.hash(`${entryRealPath}\0commonjs\0${[...commonJsPaths].join("\0")}`).toString(36);
 		Bun.plugin({
-			name: `omp:legacy-pi-ext:${hookId}`,
+			name: `oms:legacy-pi-ext:${hookId}`,
 			setup(build) {
 				build.onLoad({ filter, namespace: "file" }, args => {
 					const queryIndex = args.path.indexOf("?mtime=");
@@ -2424,7 +2424,7 @@ async function installExtensionGraphHook(
 		const filter = new RegExp(`^(?:${alternation})(?:\\?mtime=\\d+)?$`);
 		const hookId = Bun.hash(`${entryRealPath}\0sync-source\0${[...synchronousSourcePaths].join("\0")}`).toString(36);
 		Bun.plugin({
-			name: `omp:legacy-pi-ext:${hookId}`,
+			name: `oms:legacy-pi-ext:${hookId}`,
 			setup(build) {
 				build.onLoad({ filter, namespace: "file" }, args => {
 					const queryIndex = args.path.indexOf("?mtime=");
@@ -2583,7 +2583,7 @@ function resolveLegacyPiSpecifier(args: { path: string; importer: string }): Leg
 		return undefined;
 	}
 
-	// Primary: resolve the canonical @oh-my-pi/* specifier from the host binary
+	// Primary: resolve the canonical @oh-my-soup/* specifier from the host binary
 	// location. Works in dev mode and in source-link installs.
 	try {
 		return toLegacyPiResolveResult(resolveCanonicalPiSpecifier(remappedSpecifier));
@@ -2591,7 +2591,7 @@ function resolveLegacyPiSpecifier(args: { path: string; importer: string }): Leg
 		// Fallback for compiled binary mode: the bundled packages live inside
 		// /$bunfs/root and aren't reachable by filesystem resolution. Prefer the
 		// canonical specifier against the importing file's directory when the
-		// plugin installed @oh-my-pi peer deps, then try the original legacy
+		// plugin installed @oh-my-soup peer deps, then try the original legacy
 		// specifier for plugins that still vendor only @mariozechner or
 		// @earendil-works peer deps.
 		const importerDir = path.dirname(args.importer);
@@ -2618,17 +2618,17 @@ export function installLegacyPiSpecifierShim(): void {
 	isLegacyPiSpecifierShimInstalled = true;
 
 	Bun.plugin({
-		name: "omp:legacy-pi-shim",
+		name: "oms:legacy-pi-shim",
 		setup(build) {
 			build.onResolve({ filter: LEGACY_PI_SPECIFIER_FILTER, namespace: "file" }, resolveLegacyPiSpecifier);
 			build.onResolve({ filter: TYPEBOX_SPECIFIER_FILTER, namespace: "file" }, resolveTypeBoxSpecifier);
-			build.onResolve({ filter: /^omp-legacy-pi-bundled:.+$/, namespace: "file" }, args =>
+			build.onResolve({ filter: /^oms-legacy-pi-bundled:.+$/, namespace: "file" }, args =>
 				resolveBundledVirtualSpecifier(args.path),
 			);
 			build.onResolve({ filter: /.*/, namespace: BUNDLED_VIRTUAL_NAMESPACE }, args =>
 				resolveBundledVirtualSpecifier(args.path),
 			);
-			// Compiled mode serves `omp-legacy-pi-bundled:<key>` imports from
+			// Compiled mode serves `oms-legacy-pi-bundled:<key>` imports from
 			// live host module references. No bunfs path leaves this loader.
 			build.onLoad({ filter: /.*/, namespace: BUNDLED_VIRTUAL_NAMESPACE }, async args => {
 				return { contents: await synthesizeBundledModuleSource(args.path), loader: "js" };

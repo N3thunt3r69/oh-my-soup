@@ -20,22 +20,22 @@
  *      marker present.
  */
 import { afterEach, describe, expect, it } from "bun:test";
-import { importRoomKey } from "@oh-my-pi/pi-coding-agent/collab/crypto";
-import { CollabHost } from "@oh-my-pi/pi-coding-agent/collab/host";
+import { importRoomKey } from "@oh-my-soup/pi-coding-agent/collab/crypto";
+import { CollabHost } from "@oh-my-soup/pi-coding-agent/collab/host";
 import {
 	COLLAB_PROTO,
 	type CollabFrame,
 	parseCollabLink,
 	rewriteEnvelopePeer,
 	unpackEnvelope,
-} from "@oh-my-pi/pi-coding-agent/collab/protocol";
-import { CollabSocket } from "@oh-my-pi/pi-coding-agent/collab/relay-client";
+} from "@oh-my-soup/pi-coding-agent/collab/protocol";
+import { CollabSocket } from "@oh-my-soup/pi-coding-agent/collab/relay-client";
 import {
 	MAX_REPLICATED_PAYLOAD_BYTES,
 	shrinkForReplication,
-} from "@oh-my-pi/pi-coding-agent/collab/replication-shrink";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+} from "@oh-my-soup/pi-coding-agent/collab/replication-shrink";
+import type { InteractiveModeContext } from "@oh-my-soup/pi-coding-agent/modes/types";
+import type { SessionEntry } from "@oh-my-soup/pi-coding-agent/session/session-entries";
 
 interface RelayData {
 	role: "host" | "guest";
@@ -50,7 +50,7 @@ interface TestRelay {
 }
 
 /**
- * Single-room relay mirroring the omp-collab-relay forwarding contract, with
+ * Single-room relay mirroring the oms-collab-relay forwarding contract, with
  * a configurable `maxPayloadLength` so the test asserts the same close path
  * the public relay (Bun.serve default = 16 MB, proxies often lower) exposes.
  */

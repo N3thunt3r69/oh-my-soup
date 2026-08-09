@@ -86,7 +86,7 @@ jobs:
    # ref (or from a tagged main HEAD) is also treated as a release.
    release_metadata:
       name: Resolve release metadata
-      # Hosted, not omp-kata: this ~20 s git-tag probe gates the whole release
+      # Hosted, not oms-kata: this ~20 s git-tag probe gates the whole release
       # chain, and queueing it behind the 4-runner kata pool adds dead minutes
       # to the darwin critical path.
       runs-on: ubuntu-22.04
@@ -129,7 +129,7 @@ jobs:
 
    check:
       name: Lint, type check & web build
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/bun-install
@@ -146,7 +146,7 @@ jobs:
    rust_validate:
       name: Validate Rust workspace (bazel)
       if: github.event_name != 'pull_request'
-      runs-on: omp-kata
+      runs-on: oms-kata
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/bun-install
@@ -179,7 +179,7 @@ jobs:
 
    # Provides the native addons every downstream TS job installs. PRs never
    # build: they fetch the latest release's Linux x64 pair from the
-   # @oh-my-pi/pi-natives-linux-x64 npm leaf instead. The workspace loader
+   # @oh-my-soup/pi-natives-linux-x64 npm leaf instead. The workspace loader
    # skips its version sentinel for workspace loads, so release addons load
    # fine under a newer checkout; a PR whose TS tests depend on changed
    # native behavior fails visibly and the native side lands via main.
@@ -187,7 +187,7 @@ jobs:
    # bazel. Job name says "bazel" for continuity with required checks.
    native_addons:
       name: Build native addons (bazel)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       steps:
          - uses: actions/checkout@v4
 
@@ -197,7 +197,7 @@ jobs:
            shell: bash
            run: |
               set -euo pipefail
-              tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@latest dist.tarball)"
+              tarball="$(npm view @oh-my-soup/pi-natives-linux-x64@latest dist.tarball)"
               echo "Fetching $tarball"
               curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
               mkdir -p bazel-bin/natives-linux-x64-baseline bazel-bin/natives-linux-x64-modern
@@ -295,7 +295,7 @@ jobs:
 
    test_workspace:
       name: Test TS workspace fast
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 20
@@ -308,7 +308,7 @@ jobs:
               targets: linux-x64-baseline linux-x64-modern
          - name: Test workspace packages and repo scripts (TS)
            env:
-              OMP_TEST_CONCURRENCY: "4"
+              OMS_TEST_CONCURRENCY: "4"
            run: |
               bun run ci:test:ts:workspace
               # Not `test:scripts`: scripts/musl-release.test.ts fails on main
@@ -318,7 +318,7 @@ jobs:
 
    test_coding_agent_singleton:
       name: Test coding-agent singleton/global-state (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 20
@@ -336,7 +336,7 @@ jobs:
 
    test_ts_native:
       name: Test TS native/integration packages
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -349,12 +349,12 @@ jobs:
               targets: linux-x64-baseline linux-x64-modern
          - name: Test native/TUI/browser-ish packages (TS)
            env:
-              OMP_TEST_CONCURRENCY: "4"
+              OMS_TEST_CONCURRENCY: "4"
            run: bun run ci:test:ts:native
 
    test_coding_agent_ui:
       name: Test coding-agent UI/TUI (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -367,12 +367,12 @@ jobs:
               targets: linux-x64-baseline linux-x64-modern
          - name: Test coding-agent UI/TUI bucket
            env:
-              OMP_TEST_CONCURRENCY: "2"
+              OMS_TEST_CONCURRENCY: "2"
            run: bun run ci:test:coding-agent:ui
 
    test_coding_agent_runtime:
       name: Test coding-agent runtime/session (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -387,12 +387,12 @@ jobs:
            # Runtime/session tests import native-backed barrels too; keep this
            # separate for concurrency, not as a native-free guardrail.
            env:
-              OMP_TEST_CONCURRENCY: "4"
+              OMS_TEST_CONCURRENCY: "4"
            run: bun run ci:test:coding-agent:runtime
 
    test_coding_agent_native:
       name: Test coding-agent native/unit (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -405,18 +405,18 @@ jobs:
               targets: linux-x64-baseline linux-x64-modern
          - name: Test coding-agent native/unit bucket
            env:
-              OMP_TEST_CONCURRENCY: "4"
+              OMS_TEST_CONCURRENCY: "4"
               # The mupdf/PDF-extraction chunk measures ~7 min on burstable
               # runners under a full 8-wide fan-out; the default 600 s chunk
               # watchdog SIGKILLed it (release run 30519992654). The watchdog
               # exists to catch wedged children, not slow-but-progressing
               # chunks — give this bucket a wider budget.
-              OMP_TEST_CHUNK_TIMEOUT: "1200"
+              OMS_TEST_CHUNK_TIMEOUT: "1200"
            run: bun run ci:test:coding-agent:native
 
    test_smoke:
       name: Test CLI smoke (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 15
@@ -432,7 +432,7 @@ jobs:
 
    install_methods:
       name: Install method smoke tests
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'oms-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       steps:
@@ -444,7 +444,7 @@ jobs:
               targets: linux-x64-baseline linux-x64-modern
          - name: Install method smoke tests
            env:
-              OMP_INSTALL_TEST_SKIP_NATIVE_BUILD: "1"
+              OMS_INSTALL_TEST_SKIP_NATIVE_BUILD: "1"
            run: bun run ci:test:install-methods
 
    # Aggregates every validation job so publish-side release jobs gate on one
@@ -487,7 +487,7 @@ jobs:
                     platform: linux,
                     arch: x64,
                     target_id: linux-x64,
-                    binary_path: packages/coding-agent/binaries/omp-linux-x64,
+                    binary_path: packages/coding-agent/binaries/oms-linux-x64,
                     native_targets: linux-x64-baseline linux-x64-modern,
                  }
                - {
@@ -496,7 +496,7 @@ jobs:
                     libc: musl,
                     arch: x64,
                     target_id: linux-musl-x64,
-                    binary_path: packages/coding-agent/binaries/omp-linux-musl-x64,
+                    binary_path: packages/coding-agent/binaries/oms-linux-musl-x64,
                     native_targets: linux-musl-x64-baseline,
                  }
                - {
@@ -504,7 +504,7 @@ jobs:
                     platform: linux,
                     arch: arm64,
                     target_id: linux-arm64,
-                    binary_path: packages/coding-agent/binaries/omp-linux-arm64,
+                    binary_path: packages/coding-agent/binaries/oms-linux-arm64,
                     native_targets: linux-arm64,
                  }
                - {
@@ -513,7 +513,7 @@ jobs:
                     libc: musl,
                     arch: arm64,
                     target_id: linux-musl-arm64,
-                    binary_path: packages/coding-agent/binaries/omp-linux-musl-arm64,
+                    binary_path: packages/coding-agent/binaries/oms-linux-musl-arm64,
                     native_targets: linux-musl-arm64,
                  }
                - {
@@ -521,7 +521,7 @@ jobs:
                     platform: win32,
                     arch: x64,
                     target_id: win32-x64,
-                    binary_path: packages/coding-agent/binaries/omp-windows-x64.exe,
+                    binary_path: packages/coding-agent/binaries/oms-windows-x64.exe,
                     native_targets: win32-x64-baseline,
                  }
       runs-on: ${{ matrix.os }}
@@ -563,16 +563,16 @@ jobs:
               binary="$(realpath "${{ matrix.binary_path }}")"
               # Bun's musl-target binaries link libstdc++/libgcc dynamically;
               # Alpine users install them alongside the binary (same as bun itself).
-              docker run --rm -v "$binary:/usr/local/bin/omp:ro" alpine:3.22 sh -ec '
+              docker run --rm -v "$binary:/usr/local/bin/oms:ro" alpine:3.22 sh -ec '
                 apk add --no-cache libstdc++ libgcc >/dev/null
                 runtime_dir="$(mktemp -d)"
-                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --version
-                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --smoke-test
+                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" oms --version
+                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" oms --smoke-test
               '
          - name: Upload release binary artifact
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
            with:
-              name: omp-binary-${{ matrix.target_id }}
+              name: oms-binary-${{ matrix.target_id }}
               path: ${{ matrix.binary_path }}
 
    # Darwin release builds are the longest leg of a release (bazel-built
@@ -590,13 +590,13 @@ jobs:
                - {
                     os: macos-15-intel,
                     target_id: darwin-x64,
-                    binary_path: packages/coding-agent/binaries/omp-darwin-x64,
+                    binary_path: packages/coding-agent/binaries/oms-darwin-x64,
                     native_targets: darwin-x64-baseline,
                  }
                - {
                     os: macos-14,
                     target_id: darwin-arm64,
-                    binary_path: packages/coding-agent/binaries/omp-darwin-arm64,
+                    binary_path: packages/coding-agent/binaries/oms-darwin-arm64,
                     native_targets: darwin-arm64,
                  }
       runs-on: ${{ matrix.os }}
@@ -629,7 +629,7 @@ jobs:
            run: bun run ci:release:build-binaries
          - name: Sign and notarize macOS binary (Developer ID)
            # Replaces the ad-hoc signature with a Developer ID + hardened-runtime
-           # one (+JIT/library-validation entitlements; omp dlopens its
+           # one (+JIT/library-validation entitlements; oms dlopens its
            # runtime-extracted native addon, which has a different Team ID) and
            # notarizes. Auto-skips until the APPLE_* secrets are configured.
            if: env.MACOS_SIGNING == 'true'
@@ -658,10 +658,10 @@ jobs:
          - name: Upload release binary artifact
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
            with:
-              name: omp-binary-${{ matrix.target_id }}
+              name: oms-binary-${{ matrix.target_id }}
               path: ${{ matrix.binary_path }}
 
-   # Publishes the five @oh-my-pi/pi-natives-<tag> leaf packages once
+   # Publishes the five @oh-my-soup/pi-natives-<tag> leaf packages once
    # validation passes and every binary built. Runs on one linux runner: leaf
    # publishing is platform-agnostic file packaging (gen-npm-packages reads
    # packages/natives/native), so no per-platform runners are needed.
@@ -751,7 +751,7 @@ jobs:
          - name: Download release binaries
            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
            with:
-              pattern: omp-binary-*
+              pattern: oms-binary-*
               path: packages/coding-agent/binaries
               merge-multiple: true
          # Dependency-free build (bun APIs + zip only), so no `bun install`
@@ -764,15 +764,15 @@ jobs:
          - name: Generate checksums
            run: |
               bun run ci:release:checksums SHA256SUMS.txt \
-                packages/coding-agent/binaries/omp-* \
-                packages/browser-relay/dist/omp-browser-relay-extension.zip
+                packages/coding-agent/binaries/oms-* \
+                packages/browser-relay/dist/oms-browser-relay-extension.zip
          - name: Create GitHub Release
            uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
            with:
               tag_name: ${{ needs.release_metadata.outputs.release-tag }}
               files: |
-                 packages/coding-agent/binaries/omp-*
-                 packages/browser-relay/dist/omp-browser-relay-extension.zip
+                 packages/coding-agent/binaries/oms-*
+                 packages/browser-relay/dist/oms-browser-relay-extension.zip
                  SHA256SUMS.txt
               body_path: release-notes.md
               generate_release_notes: true
@@ -790,26 +790,26 @@ jobs:
       steps:
          - name: Download published macOS arm64 binary
            run: |
-              curl -fsSL -o omp-darwin-arm64 "https://github.com/${{ github.repository }}/releases/download/${{ needs.release_metadata.outputs.release-tag }}/omp-darwin-arm64"
-              chmod +x omp-darwin-arm64
+              curl -fsSL -o oms-darwin-arm64 "https://github.com/${{ github.repository }}/releases/download/${{ needs.release_metadata.outputs.release-tag }}/oms-darwin-arm64"
+              chmod +x oms-darwin-arm64
          - name: Verify published macOS arm64 binary
            run: |
-              codesign -dvvv ./omp-darwin-arm64
-              codesign --verify --strict --verbose=4 ./omp-darwin-arm64
+              codesign -dvvv ./oms-darwin-arm64
+              codesign --verify --strict --verbose=4 ./oms-darwin-arm64
               runtime_dir="$(mktemp -d)"
-              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" ./omp-darwin-arm64 --version
-              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" ./omp-darwin-arm64 --smoke-test
+              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" ./oms-darwin-arm64 --version
+              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" ./oms-darwin-arm64 --smoke-test
          - name: Assert signed release is not ad-hoc
            if: env.MACOS_SIGNING == 'true'
            run: |
-              if codesign -dvvv ./omp-darwin-arm64 2>&1 | grep -qE "flags=.*adhoc|Signature=adhoc"; then
+              if codesign -dvvv ./oms-darwin-arm64 2>&1 | grep -qE "flags=.*adhoc|Signature=adhoc"; then
                 echo "published binary is still ad-hoc signed (Developer ID signing did not run)" >&2
                 exit 1
               fi
               # Gatekeeper assessment: a notarized Developer ID binary is accepted.
               # Informational — a bare (unstapled) Mach-O relies on the online ticket
               # lookup, so surface the result without gating the release on it.
-              spctl -a -t exec -vv ./omp-darwin-arm64 || echo "spctl non-zero (expected for unstapled bare binary; ticket served online)"
+              spctl -a -t exec -vv ./oms-darwin-arm64 || echo "spctl non-zero (expected for unstapled bare binary; ticket served online)"
 
    release_npm:
       name: Publish to npm
@@ -864,7 +864,7 @@ jobs:
               NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
            run: bun run ci:release:publish
 
-   # Regenerate the Homebrew tap formula (can1357/homebrew-tap) from the freshly
+   # Regenerate the Homebrew tap formula (pickpocket/homebrew-tap) from the freshly
    # published release assets and push it. Gated on release_github_verify so the
    # tap only cuts over to a release whose published binary was verified (matches
    # how release_npm is gated). No-ops when HOMEBREW_TAP_DEPLOY_KEY is unset, so a
@@ -888,7 +888,7 @@ jobs:
            if: env.HAS_TAP_KEY == 'true'
            uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
            with:
-              repository: can1357/homebrew-tap
+              repository: pickpocket/homebrew-tap
               ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
               path: homebrew-tap
          - name: Regenerate and push the formula
@@ -896,13 +896,13 @@ jobs:
            env:
               GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
            run: |
-              bun scripts/ci-update-brew-formula.ts "${{ needs.release_metadata.outputs.release-tag }}" --out homebrew-tap/Formula/omp.rb
+              bun scripts/ci-update-brew-formula.ts "${{ needs.release_metadata.outputs.release-tag }}" --out homebrew-tap/Formula/oms.rb
               cd homebrew-tap
-              if git diff --quiet -- Formula/omp.rb; then
+              if git diff --quiet -- Formula/oms.rb; then
                 echo "formula already up to date for ${{ needs.release_metadata.outputs.release-tag }}"
                 exit 0
               fi
               git -c user.name="github-actions[bot]" \
                   -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-                  commit -m "omp ${{ needs.release_metadata.outputs.release-tag }}" -- Formula/omp.rb
+                  commit -m "oms ${{ needs.release_metadata.outputs.release-tag }}" -- Formula/oms.rb
               git push origin HEAD:main

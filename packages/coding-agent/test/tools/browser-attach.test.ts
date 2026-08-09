@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
 	pickElectronTarget,
 	shouldPreserveConnectedBrowserFocus,
-} from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
-import { normalizeConnectedCdpUrl } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
+} from "@oh-my-soup/pi-coding-agent/tools/browser/attach";
+import { normalizeConnectedCdpUrl } from "@oh-my-soup/pi-coding-agent/tools/browser/registry";
 import type { Browser, Page, Target } from "puppeteer-core";
 
 interface FakePageOptions {

@@ -1,4 +1,4 @@
-# @oh-my-pi/pi-ai
+# @oh-my-soup/pi-ai
 
 Unified LLM API with automatic model discovery, provider configuration, token and cost tracking, and simple context persistence and hand-off to other models mid-session.
 
@@ -88,18 +88,18 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 ## Installation
 
 ```bash
-npm install @oh-my-pi/pi-ai
+npm install @oh-my-soup/pi-ai
 ```
 
 ## Quick Start
 
 ```typescript
-import { getModel, stream, complete, Context, Tool, type } from "@oh-my-pi/pi-ai";
+import { getModel, stream, complete, Context, Tool, type } from "@oh-my-soup/pi-ai";
 
 // Fully typed with auto-complete support for both providers and models
 const model = getModel("openai", "gpt-4o-mini");
 
-// Define tools with omptype schemas for type safety and validation
+// Define tools with omstype schemas for type safety and validation
 const tools: Tool[] = [
 	{
 		name: "get_time",
@@ -218,12 +218,12 @@ for (const block of response.content) {
 
 ## Tools
 
-Tools enable LLMs to interact with external systems. Omptype schemas provide type-safe definitions, runtime validation, and JSON Schema conversion for providers.
+Tools enable LLMs to interact with external systems. Omstype schemas provide type-safe definitions, runtime validation, and JSON Schema conversion for providers.
 
 ### Defining Tools
 
 ```typescript
-import { type Tool, type } from "@oh-my-pi/pi-ai";
+import { type Tool, type } from "@oh-my-soup/pi-ai";
 
 const weatherTool: Tool = {
 	name: "get_weather",
@@ -341,12 +341,12 @@ for await (const event of s) {
 
 ### Validating Tool Arguments
 
-When using `agentLoop`, tool arguments are automatically validated against their omptype schemas before execution. Validation failures are returned to the model as tool results so it can retry.
+When using `agentLoop`, tool arguments are automatically validated against their omstype schemas before execution. Validation failures are returned to the model as tool results so it can retry.
 
 When implementing your own tool execution loop with `stream()` or `complete()`, use `validateToolCall` to validate arguments before passing them to your tools:
 
 ```typescript
-import { stream, validateToolCall, Tool } from "@oh-my-pi/pi-ai";
+import { stream, validateToolCall, Tool } from "@oh-my-soup/pi-ai";
 
 const tools: Tool[] = [weatherTool, calculatorTool];
 const s = stream(model, { messages, tools });
@@ -400,7 +400,7 @@ Models with vision capabilities can process images. You can check if a model sup
 
 ```typescript
 import * as fs from "node:fs";
-import { getModel, complete } from "@oh-my-pi/pi-ai";
+import { getModel, complete } from "@oh-my-soup/pi-ai";
 
 const model = getModel("openai", "gpt-4o-mini");
 
@@ -439,7 +439,7 @@ Many models support thinking/reasoning capabilities where they can show their in
 ### Unified Interface (streamSimple/completeSimple)
 
 ```typescript
-import { getModel, streamSimple, completeSimple } from "@oh-my-pi/pi-ai";
+import { getModel, streamSimple, completeSimple } from "@oh-my-soup/pi-ai";
 
 // Many models across providers support thinking/reasoning
 const model = getModel("anthropic", "claude-sonnet-4-20250514");
@@ -481,7 +481,7 @@ for (const block of response.content) {
 For fine-grained control, use the provider-specific options:
 
 ```typescript
-import { getModel, complete } from "@oh-my-pi/pi-ai";
+import { getModel, complete } from "@oh-my-soup/pi-ai";
 
 // OpenAI Reasoning (o1, o3, gpt-5)
 const openaiModel = getModel("openai", "gpt-5-mini");
@@ -568,7 +568,7 @@ if (message.stopReason === "error" || message.stopReason === "aborted") {
 The abort signal allows you to cancel in-progress requests. Aborted requests have `stopReason === 'aborted'`:
 
 ```typescript
-import { getModel, stream } from "@oh-my-pi/pi-ai";
+import { getModel, stream } from "@oh-my-soup/pi-ai";
 
 const model = getModel("openai", "gpt-4o-mini");
 
@@ -669,7 +669,7 @@ A **provider** offers models through a specific API. For example:
 ### Querying Providers and Models
 
 ```typescript
-import { getProviders, getModels, getModel } from "@oh-my-pi/pi-ai";
+import { getProviders, getModels, getModel } from "@oh-my-soup/pi-ai";
 
 // Get all available providers
 const providers = getProviders();
@@ -697,7 +697,7 @@ You can create custom models for local inference servers or custom endpoints.
 For local Ollama, `OLLAMA_API_KEY` is optional and mainly needed for authenticated/self-hosted gateways. `ollama` remains the local OpenAI-compatible runtime integration.
 
 ```typescript
-import { Model, stream } from "@oh-my-pi/pi-ai";
+import { Model, stream } from "@oh-my-soup/pi-ai";
 
 // Example: local Ollama using the OpenAI-compatible API
 const ollamaModel: Model<"openai-completions"> = {
@@ -823,7 +823,7 @@ When messages from one provider are sent to a different provider, the library au
 ### Example: Multi-Provider Conversation
 
 ```typescript
-import { getModel, complete, Context } from "@oh-my-pi/pi-ai";
+import { getModel, complete, Context } from "@oh-my-soup/pi-ai";
 
 // Start with Claude
 const claude = getModel("anthropic", "claude-sonnet-4-20250514");
@@ -870,7 +870,7 @@ This enables flexible workflows where you can:
 The `Context` object can be easily serialized and deserialized using standard JSON methods, making it simple to persist conversations, implement chat history, or transfer contexts between services:
 
 ```typescript
-import { Context, getModel, complete } from "@oh-my-pi/pi-ai";
+import { Context, getModel, complete } from "@oh-my-soup/pi-ai";
 
 // Create and use a context
 const context: Context = {
@@ -905,7 +905,7 @@ const continuation = await complete(newModel, restored);
 The library supports browser environments. You must pass the API key explicitly since environment variables are not available in browsers:
 
 ```typescript
-import { getModel, complete } from "@oh-my-pi/pi-ai";
+import { getModel, complete } from "@oh-my-soup/pi-ai";
 
 // API key must be passed explicitly in browser
 const model = getModel("anthropic", "claude-haiku-4-5-20251001");
@@ -971,7 +971,7 @@ and optional mTLS material (`CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`)
 `NODE_EXTRA_CA_CERTS` (PEM file path or inline PEM, mirroring Node's contract)
 is honoured on every provider fetch — OpenAI-compatible, Codex, Ollama, Azure
 Responses, Google, and Anthropic alike — for corporate relays or private CA
-bundles. Bun's `fetch` does not consume the env var natively, so omp injects
+bundles. Bun's `fetch` does not consume the env var natively, so oms injects
 the bundle into `RequestInit.tls.ca` and seeds the system root store
 alongside it.
 
@@ -1011,7 +1011,7 @@ const response = await complete(model, context, {
 ### Checking Environment Variables
 
 ```typescript
-import { getEnvApiKey } from "@oh-my-pi/pi-ai";
+import { getEnvApiKey } from "@oh-my-soup/pi-ai";
 
 // Check if an API key is set in environment variables
 const key = getEnvApiKey("openai"); // checks OPENAI_API_KEY
@@ -1052,7 +1052,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
 ```
 
 ```typescript
-import { getModel, complete } from "@oh-my-pi/pi-ai";
+import { getModel, complete } from "@oh-my-soup/pi-ai";
 
 (async () => {
 	const model = getModel("google-vertex", "gemini-2.5-flash");
@@ -1070,14 +1070,14 @@ Official docs: [Application Default Credentials](https://cloud.google.com/docs/a
 
 ### CLI Login
 
-Authenticate via the [`omp`](https://omp.sh) coding-agent CLI, which drives this library's OAuth/API-key flows in-process and persists into `agent.db`:
+Authenticate via the [`oms`](https://github.com/pickpocket/oh-my-soup) coding-agent CLI, which drives this library's OAuth/API-key flows in-process and persists into `agent.db`:
 
 ```bash
-omp auth-broker login              # interactive provider selection
-omp auth-broker login anthropic    # login to a specific provider
-omp auth-broker login vllm         # store vLLM API key (or placeholder for local no-auth)
-omp auth-broker list               # list supported providers
-omp auth-broker logout             # interactive — pick a stored credential to remove
+oms auth-broker login              # interactive provider selection
+oms auth-broker login anthropic    # login to a specific provider
+oms auth-broker login vllm         # store vLLM API key (or placeholder for local no-auth)
+oms auth-broker list               # list supported providers
+oms auth-broker logout             # interactive — pick a stored credential to remove
 ```
 
 Credentials are saved to `agent.db` in the agent directory. `/login qianfan` opens the Qianfan console and stores the pasted API key.
@@ -1118,7 +1118,7 @@ import {
 	// Types
 	type OAuthProvider, // includes 'anthropic', 'openai-codex', 'github-copilot', 'google-gemini-cli', 'google-antigravity', 'together', 'moonshot', 'qianfan', 'nvidia', 'nanogpt', 'novita', 'huggingface', 'venice', 'xiaomi', 'vllm', 'litellm', 'cloudflare-ai-gateway', 'qwen-portal', ...
 	type OAuthCredentials,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-soup/pi-ai";
 ```
 
 `loginOpenAICodex` accepts an optional `originator` value used in the OAuth flow:
@@ -1133,7 +1133,7 @@ await loginOpenAICodex({
 ### Login Flow Example
 
 ```typescript
-import { loginGitHubCopilot } from "@oh-my-pi/pi-ai";
+import { loginGitHubCopilot } from "@oh-my-soup/pi-ai";
 import * as fs from "node:fs";
 
 const credentials = await loginGitHubCopilot({
@@ -1157,7 +1157,7 @@ fs.writeFileSync("credentials.json", JSON.stringify(auth, null, 2));
 Use `getOAuthApiKey()` to get an API key, automatically refreshing if expired:
 
 ```typescript
-import { getModel, complete, getOAuthApiKey } from "@oh-my-pi/pi-ai";
+import { getModel, complete, getOAuthApiKey } from "@oh-my-soup/pi-ai";
 import * as fs from "node:fs";
 
 // Load your stored credentials

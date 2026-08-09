@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import {
 	type DisassemblerAdapter,
 	type DisassemblerExecutionOptions,
 	type DisassemblerOpenOptions,
 	IdaDisassemblerAdapter,
 	registerDisassemblerAdapter,
-} from "@oh-my-pi/pi-coding-agent/disasm";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import { DisasmTool } from "@oh-my-pi/pi-coding-agent/tools/disasm";
+} from "@oh-my-soup/pi-coding-agent/disasm";
+import type { ToolSession } from "@oh-my-soup/pi-coding-agent/sdk";
+import { DisasmTool } from "@oh-my-soup/pi-coding-agent/tools/disasm";
 
 interface WireRequest {
 	v?: unknown;

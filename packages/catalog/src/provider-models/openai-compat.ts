@@ -1,5 +1,5 @@
-import { VERSION } from "@oh-my-pi/pi-utils";
-import * as logger from "@oh-my-pi/pi-utils/logger";
+import { VERSION } from "@oh-my-soup/pi-utils";
+import * as logger from "@oh-my-soup/pi-utils/logger";
 import {
 	fetchOpenAICompatibleModels,
 	type OpenAICompatibleModelMapperContext,
@@ -111,7 +111,7 @@ const catalogSession: {
 	hasPayload: boolean;
 } = { inflight: null, payload: undefined, etag: null, hasPayload: false };
 
-const CATALOG_USER_AGENT = `omp/${VERSION} (+https://omp.sh)`;
+const CATALOG_USER_AGENT = `oms/${VERSION} (+https://github.com/pickpocket/oh-my-soup)`;
 
 /**
  * Fetches the models.dev catalog via catalog.stencil.so, which serves a
@@ -395,7 +395,7 @@ async function fetchOllamaNativeModels(
  * Ollama's cloud catalog reports for stock models.
  */
 const OLLAMA_FALLBACK_CONTEXT_WINDOW = 128_000;
-/** Cap max output tokens at a value that matches OMP's other openai-responses defaults. */
+/** Cap max output tokens at a value that matches OMS's other openai-responses defaults. */
 const OLLAMA_DEFAULT_MAX_TOKENS = 8192;
 
 interface OllamaResolvedMetadata {
@@ -3337,7 +3337,7 @@ function toSyntheticStringList(value: unknown): readonly string[] {
 
 /**
  * Translate Synthetic's per-model `reasoning_effort` vocabulary into an effort
- * ladder. Every advertised value that names an OMP tier maps verbatim; `none`
+ * ladder. Every advertised value that names an OMS tier maps verbatim; `none`
  * is the thinking-off state rather than a tier of its own, so it backs the
  * `minimal` selector through the wire map (same shape as the Fireworks
  * `minimal → none` map) and gives these routes a real no-thinking tier.

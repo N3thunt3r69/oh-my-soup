@@ -2,15 +2,15 @@ import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ReviewCommand } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/review";
-import type { CustomCommandAPI } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/types";
-import type { HookCommandContext } from "@oh-my-pi/pi-coding-agent/extensibility/hooks/types";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import type { PrDiffPayload, ViewLookupResult } from "@oh-my-pi/pi-coding-agent/tools/gh";
-import * as gh from "@oh-my-pi/pi-coding-agent/tools/gh";
-import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import * as jj from "@oh-my-pi/pi-coding-agent/utils/jj";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { ReviewCommand } from "@oh-my-soup/pi-coding-agent/extensibility/custom-commands/bundled/review";
+import type { CustomCommandAPI } from "@oh-my-soup/pi-coding-agent/extensibility/custom-commands/types";
+import type { HookCommandContext } from "@oh-my-soup/pi-coding-agent/extensibility/hooks/types";
+import type { SessionEntry } from "@oh-my-soup/pi-coding-agent/session/session-entries";
+import type { PrDiffPayload, ViewLookupResult } from "@oh-my-soup/pi-coding-agent/tools/gh";
+import * as gh from "@oh-my-soup/pi-coding-agent/tools/gh";
+import * as git from "@oh-my-soup/pi-coding-agent/utils/git";
+import * as jj from "@oh-my-soup/pi-coding-agent/utils/jj";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 const SAMPLE_JJ_DIFF = `diff --git a/src/workspace.ts b/src/workspace.ts
 --- a/src/workspace.ts
@@ -93,7 +93,7 @@ describe("ReviewCommand", () => {
 	});
 
 	async function createTempDir(): Promise<string> {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-review-command-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-review-command-"));
 		return tmpDir;
 	}
 

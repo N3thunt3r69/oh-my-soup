@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
+import * as git from "@oh-my-soup/pi-coding-agent/utils/git";
 
 // Regression coverage for #6169: when `git` is not on PATH, `Bun.spawn`/
 // `Bun.spawnSync` throw synchronously with `code: "ENOENT"` (`uv_spawn 'git'`)
@@ -37,8 +37,8 @@ describe("git helpers with git binary absent (#6169)", () => {
 		vi.spyOn(Bun, "spawn").mockImplementation(throwSpawnEnoent);
 		// A deleted cwd also makes spawn throw ENOENT; the error must name the
 		// directory, not falsely claim git is uninstalled.
-		await expect(git.diff.has("/nonexistent-omp-eval-dir")).rejects.toThrow(
-			"working directory does not exist: /nonexistent-omp-eval-dir",
+		await expect(git.diff.has("/nonexistent-oms-eval-dir")).rejects.toThrow(
+			"working directory does not exist: /nonexistent-oms-eval-dir",
 		);
 	});
 

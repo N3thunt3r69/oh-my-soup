@@ -7,8 +7,8 @@ version = "17.2.12"
 edition = "2024"
 license = "MIT"
 authors = ["Can Boluk"]
-homepage = "https://omp.sh/"
-repository = "https://github.com/can1357/oh-my-pi"
+homepage = "https://github.com/pickpocket/oh-my-soup"
+repository = "https://github.com/pickpocket/oh-my-soup"
 
 [patch.crates-io]
 brush-core = { path = "crates/vendor/brush-core" }

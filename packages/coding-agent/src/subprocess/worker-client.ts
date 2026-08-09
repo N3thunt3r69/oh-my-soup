@@ -8,7 +8,7 @@ import {
 	logger,
 	stripWindowsExtendedLengthPathPrefix,
 	workerHostEntry,
-} from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-utils";
 import type { Subprocess } from "bun";
 
 /**
@@ -269,7 +269,7 @@ interface StderrCapture {
 /** Create a file-backed stderr target that does not pin Bun's event loop. */
 function createStderrCapture(exitLabel: string): StderrCapture {
 	try {
-		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-worker-stderr-"));
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-worker-stderr-"));
 		const fd = fs.openSync(path.join(dir, "stderr.log"), "w+");
 		const cleanupOnExit = (): void => cleanupStderrCapture({ target: fd, fd, dir, cleanupOnExit: null });
 		process.once("exit", cleanupOnExit);
@@ -430,7 +430,7 @@ export function logWorkerMessage(message: WorkerLogMessage): void {
 }
 
 /**
- * Drive the ping/pong readiness probe wired into `omp --smoke-test`: send one
+ * Drive the ping/pong readiness probe wired into `oms --smoke-test`: send one
  * `ping`, resolve on the first `pong` (ignoring `log` chatter), and reject on
  * any other message, a worker error, or the timeout. Always tears the handle
  * down on the way out. `label` prefixes the failure messages.

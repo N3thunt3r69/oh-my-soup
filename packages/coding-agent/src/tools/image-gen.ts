@@ -1,16 +1,16 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { type } from "@oh-my-pi/omptype";
-import { type ApiKey, type FetchImpl, getEnvApiKey, type Model, withAuth } from "@oh-my-pi/pi-ai";
-import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
+import { type } from "@oh-my-soup/omstype";
+import { type ApiKey, type FetchImpl, getEnvApiKey, type Model, withAuth } from "@oh-my-soup/pi-ai";
+import { ProviderHttpError } from "@oh-my-soup/pi-ai/error";
 import {
 	CODEX_BASE_URL,
 	getCodexAccountId,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 	URL_PATHS,
-} from "@oh-my-pi/pi-catalog/wire/codex";
-import { getAntigravityUserAgent } from "@oh-my-pi/pi-catalog/wire/gemini-headers";
+} from "@oh-my-soup/pi-catalog/wire/codex";
+import { getAntigravityUserAgent } from "@oh-my-soup/pi-catalog/wire/gemini-headers";
 import {
 	$env,
 	isEnoent,
@@ -20,7 +20,7 @@ import {
 	readSseJson,
 	Snowflake,
 	untilAborted,
-} from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-utils";
 import packageJson from "../../package.json" with { type: "json" };
 import { isAuthenticated, type ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
@@ -709,7 +709,7 @@ function getExtensionForMime(mimeType: string): string {
 
 async function saveImageToTemp(image: InlineImageData): Promise<string> {
 	const ext = getExtensionForMime(image.mimeType);
-	const filename = `omp-image-${Snowflake.next()}.${ext}`;
+	const filename = `oms-image-${Snowflake.next()}.${ext}`;
 	const filepath = path.join(os.tmpdir(), filename);
 	await Bun.write(filepath, Buffer.from(image.data, "base64"));
 	return filepath;
@@ -1479,8 +1479,8 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 									headers: {
 										"Content-Type": "application/json",
 										Authorization: `Bearer ${key}`,
-										"HTTP-Referer": "https://omp.sh/",
-										"X-OpenRouter-Title": "Oh-My-Pi",
+										"HTTP-Referer": "https://github.com/pickpocket/oh-my-soup",
+										"X-OpenRouter-Title": "Oh-My-Soup",
 										"X-OpenRouter-Categories": "cli-agent",
 									},
 									body: JSON.stringify(requestBody),

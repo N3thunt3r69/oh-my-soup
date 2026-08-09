@@ -8,9 +8,9 @@
  * - Interact with the user via UI primitives
  */
 
-import type { type as ArkType } from "@oh-my-pi/omptype";
-import type * as TypeBox from "@oh-my-pi/omptype/typebox";
-import type * as zod from "@oh-my-pi/omptype/zod";
+import type { type as ArkType } from "@oh-my-soup/omstype";
+import type * as TypeBox from "@oh-my-soup/omstype/typebox";
+import type * as zod from "@oh-my-soup/omstype/zod";
 import type {
 	AgentMessage,
 	AgentToolResult,
@@ -18,8 +18,8 @@ import type {
 	ThinkingLevel,
 	ToolApproval,
 	ToolLoadMode,
-} from "@oh-my-pi/pi-agent-core";
-import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
+} from "@oh-my-soup/pi-agent-core";
+import type { CompactionResult } from "@oh-my-soup/pi-agent-core/compaction";
 import type {
 	Api,
 	AssistantMessageEvent,
@@ -36,10 +36,10 @@ import type {
 	Static,
 	TextContent,
 	TSchema,
-} from "@oh-my-pi/pi-ai";
-import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
-import type { AutocompleteItem, AutocompleteProvider, Component, EditorTheme, KeyId, TUI } from "@oh-my-pi/pi-tui";
-import type { logger as PiLogger } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-ai";
+import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-soup/pi-ai/oauth/types";
+import type { AutocompleteItem, AutocompleteProvider, Component, EditorTheme, KeyId, TUI } from "@oh-my-soup/pi-tui";
+import type { logger as PiLogger } from "@oh-my-soup/pi-utils";
 import type { KeybindingsManager } from "../../config/keybindings";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { EditToolDetails } from "../../edit";
@@ -1142,10 +1142,10 @@ export interface ExtensionAPI {
 	/** Injected TypeBox shim for legacy `Type.Object(...)` parameter authoring. */
 	typebox: typeof TypeBox;
 
-	/** Injected omptype schema builder for extension tools. */
+	/** Injected omstype schema builder for extension tools. */
 	arktype: typeof ArkType;
 
-	/** Injected Zod-compatible omptype builder for extension tools. */
+	/** Injected Zod-compatible omstype builder for extension tools. */
 	zod: typeof zod;
 
 	/** Injected pi-coding-agent exports for accessing SDK utilities */

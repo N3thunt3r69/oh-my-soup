@@ -13,7 +13,7 @@
  *
  * Replaces the old SessionObserverOverlayComponent (ctrl+s observer).
  */
-import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { AgentTool } from "@oh-my-soup/pi-agent-core";
 import {
 	Container,
 	matchesKey,
@@ -25,8 +25,8 @@ import {
 	type TUI,
 	visibleWidth,
 	wrapTextWithAnsi,
-} from "@oh-my-pi/pi-tui";
-import { formatAge, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-tui";
+import { formatAge, formatNumber, getProjectDir, logger } from "@oh-my-soup/pi-utils";
 import type { KeyId } from "../../config/keybindings";
 import type { Settings } from "../../config/settings";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
@@ -586,7 +586,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 				const emptyState = [
 					`${theme.fg("muted", theme.status.shadowed)} ${theme.bold("No agents in this session")}`,
 					theme.fg("dim", "Finished, parked, and killed subagents remain with the session that created them."),
-					theme.fg("dim", "Resume that session with omp-dev --continue, or spawn a task here."),
+					theme.fg("dim", "Resume that session with oms-dev --continue, or spawn a task here."),
 				];
 				for (const line of emptyState.slice(0, budget)) {
 					lines.push(line);

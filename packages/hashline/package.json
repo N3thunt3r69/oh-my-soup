@@ -1,18 +1,18 @@
 {
   "type": "module",
-  "name": "@oh-my-pi/hashline",
+  "name": "@oh-my-soup/hashline",
   "version": "17.2.12",
   "description": "Hashline: a compact, line-anchored patch language and applier. Pluggable FS/IO so it works over disk, in-memory, or any custom backend.",
-  "homepage": "https://omp.sh",
+  "homepage": "https://github.com/pickpocket/oh-my-soup",
   "author": "Can Boluk",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/can1357/oh-my-pi.git",
+    "url": "git+https://github.com/pickpocket/oh-my-soup.git",
     "directory": "packages/hashline"
   },
   "bugs": {
-    "url": "https://github.com/can1357/oh-my-pi/issues"
+    "url": "https://github.com/pickpocket/oh-my-soup/issues"
   },
   "keywords": [
     "patch",
@@ -33,8 +33,8 @@
     "fmt": "biome format --write ."
   },
   "dependencies": {
-    "@oh-my-pi/pi-natives": "catalog:",
-    "@oh-my-pi/pi-utils": "catalog:"
+    "@oh-my-soup/pi-natives": "catalog:",
+    "@oh-my-soup/pi-utils": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:"

@@ -12,10 +12,10 @@ import type {
 	DesktopSessionOptions,
 	DesktopWindow,
 	PointerOptions,
-} from "@oh-my-pi/pi-natives";
-import { createDesktopSession } from "@oh-my-pi/pi-natives/desktop";
-import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
-import { Snowflake } from "@oh-my-pi/pi-utils/snowflake";
+} from "@oh-my-soup/pi-natives";
+import { createDesktopSession } from "@oh-my-soup/pi-natives/desktop";
+import * as postmortem from "@oh-my-soup/pi-utils/postmortem";
+import { Snowflake } from "@oh-my-soup/pi-utils/snowflake";
 import { JsRuntime, type RuntimeHooks } from "../../eval/js/shared/runtime";
 import { copyToClipboard, readTextFromClipboard } from "../../utils/clipboard";
 import { cloneSafe, RunOutput } from "../browser/run-output";
@@ -192,7 +192,7 @@ async function captureScreenshot(
 			maxHeight: context.snapshot.captureMaxHeight,
 		}),
 	);
-	const destination = path.join(os.tmpdir(), `omp-computer-${Snowflake.next()}.png`);
+	const destination = path.join(os.tmpdir(), `oms-computer-${Snowflake.next()}.png`);
 	await Bun.write(destination, frame.data);
 	const scaled = frame.width !== frame.sourceWidth || frame.height !== frame.sourceHeight;
 	context.screenshots.push({

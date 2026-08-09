@@ -1,12 +1,12 @@
 /**
  * Stats CLI command handlers.
  *
- * Handles `omp stats` subcommand for viewing AI usage statistics.
+ * Handles `oms stats` subcommand for viewing AI usage statistics.
  */
 
-import { truncateToWidth } from "@oh-my-pi/pi-tui/utils";
-import { APP_NAME, formatDuration, formatNumber, formatPercent } from "@oh-my-pi/pi-utils";
-import chalk from "@oh-my-pi/pi-utils/chalk";
+import { truncateToWidth } from "@oh-my-soup/pi-tui/utils";
+import { APP_NAME, formatDuration, formatNumber, formatPercent } from "@oh-my-soup/pi-utils";
+import chalk from "@oh-my-soup/pi-utils/chalk";
 import { openPath } from "../utils/open";
 
 /**
@@ -113,7 +113,7 @@ function normalizePremiumRequests(n: number): number {
 export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
 	// Lazy import to avoid loading stats module when not needed
 	const { getDashboardStats, syncAllSessions, getTotalMessageCount, startServer, closeDb } = await import(
-		"@oh-my-pi/omp-stats"
+		"@oh-my-soup/oms-stats"
 	);
 
 	// Sync session files first
@@ -157,7 +157,7 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
 }
 
 async function printStatsSummary(): Promise<void> {
-	const { getDashboardStats } = await import("@oh-my-pi/omp-stats");
+	const { getDashboardStats } = await import("@oh-my-soup/oms-stats");
 	const stats = await getDashboardStats();
 	const { overall, byModel, byFolder } = stats;
 

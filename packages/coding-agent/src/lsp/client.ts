@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { isEnoent, logger, postmortem, ptree, untilAborted } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger, postmortem, ptree, untilAborted } from "@oh-my-soup/pi-utils";
 import { MessageFramer } from "../jsonrpc/message-framing";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
 import { applyWorkspaceEdit } from "./edits";
@@ -38,7 +38,7 @@ let idleCheckInterval: NodeJS.Timeout | null = null;
 const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
 
 // Broker-shared server mode (one language server per project shared by every
-// omp instance through the LSP mux daemon). Off by default so embedders and
+// oms instance through the LSP mux daemon). Off by default so embedders and
 // tests that drive getOrCreateClient directly never touch the daemon broker;
 // the SDK turns it on from the `lsp.shared` setting at session creation.
 let sharedLspEnabled = false;

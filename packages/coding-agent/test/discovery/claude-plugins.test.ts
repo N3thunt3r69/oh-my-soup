@@ -2,20 +2,20 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadCapability } from "@oh-my-pi/pi-coding-agent/capability";
-import { clearCache as clearFsCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
+import { loadCapability } from "@oh-my-soup/pi-coding-agent/capability";
+import { clearCache as clearFsCache } from "@oh-my-soup/pi-coding-agent/capability/fs";
 import {
 	clearClaudePluginRootsCache,
 	listClaudePluginRoots,
 	parseClaudePluginsRegistry,
-} from "@oh-my-pi/pi-coding-agent/discovery/helpers";
-import { loadSlashCommands } from "@oh-my-pi/pi-coding-agent/extensibility/slash-commands";
-import { discoverAgents } from "@oh-my-pi/pi-coding-agent/task/discovery";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
-import "@oh-my-pi/pi-coding-agent/discovery/claude-plugins";
-import { type MCPServer, mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
-import type { Skill } from "@oh-my-pi/pi-coding-agent/capability/skill";
-import type { SlashCommand } from "@oh-my-pi/pi-coding-agent/capability/slash-command";
+} from "@oh-my-soup/pi-coding-agent/discovery/helpers";
+import { loadSlashCommands } from "@oh-my-soup/pi-coding-agent/extensibility/slash-commands";
+import { discoverAgents } from "@oh-my-soup/pi-coding-agent/task/discovery";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
+import "@oh-my-soup/pi-coding-agent/discovery/claude-plugins";
+import { type MCPServer, mcpCapability } from "@oh-my-soup/pi-coding-agent/capability/mcp";
+import type { Skill } from "@oh-my-soup/pi-coding-agent/capability/skill";
+import type { SlashCommand } from "@oh-my-soup/pi-coding-agent/capability/slash-command";
 
 describe("parseClaudePluginsRegistry", () => {
 	test("parses valid registry", () => {
@@ -435,11 +435,11 @@ describe("listClaudePluginRoots", () => {
 	test("expands env placeholders in marketplace plugin MCP url and headers", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "context7");
-		const originalApiKey = process.env.OMP_PLUGIN_MCP_API_KEY;
-		const originalUrl = process.env.OMP_PLUGIN_MCP_URL;
+		const originalApiKey = process.env.OMS_PLUGIN_MCP_API_KEY;
+		const originalUrl = process.env.OMS_PLUGIN_MCP_URL;
 		const envPlaceholder = (name: string): string => ["$", "{", name, ":-}"].join("");
-		process.env.OMP_PLUGIN_MCP_API_KEY = "ctx7sk-test-key";
-		process.env.OMP_PLUGIN_MCP_URL = "https://mcp.context7.example";
+		process.env.OMS_PLUGIN_MCP_API_KEY = "ctx7sk-test-key";
+		process.env.OMS_PLUGIN_MCP_URL = "https://mcp.context7.example";
 
 		try {
 			await fs.mkdir(pluginsDir, { recursive: true });
@@ -466,9 +466,9 @@ describe("listClaudePluginRoots", () => {
 				JSON.stringify({
 					context7: {
 						type: "http",
-						url: `${envPlaceholder("OMP_PLUGIN_MCP_URL")}/mcp`,
+						url: `${envPlaceholder("OMS_PLUGIN_MCP_URL")}/mcp`,
 						headers: {
-							CONTEXT7_API_KEY: envPlaceholder("OMP_PLUGIN_MCP_API_KEY"),
+							CONTEXT7_API_KEY: envPlaceholder("OMS_PLUGIN_MCP_API_KEY"),
 						},
 					},
 				}),
@@ -484,20 +484,20 @@ describe("listClaudePluginRoots", () => {
 			expect(server?.url).toBe("https://mcp.context7.example/mcp");
 			expect(server?.headers).toEqual({ CONTEXT7_API_KEY: "ctx7sk-test-key" });
 		} finally {
-			if (originalApiKey === undefined) delete process.env.OMP_PLUGIN_MCP_API_KEY;
-			else process.env.OMP_PLUGIN_MCP_API_KEY = originalApiKey;
-			if (originalUrl === undefined) delete process.env.OMP_PLUGIN_MCP_URL;
-			else process.env.OMP_PLUGIN_MCP_URL = originalUrl;
+			if (originalApiKey === undefined) delete process.env.OMS_PLUGIN_MCP_API_KEY;
+			else process.env.OMS_PLUGIN_MCP_API_KEY = originalApiKey;
+			if (originalUrl === undefined) delete process.env.OMS_PLUGIN_MCP_URL;
+			else process.env.OMS_PLUGIN_MCP_URL = originalUrl;
 		}
 	});
 
-	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
+	test("uses OMS then Claude manifest mcpServers paths before .mcp.json", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
-		const ompPluginPath = path.join(tempDir, "plugins", "omp-pointer");
+		const ompPluginPath = path.join(tempDir, "plugins", "oms-pointer");
 		const claudePluginPath = path.join(tempDir, "plugins", "claude-pointer");
 		await fs.mkdir(pluginsDir, { recursive: true });
 		await Promise.all([
-			fs.mkdir(path.join(ompPluginPath, ".omp-plugin"), { recursive: true }),
+			fs.mkdir(path.join(ompPluginPath, ".oms-plugin"), { recursive: true }),
 			fs.mkdir(path.join(ompPluginPath, ".claude-plugin"), { recursive: true }),
 			fs.mkdir(path.join(claudePluginPath, ".claude-plugin"), { recursive: true }),
 		]);
@@ -506,7 +506,7 @@ describe("listClaudePluginRoots", () => {
 			JSON.stringify({
 				version: 2,
 				plugins: {
-					"omp-pointer@market": [
+					"oms-pointer@market": [
 						{
 							scope: "user",
 							installPath: ompPluginPath,
@@ -529,14 +529,14 @@ describe("listClaudePluginRoots", () => {
 		);
 		await Promise.all([
 			fs.writeFile(
-				path.join(ompPluginPath, ".omp-plugin", "plugin.json"),
-				JSON.stringify({ mcpServers: "./mcp-omp.json" }),
+				path.join(ompPluginPath, ".oms-plugin", "plugin.json"),
+				JSON.stringify({ mcpServers: "./mcp-oms.json" }),
 			),
 			fs.writeFile(
 				path.join(ompPluginPath, ".claude-plugin", "plugin.json"),
 				JSON.stringify({ mcpServers: "./mcp-claude.json" }),
 			),
-			fs.writeFile(path.join(ompPluginPath, "mcp-omp.json"), JSON.stringify({ "from-omp": { command: "omp" } })),
+			fs.writeFile(path.join(ompPluginPath, "mcp-oms.json"), JSON.stringify({ "from-oms": { command: "oms" } })),
 			fs.writeFile(
 				path.join(ompPluginPath, "mcp-claude.json"),
 				JSON.stringify({ "from-claude": { command: "claude" } }),
@@ -561,7 +561,7 @@ describe("listClaudePluginRoots", () => {
 		expect(result.warnings).toEqual([]);
 		expect(result.all.map(server => server.name).sort()).toEqual([
 			"claude-pointer:from-claude",
-			"omp-pointer:from-omp",
+			"oms-pointer:from-oms",
 		]);
 	});
 
@@ -569,7 +569,7 @@ describe("listClaudePluginRoots", () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "inline-mcp");
 		await fs.mkdir(pluginsDir, { recursive: true });
-		await fs.mkdir(path.join(pluginPath, ".omp-plugin"), { recursive: true });
+		await fs.mkdir(path.join(pluginPath, ".oms-plugin"), { recursive: true });
 		await fs.writeFile(
 			path.join(pluginsDir, "installed_plugins.json"),
 			JSON.stringify({
@@ -590,7 +590,7 @@ describe("listClaudePluginRoots", () => {
 		// Inline object form: the manifest carries the server map directly, and no
 		// root .mcp.json exists, so the pre-fix fallback would register nothing.
 		await fs.writeFile(
-			path.join(pluginPath, ".omp-plugin", "plugin.json"),
+			path.join(pluginPath, ".oms-plugin", "plugin.json"),
 			JSON.stringify({ mcpServers: { local: { command: "./bin/server", args: ["run"] } } }),
 		);
 
@@ -610,7 +610,7 @@ describe("listClaudePluginRoots", () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "broken-pointer");
 		await fs.mkdir(pluginsDir, { recursive: true });
-		await fs.mkdir(path.join(pluginPath, ".omp-plugin"), { recursive: true });
+		await fs.mkdir(path.join(pluginPath, ".oms-plugin"), { recursive: true });
 		await fs.writeFile(
 			path.join(pluginsDir, "installed_plugins.json"),
 			JSON.stringify({
@@ -631,8 +631,8 @@ describe("listClaudePluginRoots", () => {
 		// Pointer names a file the plugin never shipped: discovery must say so
 		// instead of silently registering nothing.
 		await fs.writeFile(
-			path.join(pluginPath, ".omp-plugin", "plugin.json"),
-			JSON.stringify({ mcpServers: "./mcp-omp.json" }),
+			path.join(pluginPath, ".oms-plugin", "plugin.json"),
+			JSON.stringify({ mcpServers: "./mcp-oms.json" }),
 		);
 		await fs.writeFile(path.join(pluginPath, ".mcp.json"), JSON.stringify({ "from-root": { command: "root" } }));
 
@@ -643,14 +643,14 @@ describe("listClaudePluginRoots", () => {
 
 		expect(result.all.map(server => server.name)).toEqual([]);
 		expect(result.warnings).toEqual([
-			`[Claude Code Marketplace] [claude-plugins] Missing mcpServers file declared by broken-pointer@market: ${path.join(pluginPath, "mcp-omp.json")}`,
+			`[Claude Code Marketplace] [claude-plugins] Missing mcpServers file declared by broken-pointer@market: ${path.join(pluginPath, "mcp-oms.json")}`,
 		]);
 	});
 
 	test("deduplicates a plugin alias of a directly configured MCP connection", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "context7");
-		const directConfigPath = path.join(tempDir, ".omp", "mcp.json");
+		const directConfigPath = path.join(tempDir, ".oms", "mcp.json");
 		const connection = {
 			type: "http",
 			url: "https://mcp.context7.example/mcp",

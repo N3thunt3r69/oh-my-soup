@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { type } from "@oh-my-pi/omptype";
-import { isArkSchema } from "@oh-my-pi/pi-ai/utils/schema";
+import { type } from "@oh-my-soup/omstype";
+import { isArkSchema } from "@oh-my-soup/pi-ai/utils/schema";
 import { applyToolProxy } from "../../src/extensibility/tool-proxy";
 
 describe("applyToolProxy", () => {
@@ -14,7 +14,7 @@ describe("applyToolProxy", () => {
 	}
 
 	it("preserves schema callables: parameters stay wire-detectable through the wrapper", () => {
-		// Regression: omptype schemas are plain functions carrying toJsonSchema/
+		// Regression: omstype schemas are plain functions carrying toJsonSchema/
 		// assert as own properties; binding them stripped those properties, so
 		// isArkSchema failed and JSON.stringify(schema) yielded undefined
 		// downstream (status-line tokenizer crash).
