@@ -75,12 +75,6 @@ curl -fsSL https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/
 brew install pickpocket/tap/oms
 ```
 
-**Bun (recommended)**
-
-```sh
-bun install -g @oh-my-soup/pi-coding-agent
-```
-
 **Windows (PowerShell)**
 
 ```powershell
@@ -93,7 +87,9 @@ irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install
 mise use -g github:pickpocket/oh-my-soup
 ```
 
-macOS · Linux · Windows · bun ≥ 1.3.14
+> `oms` only lands on PATH once mise itself is active: `mise activate` in your shell rc, or the shims dir (`~/.local/share/mise/shims`, `%LOCALAPPDATA%\mise\shims` on Windows) on PATH.
+
+macOS · Linux · Windows · x64 and arm64. Every method installs the same self-contained binary — there is no runtime to install and nothing to fetch from a package registry.
 
 ### Shell completions
 

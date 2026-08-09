@@ -15,21 +15,18 @@ import chalk from "@oh-my-soup/pi-utils/chalk";
 import { $ } from "bun";
 import { theme } from "../modes/theme/theme";
 import { isTimeoutError, withTimeoutSignal } from "../utils/fetch-timeout";
+import { fetchLatestRelease, type LatestRelease, RELEASE_REPO as REPO } from "../utils/latest-release";
 
-const REPO = "pickpocket/oh-my-soup";
 const PACKAGE = "@oh-my-soup/pi-coding-agent";
 const HOMEBREW_FORMULA = "pickpocket/tap/oms";
 const MISE_TOOL = "github:pickpocket/oh-my-soup";
 /**
  * Official npm registry origin.
  *
- * Pinned across both the version check and the bun install step so the two
- * agree on which catalog they are talking to. A user's bun may be pointed at
- * an unofficial mirror (corporate proxy, Taobao, etc.) that lags the upstream
- * registry by minutes-to-hours, in which case `getLatestRelease` would resolve
- * a version the mirror has not yet replicated and the install would fail with
- * `No version matching "X" found for specifier "<pkg>" (but package exists)`.
- * See #1686.
+ * Pins the bun/npm reinstall paths to the official registry regardless of the
+ * user's bunfig/`.npmrc`. A mirror (corporate proxy, Taobao, …) that lags the
+ * upstream registry by minutes-to-hours would otherwise reject a version that
+ * is already published. See #1686.
  */
 const NPM_REGISTRY = "https://registry.npmjs.org/";
 const GITHUB_API = "https://api.github.com";
@@ -61,11 +58,6 @@ const SUPPORTED_NATIVE_TAGS: ReadonlySet<string> = new Set([
 
 function currentNativeTag(): string {
 	return `${process.platform}-${process.arch}`;
-}
-
-interface ReleaseInfo {
-	tag: string;
-	version: string;
 }
 
 export interface ReleaseBinaryAsset {
@@ -462,40 +454,9 @@ async function resolveUpdateTarget(): Promise<UpdateTarget> {
 		if (method === "binary") return { method, path: ompPath };
 		return { method };
 	}
-
-	if (bunBinDir) return { method: "bun" };
-
+	// No fallback guess: oms is distributed as a release binary, so an oms that
+	// is not on PATH is an install this process cannot safely replace.
 	throw new Error(`Could not resolve ${APP_NAME} binary path in PATH`);
-}
-
-/**
- * Get the latest release info from the npm registry.
- * Uses npm instead of GitHub API to avoid unauthenticated rate limiting.
- */
-async function getLatestRelease(): Promise<ReleaseInfo> {
-	let response: Response;
-	try {
-		response = await fetch(`${NPM_REGISTRY}${PACKAGE}/latest`, {
-			signal: withTimeoutSignal(RELEASE_METADATA_TIMEOUT_MS),
-		});
-	} catch (err) {
-		if (isTimeoutError(err)) {
-			throw new Error("Timed out fetching release info after 30s", { cause: err });
-		}
-		throw err;
-	}
-	if (!response.ok) {
-		throw new Error(`Failed to fetch release info: ${response.statusText}`);
-	}
-
-	const data = (await response.json()) as { version: string };
-	const version = data.version;
-	const tag = `v${version}`;
-
-	return {
-		tag,
-		version,
-	};
 }
 
 interface BunInstallCachePruneResult {
@@ -938,18 +899,10 @@ function buildVersionedPackageInstallArgs(expectedVersion: string, nativeTag: st
 /**
  * Build the bun argv used to globally install a specific oms version.
  *
- * The version is selected by hitting {@link NPM_REGISTRY} directly in
- * {@link getLatestRelease}, so the install MUST observe the same catalog:
- *
- * - `--registry=${NPM_REGISTRY}` pins the install to the official registry
- *   regardless of the user's bunfig/`.npmrc`. A mirror (corporate proxy,
- *   Taobao, …) that hasn't yet replicated the release would otherwise reject
- *   a version the upstream registry already advertises.
- * - `--no-cache` tells bun to ignore its on-disk manifest snapshot so it
- *   re-fetches metadata from that registry on every invocation.
- *
- * Together these two flags make `oms update` produce exactly the registry
- * lookup the version check just performed. See #1686.
+ * `--registry=${NPM_REGISTRY}` pins the install to the official registry
+ * regardless of the user's bunfig/`.npmrc`, and `--no-cache` tells bun to
+ * ignore its on-disk manifest snapshot so it re-fetches metadata on every
+ * invocation. See #1686.
  *
  * Also pins {@link NATIVES_PACKAGE} and the platform-specific
  * `@oh-my-soup/pi-natives-<tag>` leaf to `expectedVersion`. `bun install -g`
@@ -1118,12 +1071,13 @@ export async function updateViaBinaryAt(
 export async function runUpdateCommand(opts: { force: boolean; check: boolean }): Promise<void> {
 	console.log(chalk.dim(`Current version: ${VERSION}`));
 
-	// Check for updates
-	let release: ReleaseInfo;
+	// Check for updates. GitHub releases are the source of truth for both the
+	// version and the binaries; oms is not published to a package registry.
+	let release: LatestRelease;
 	try {
-		release = await getLatestRelease();
+		release = await fetchLatestRelease(RELEASE_METADATA_TIMEOUT_MS);
 	} catch (err) {
-		console.error(chalk.red(`Failed to check for updates: ${err}`));
+		console.error(chalk.red(`Failed to check for updates: ${isTimeoutError(err) ? "timed out after 30s" : err}`));
 		process.exit(1);
 	}
 

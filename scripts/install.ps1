@@ -2,87 +2,20 @@
 # Usage: irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install.ps1 | iex
 #
 # Or with options:
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install.ps1))) -Source
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install.ps1))) -Binary
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install.ps1))) -Source -Ref v3.20.1
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install.ps1))) -Source -Ref main
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install.ps1))) -Binary -Ref v3.20.1
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pickpocket/oh-my-soup/main/scripts/install.ps1))) -Ref v17.2.13
+#
+# Installs the prebuilt single-file binary from the GitHub release. oms is not
+# published to any package registry; the binary is the distribution.
 
 param(
-    [switch]$Source,
-    [switch]$Binary,
     [string]$Ref
 )
 
 $ErrorActionPreference = "Stop"
 
 $Repo = "pickpocket/oh-my-soup"
-$Package = "@oh-my-soup/pi-coding-agent"
 $InstallDir = if ($env:PI_INSTALL_DIR) { $env:PI_INSTALL_DIR } else { "$env:LOCALAPPDATA\oms" }
 $BinaryName = "oms-windows-x64.exe"
-$MinimumBunVersion = "1.3.14"
-
-function Test-BunInstalled {
-    try {
-        $null = Get-Command bun -ErrorAction Stop
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Get-BunVersion {
-    try {
-        $versionText = (bun --version 2>$null)
-        if (-not $versionText) {
-            return $null
-        }
-
-        $clean = $versionText.Trim().Split("-")[0]
-        return [version]$clean
-    } catch {
-        return $null
-    }
-}
-
-function Test-BunVersion {
-    param([string]$MinimumVersion)
-
-    $currentVersion = Get-BunVersion
-    if (-not $currentVersion) {
-        return $false
-    }
-
-    return $currentVersion -ge [version]$MinimumVersion
-}
-
-function Assert-BunVersion {
-    param([string]$MinimumVersion)
-
-    if (-not (Test-BunVersion $MinimumVersion)) {
-        $current = Get-BunVersion
-        $currentText = if ($current) { $current.ToString() } else { "unknown" }
-        throw "Bun $MinimumVersion or newer is required. Current version: $currentText. Upgrade Bun at https://bun.sh/docs/installation"
-    }
-}
-
-function Test-GitInstalled {
-    try {
-        $null = Get-Command git -ErrorAction Stop
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Test-GitLfsInstalled {
-    try {
-        $null = Get-Command git-lfs -ErrorAction Stop
-        return $true
-    } catch {
-        return $false
-    }
-}
 
 function Find-BashShell {
     # Check Git Bash first (most common on Windows)
@@ -163,88 +96,13 @@ function Configure-BashShell {
     }
 }
 
-function Install-Bun {
-    Write-Host "Installing bun..."
-    irm bun.sh/install.ps1 | iex
-    # Refresh PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-    Assert-BunVersion $MinimumBunVersion
-}
-
-function Install-ViaBun {
-    Write-Host "Installing via bun..."
-    if ($Ref) {
-        if (-not (Test-GitInstalled)) {
-            throw "git is required for -Ref when installing from source"
-        }
-
-        $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("oms-install-" + [System.Guid]::NewGuid().ToString("N"))
-        New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
-
-        try {
-            $repoUrl = "https://github.com/$Repo.git"
-            $cloneOk = $false
-            try {
-                git clone --depth 1 --branch $Ref $repoUrl $tmpRoot | Out-Null
-                $cloneOk = $true
-            } catch {
-                $cloneOk = $false
-            }
-
-            if (-not $cloneOk) {
-                git clone $repoUrl $tmpRoot | Out-Null
-                Push-Location $tmpRoot
-                try {
-                    git checkout $Ref | Out-Null
-                } finally {
-                    Pop-Location
-                }
-            }
-
-            # Pull LFS files
-            if (Test-GitLfsInstalled) {
-                Push-Location $tmpRoot
-                try {
-                    git lfs pull | Out-Null
-                } finally {
-                    Pop-Location
-                }
-            }
-
-            $packagePath = Join-Path $tmpRoot "packages\coding-agent"
-            if (-not (Test-Path $packagePath)) {
-                throw "Expected package at $packagePath"
-            }
-
-            bun install -g $packagePath
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to install from $packagePath via bun"
-            }
-        } finally {
-            Remove-Item -Recurse -Force $tmpRoot -ErrorAction SilentlyContinue
-        }
-    } else {
-        bun install -g $Package
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install $Package via bun"
-        }
-    }
-
-    Write-Host ""
-    Write-Host "[OK] Installed oms via bun" -ForegroundColor Green
-
-    Configure-BashShell
-
-    Write-Host "Run 'oms' to get started!"
-}
-
 function Install-Binary {
     if ($Ref) {
         Write-Host "Fetching release $Ref..."
         try {
             $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$Ref" -TimeoutSec 60
         } catch {
-            throw "Release tag not found: $Ref`nFor branch/commit installs, use -Source with -Ref."
+            throw "Release tag not found: $Ref`nAvailable releases: https://github.com/$Repo/releases"
         }
     } else {
         Write-Host "Fetching latest release..."
@@ -263,10 +121,28 @@ function Install-Binary {
     $BinaryUrl = "https://github.com/$Repo/releases/download/$Latest/$BinaryName"
     Write-Host "Downloading $BinaryName..."
     $OutPath = Join-Path $InstallDir "oms.exe"
-    Invoke-WebRequest -Uri $BinaryUrl -OutFile $OutPath -TimeoutSec 900
+    # Download beside the target first: overwriting a running oms.exe fails, and
+    # a half-written oms.exe is worse than the previous one.
+    $TempPath = "$OutPath.download"
+    try {
+        Invoke-WebRequest -Uri $BinaryUrl -OutFile $TempPath -TimeoutSec 900
+    } catch {
+        Remove-Item $TempPath -ErrorAction SilentlyContinue
+        throw "$Latest has no $BinaryName asset.`nSee https://github.com/$Repo/releases/tag/$Latest for what it ships."
+    }
+    Move-Item -Force $TempPath $OutPath
+
+    # Never claim success for a binary that cannot start.
+    $smoke = & $OutPath --version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "[FAIL] oms was downloaded to $OutPath but cannot start:" -ForegroundColor Red
+        $smoke | ForEach-Object { Write-Host "    $_" }
+        exit 1
+    }
 
     Write-Host ""
-    Write-Host "[OK] Installed oms to $OutPath" -ForegroundColor Green
+    Write-Host "[OK] Installed oms $($smoke -join ' ') to $OutPath" -ForegroundColor Green
 
     # Add to PATH if not already there
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -285,25 +161,4 @@ function Install-Binary {
     }
 }
 
-# Main logic
-if ($Ref -and -not $Source -and -not $Binary) {
-    $Source = $true
-}
-
-if ($Source) {
-    if (-not (Test-BunInstalled)) {
-        Install-Bun
-    }
-    Assert-BunVersion $MinimumBunVersion
-    Install-ViaBun
-} elseif ($Binary) {
-    Install-Binary
-} else {
-    # Default: use bun if available, otherwise binary
-    if (Test-BunInstalled) {
-        Assert-BunVersion $MinimumBunVersion
-        Install-ViaBun
-    } else {
-        Install-Binary
-    }
-}
+Install-Binary

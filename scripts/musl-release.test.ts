@@ -68,14 +68,14 @@ describe("musl release artifacts", () => {
 case "$*" in
   *api.github.com*) echo '{"tag_name":"v1.0.0"}' ;;
   *) while [ "$#" -gt 0 ]; do
-       [ "$1" = "-o" ] && { printf binary > "$2"; exit 0; }
+       [ "$1" = "-o" ] && { printf '#!/bin/sh\\necho 1.0.0\\n' > "$2"; exit 0; }
        shift
      done ;;
 esac
 `,
 		);
 
-		const result = await run(["sh", "scripts/install.sh", "--binary"], {
+		const result = await run(["sh", "scripts/install.sh"], {
 			...process.env,
 			PATH: `${binDir}:${process.env.PATH ?? ""}`,
 			HOME: dir,
@@ -84,6 +84,41 @@ esac
 
 		expect(result.exitCode, result.stderr).toBe(0);
 		expect(result.stdout).toContain("Downloading oms-linux-musl-x64...");
-		expect(await Bun.file(path.join(installDir, "oms")).text()).toBe("binary");
+		// The installer must run what it downloaded before claiming success.
+		expect(result.stdout).toContain("✓ Installed oms to");
+		expect(await Bun.file(path.join(installDir, "oms")).text()).toBe("#!/bin/sh\necho 1.0.0\n");
+	});
+
+	test("fails instead of reporting success when the downloaded binary cannot start", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-broken-install-"));
+		tempDirs.push(dir);
+		const binDir = path.join(dir, "bin");
+		const installDir = path.join(dir, "install");
+		await fs.mkdir(binDir);
+		await writeExecutable(binDir, "uname", '#!/bin/sh\n[ "$1" = "-s" ] && echo Linux || echo x86_64\n');
+		await writeExecutable(
+			binDir,
+			"curl",
+			`#!/bin/sh
+case "$*" in
+  *api.github.com*) echo '{"tag_name":"v1.0.0"}' ;;
+  *) while [ "$#" -gt 0 ]; do
+       [ "$1" = "-o" ] && { printf '#!/bin/sh\\nexit 127\\n' > "$2"; exit 0; }
+       shift
+     done ;;
+esac
+`,
+		);
+
+		const result = await run(["sh", "scripts/install.sh"], {
+			...process.env,
+			PATH: `${binDir}:${process.env.PATH ?? ""}`,
+			HOME: dir,
+			PI_INSTALL_DIR: installDir,
+		});
+
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stdout).toContain("cannot start");
+		expect(result.stdout).not.toContain("✓ Installed");
 	});
 });

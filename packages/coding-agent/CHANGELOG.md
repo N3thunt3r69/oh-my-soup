@@ -19,6 +19,8 @@
 
 - **Renamed the project to Oh My Soup.** The CLI is now `oms`, the config root is `~/.oms`, project config lives in `.oms/`, internal URLs use the `oms://` scheme, environment variables use the `OMS_` prefix, and packages publish under `@oh-my-soup/*`. Existing installs keep working without a migration: a home that has `~/.omp` but no `~/.oms` stays pinned to the legacy root, project-local `.omp/` trees are still discovered (ranked below `.oms/`), and every `OMP_*` variable feeds its `OMS_*` name unless that name is already set. `OMP_NUM_THREADS`/`OMP_THREAD_LIMIT` are left alone — those belong to OpenMP and are read by `nproc`.
 - Broadened context-overflow detection with explicit Mistral and Ollama error patterns and added non-overflow exclusions so AWS throttling and rate-limit errors are no longer misclassified as overflow. (Ported from prime-agent.)
+- **Install is binary-only.** Every documented install method now delivers the same prebuilt release binary: `scripts/install.sh` and `scripts/install.ps1` fetch the GitHub release asset for the host platform and smoke-test it before reporting success (`--ref`/`-Ref` pins a specific release tag), and the Bun/npm install line is gone — nothing is published to a package registry. Homebrew (`brew install pickpocket/tap/oms`) and mise (`mise use -g github:pickpocket/oh-my-soup`) install that same binary.
+- `oms update` and the startup update notice now resolve the newest version from the GitHub release feed instead of the npm registry. Both read the `releases/latest` redirect rather than the REST API, so the check needs no token and is not subject to the API's 60-requests-per-hour unauthenticated limit.
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
