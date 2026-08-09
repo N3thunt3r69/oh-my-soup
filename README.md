@@ -24,13 +24,40 @@
 
 The most capable agent surface that ships. Continuously tuned by real-world use — complete out of the box, open all the way down.
 
-**60+** providers · **31** built-in tools · **14** lsp ops · **28** dap ops · **~80k** lines of Rust core.
+**60+** providers · **32** built-in tools · **14** lsp ops · **28** dap ops · **~80k** lines of Rust core.
 
 > [!NOTE]
-> Pull requests are **temporarily open to everyone** as a trial. We previously
-> required a vouch before accepting PRs; that requirement is lifted for now
-> while we evaluate how open contributions go. Depending on the results, the
-> vouch system may return.
+> Oh My Soup is a fork of [Oh My Pi](https://github.com/can1357/oh-my-pi). It tracks upstream and
+> adds the work below. Changelog entries link to upstream's issue tracker, where that history lives.
+
+## What this fork adds
+
+### `disasm` — reverse engineering as a first-class tool
+
+Two native backends behind one backend-neutral interface, neither routed through MCP or shell commands:
+
+- **IDA.** Resolves your IDA installation and Python, materializes a pinned [ida-bridge](https://github.com/cellebrite-labs/ida-bridge) runtime bundled with `oms`, provisions its dependencies in an `oms`-owned environment, starts the bridge, and opens each binary in its own headless idalib worker. `execute` runs IDAPython; stateful namespaces persist across calls.
+- **Ghidra.** Discovers the newest installed Ghidra and a Java 21+ JDK, installs its headless scripts, and analyzes binaries into temporary or persistent `.gpr` projects. `execute` runs native Ghidra Java in a short transaction.
+
+`query` is shared SQL over disassembly, decompilation, xrefs, symbols, and types. Multiple targets stay open concurrently; temporary databases and owned processes are reclaimed on `close`.
+
+```json
+{ "action": "open",  "backend": "ghidra", "file": "./sample.exe" }
+{ "action": "query", "target": "ghidra-1", "sql": "SELECT name, entry FROM functions WHERE name LIKE 'main%'" }
+```
+
+### Camoufox instead of headless Chromium
+
+`browser` drives [Camoufox](https://camoufox.com) — a stealth Firefox build — over WebDriver BiDi, with the same Puppeteer-shaped API. Fingerprint resistance lives in the engine rather than in injected JavaScript, so there is no patch surface for a page to detect. CDP-attached Electron apps and the Chrome relay extension still work unchanged.
+
+### Session lifecycle, ported from prime-agent
+
+- **`/heartbeat`** — recurring or one-shot scheduled prompts delivered as steering or follow-up messages, persisted crash-safe; a restart after downtime collapses missed slots into exactly one late fire.
+- **Detached subagents** — `agent(prompt, detach=True)` from an eval cell returns at admission with an `agent://` handle; the child outlives the cell as a background job.
+- **`/refine`** — a continual-harness pass that applies small evidence-backed updates to prompt notes, memories, managed skills, and subagent specs. Every pass lands in `refinements.jsonl`; `/refine rollback <id>` restores byte-identically.
+- **Agent tree in `/context`** — main session plus every live and disk-persisted subagent, with per-node own/total token usage that never double-counts descendants.
+- **Python kernel snapshots** — the namespace is pickled per-variable with `dill` on save and restored on resume, reporting what survived and what was skipped.
+- **Agent-callable compaction** — `compact.status()` and `compact.run(instructions?)` schedule a compaction at the next safe turn boundary, honored even when auto-compaction is off.
 
 ## Install
 
@@ -101,9 +128,9 @@ Edits that land on the first attempt. Reads that summarize files instead of dump
 
 [Read the full post ↗](https://blog.can.ac/2026/02/12/the-harness-problem/)
 
-## The Pi _you love_, with **batteries included**.
+## The Oh My Pi _you love_, with **batteries included**.
 
-Originally built on [Mario Zechner](https://github.com/mariozechner)'s wonderful [Pi](https://github.com/badlogic/pi-mono), oms adds everything you're missing.
+Originally built on [Mario Zechner](https://github.com/mariozechner)'s wonderful [Pi](https://github.com/badlogic/pi-mono), then rebuilt by [@can1357](https://github.com/can1357) as [Oh My Pi](https://github.com/can1357/oh-my-pi) — oms adds everything you're missing.
 
 ### 01 · Code execution w/ tool-calling
 
@@ -225,7 +252,7 @@ _[Watch the capture ↗](https://omp.sh/clips/codemod.mp4)_
 
 ### 20 · Drives a _real browser_. _Or your Slack?_
 
-Stealth's on by default, so pages see a normal user instead of a headless bot. The same API drives any Electron app in place — point it at Slack and the agent reads your DMs the way it reads the web. Or skip the sandbox entirely: the browser relay extension lets the agent adopt the Chrome tabs you already have open, without stealing focus.
+Stealth is the engine, not a patch: pages get a real Camoufox (Firefox) fingerprint instead of a headless browser wearing injected JavaScript. The same API drives any Electron app in place — point it at Slack and the agent reads your DMs the way it reads the web. Or skip the sandbox entirely: the browser relay extension lets the agent adopt the Chrome tabs you already have open, without stealing focus.
 
 ![oms TUI driving the browser tool against DuckDuckGo](https://omp.sh/captures/browser.webp)
 
@@ -235,7 +262,7 @@ Stealth's on by default, so pages see a normal user instead of a headless bot. T
 
 ## Whatever the task needs, _it's already in the box_.
 
-31 tools live in the same namespace as `read` and `bash`. Pin the active set with `--tools read,edit,bash,…`; rarely used discoverable tools stay behind `xd://` devices. `read xd://` lists them, and `write xd://<tool>` runs one when `tools.xdev` is enabled.
+32 tools live in the same namespace as `read` and `bash`. Pin the active set with `--tools read,edit,bash,…`; rarely used discoverable tools stay behind `xd://` devices. `read xd://` lists them, and `write xd://<tool>` runs one when `tools.xdev` is enabled.
 
 **Files & search**
 
@@ -256,6 +283,7 @@ Stealth's on by default, so pages see a normal user instead of a headless bot. T
 
 - `lsp` — diagnostics, navigation, symbols, renames, code actions, raw requests.
 - `debug` — drive a DAP session — breakpoints, stepping, threads, stack, variables.
+- `disasm` — headless IDA and Ghidra: open binaries, query disassembly and decompilation over SQL, run IDAPython or Ghidra Java.
 - `security_scan` — plan and run native security reviews; drives Codex Security cloud scans.
 
 **Coordination**
@@ -267,7 +295,7 @@ Stealth's on by default, so pages see a normal user instead of a headless bot. T
 
 **Desktop & web**
 
-- `browser` — Puppeteer tabs over headless Chromium, CDP-attached apps, or your own Chrome via the relay.
+- `browser` — Camoufox (stealth Firefox) tabs over WebDriver BiDi, CDP-attached apps, or your own Chrome via the relay.
 - `computer` — persistent JS against the host desktop: windows, screenshots, native input, AX tree, clipboard.
 - `web_search` — one query across configured providers, returning answer plus citations.
 - `github` — GitHub CLI ops — repo, PR, issues, code search, Actions run-watch.
@@ -632,10 +660,9 @@ For architecture and contribution guidelines, see [packages/coding-agent/DEVELOP
 
 ## Contributing
 
-Issues and pull requests are open to everyone. Open PRs are currently a
-**trial** — the previous vouch requirement is lifted while we evaluate how it
-goes, and it may return. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for
-guidelines on contributing.
+Issues and pull requests are open to everyone. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for
+guidelines. Changes that belong upstream are better sent to
+[can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) — this fork merges from it.
 
 ---
 
@@ -648,9 +675,9 @@ MIT. See [LICENSE](LICENSE).
 
 _made for terminals that stay open_
 
-- [omp.sh](https://github.com/pickpocket/oh-my-soup)
+- [Oh My Soup](https://github.com/pickpocket/oh-my-soup)
 - [GitHub](https://github.com/pickpocket/oh-my-soup)
 - [Changelog](https://github.com/pickpocket/oh-my-soup/blob/main/packages/coding-agent/CHANGELOG.md)
 - [npm](https://www.npmjs.com/package/@oh-my-soup/pi-coding-agent)
-- [Discord](https://discord.gg/4NMW9cdXZa)
+- [Upstream Discord](https://discord.gg/4NMW9cdXZa)
 - [MIT](https://github.com/pickpocket/oh-my-soup/blob/main/LICENSE)
