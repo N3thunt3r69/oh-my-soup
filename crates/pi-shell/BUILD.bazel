@@ -39,11 +39,7 @@ rust_test(
     crate = ":pi-shell",
     edition = "2024",
     proc_macro_deps = all_crate_deps(proc_macro_dev = True),
-    # The job-control cases re-exec this binary into its own process group and
-    # assert the shell observes a self-STOPped foreground pipeline. Inside
-    # linux-sandbox's PID namespace the parent never sees the stop and
-    # `run_string` hangs until the test's deadline.
-    tags = ["no-sandbox"],
+    # The job-control case that needs a terminal is `#[ignore]`d in the source.
     deps = all_crate_deps(normal_dev = True),
 )
 

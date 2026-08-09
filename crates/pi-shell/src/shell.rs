@@ -2652,7 +2652,13 @@ mod tests {
 	}
 
 	#[cfg(unix)]
+	// Needs a controlling terminal: the pipeline's children `kill -STOP $$` and
+	// the assertion is that the shell returns a *stopped* foreground job. With
+	// stdio on pipes — every CI runner, sandboxed or not — job control stays off,
+	// nothing reports the stop, and `run_string` waits forever. Run it from a
+	// terminal: `cargo test -p pi-shell -- --ignored jobspec_pipeline`.
 	#[tokio::test(flavor = "multi_thread")]
+	#[ignore = "requires a controlling terminal for job control"]
 	async fn kill_builtin_signals_every_process_in_a_jobspec_pipeline() {
 		const MARKER: &str = "PI_SHELL_TEST_KILL_JOBSPEC_PIPELINE";
 		if std::env::var_os(MARKER).is_none() {
@@ -2687,17 +2693,14 @@ mod tests {
 		let (mut session, params) = kill_test_context().await;
 		let source_info = SourceInfo::from("pi-natives:test");
 
-		// Liveness bounds, not latency assertions: spawning two `sh` children and
-		// observing their self-STOP takes well under a second on a dedicated host
-		// but blew the old 5 s ceiling on a shared 4-core CI runner.
 		time::timeout(
-			Duration::from_secs(30),
+			Duration::from_secs(5),
 			session.shell.run_string(command, &source_info, &params),
 		)
 		.await
 		.expect("pipeline did not stop")
 		.expect("stopped pipeline");
-		time::timeout(Duration::from_secs(30), async {
+		time::timeout(Duration::from_secs(5), async {
 			while !first_ready.exists() || !second_ready.exists() {
 				time::sleep(Duration::from_millis(10)).await;
 			}
