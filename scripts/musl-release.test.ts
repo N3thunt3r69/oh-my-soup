@@ -53,7 +53,13 @@ describe("musl release artifacts", () => {
 		);
 	});
 
-	test("selects the musl asset when the Linux host reports musl", async () => {
+	// install.sh is the POSIX installer; both cases below drive it through `sh`
+	// with shims for `uname`/`ldd`/`curl` on PATH. A Windows host resolves the
+	// real `uname` from its Git/MSYS toolchain instead of the shim, so the
+	// installer sees `MINGW64_NT-…` and bails before the behavior under test.
+	const posixOnly = test.skipIf(process.platform === "win32");
+
+	posixOnly("selects the musl asset when the Linux host reports musl", async () => {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-musl-install-"));
 		tempDirs.push(dir);
 		const binDir = path.join(dir, "bin");
@@ -89,7 +95,7 @@ esac
 		expect(await Bun.file(path.join(installDir, "oms")).text()).toBe("#!/bin/sh\necho 1.0.0\n");
 	});
 
-	test("fails instead of reporting success when the downloaded binary cannot start", async () => {
+	posixOnly("fails instead of reporting success when the downloaded binary cannot start", async () => {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-broken-install-"));
 		tempDirs.push(dir);
 		const binDir = path.join(dir, "bin");

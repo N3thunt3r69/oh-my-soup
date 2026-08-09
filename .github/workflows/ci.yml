@@ -269,8 +269,11 @@ jobs:
            run: |
               bun run ci:test:ts:workspace
               # Not the whole `test:scripts` group (heavy, and unrelated to this
-              # bucket) — just the release/installer contract tests.
-              bun test scripts/release.test.ts scripts/musl-release.test.ts
+              # bucket) — just the release/installer/build-config contract tests.
+              bun test \
+                scripts/release.test.ts \
+                scripts/musl-release.test.ts \
+                scripts/bazel-crate-features.test.ts
 
    test_coding_agent_singleton:
       name: Test coding-agent singleton/global-state (TS)
