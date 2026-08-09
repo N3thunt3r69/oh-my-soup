@@ -11,11 +11,19 @@ describe("runUpdateCommand fetch cancellation", () => {
 
 	it("checks release metadata with a timeout signal", async () => {
 		let requestSignal: AbortSignal | undefined;
+		let requestUrl: string | undefined;
 		vi.spyOn(console, "log").mockImplementation(() => {});
+		// The version probe reads the `releases/latest` redirect, so the stub has
+		// to answer with the 302 that carries the tag — a body-only response would
+		// look like a repository with no releases.
 		const fetchStub = Object.assign(
-			async (_input: FetchInput, init?: FetchInit) => {
+			async (input: FetchInput, init?: FetchInit) => {
 				requestSignal = init?.signal ?? undefined;
-				return Response.json({ version: "999.0.0" });
+				requestUrl = String(input);
+				return new Response(null, {
+					status: 302,
+					headers: { location: "https://github.com/pickpocket/oh-my-soup/releases/tag/v999.0.0" },
+				});
 			},
 			{ preconnect: globalThis.fetch.preconnect },
 		);
@@ -23,6 +31,7 @@ describe("runUpdateCommand fetch cancellation", () => {
 
 		await runUpdateCommand({ force: false, check: true });
 
+		expect(requestUrl).toBe("https://github.com/pickpocket/oh-my-soup/releases/latest");
 		expect(requestSignal).toBeInstanceOf(AbortSignal);
 	});
 });

@@ -14,6 +14,10 @@ describe("browser backend defaults", () => {
 			"    capturedKind = kind;",
 			'    return { key: "configured", kind, refCount: 0, cdpUrl: kind.cdpUrl, browser: { connected: true } };',
 			"  },",
+			// browser.ts imports these statically from the same module, so the mock
+			// has to carry them or the import fails before the tool ever runs.
+			"  holdBrowser: handle => { handle.refCount++; },",
+			"  releaseBrowser: async handle => { handle.refCount = Math.max(0, handle.refCount - 1); },",
 			"}));",
 			'const supervisorModule = import.meta.resolve("@oh-my-soup/pi-coding-agent/tools/browser/tab-supervisor");',
 			"mock.module(supervisorModule, () => ({",
