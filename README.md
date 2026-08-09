@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/pickpocket/oh-my-soup/blob/main/assets/hero.png?raw=true" alt="oms">
+  <img src="https://github.com/pickpocket/oh-my-soup/blob/main/assets/hero.webp?raw=true" alt="Oh My Soup">
 </p>
 
 <p align="center">
