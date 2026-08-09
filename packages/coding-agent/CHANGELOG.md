@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.13] - 2026-08-09
+
 ### Added
 
 - Added quality gates to goal mode: goals may carry shell gate commands (`goal({op:"create", gates:[...]})` or `/goal gates`) that must all exit 0 before the goal can complete. Failing gate output feeds the auto-continuation prompt verbatim, reruns are skipped when the git worktree is unchanged since the last failure, and the new `goal.maxGateRetries` setting bounds failed attempts per gate.
