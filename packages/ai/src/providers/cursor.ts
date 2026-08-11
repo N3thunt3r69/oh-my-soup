@@ -210,6 +210,7 @@ import {
 	buildPiWriteError,
 	buildPiWriteRejected,
 	buildPiWriteResult,
+	omitUndefinedArgs,
 	piEscapeRegexLiteral,
 	piGrepSkip,
 	piJoinPath,
@@ -3668,11 +3669,14 @@ export function synthesizeCursorExecToolCall(
 ): void {
 	endCurrentTextBlock(output, stream, state);
 	endCurrentThinkingBlock(output, stream, state);
+	// Exec-frame translators often write `optional: value || undefined`. A
+	// present `undefined` fails ArkType optional-field validation; drop those
+	// keys so the transcript block matches what a model-native call would omit.
 	const block: ToolCallState = {
 		type: "toolCall",
 		id: toolCallId,
 		name: toolName,
-		arguments: args,
+		arguments: omitUndefinedArgs(args),
 		[kStreamingBlockIndex]: output.content.length,
 		[kStreamingBlockKind]: "cursor-exec",
 		[kCursorExecResolved]: true,

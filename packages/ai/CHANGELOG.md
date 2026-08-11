@@ -13,6 +13,8 @@
 - Fixed OpenAI GPT-5.6 and Daybreak `off` thinking requests serializing as `low`; every first-party alias with explicit wire-level off support now sends `reasoning.effort: "none"`.
 - Fixed the Amazon Bedrock and Cursor transports ignoring `StreamOptions.headers`; both built their request headers from scratch, so caller-supplied tracing or attribution headers were silently dropped while working on every other provider ([#8107](https://github.com/can1357/oh-my-pi/pull/8107) by [@svperfecta](https://github.com/svperfecta)).
 - Fixed Antigravity Flash turns hanging after successful response headers when the endpoint never emitted an SSE event; the provider now cancels the stalled body and fails over after 60 seconds while retaining the longer allowance for Pro reasoning starts.
+- Fixed Cursor exec-bridge bash/grep calls failing ArkType validation when the server omitted optional frame fields: synthesized and executed tool args now drop `undefined` keys (`cwd`, `case`, `skip`, `timeout`) instead of writing `optional: value || undefined`.
+- Fixed Cursor sessions double-executing settled tools when `tools.format` is an owned dialect (e.g. `gemini`): `wrapInbandToolStream` rebuilt toolCall blocks without copying `kCursorExecResolved`, so agent-loop re-ran bash/grep/todo and appended a second result for the same call id.
 
 ## [17.2.12] - 2026-08-08
 
