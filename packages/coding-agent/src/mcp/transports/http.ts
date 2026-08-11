@@ -2,10 +2,11 @@
  * MCP HTTP transport (Streamable HTTP).
  *
  * Implements JSON-RPC 2.0 over HTTP POST with optional SSE streaming.
- * Based on MCP spec 2025-03-26.
+ * The negotiated protocol revision is carried in the `MCP-Protocol-Version`
+ * header on every request (see `MCP_PROTOCOL_VERSION`).
  */
 import * as AIError from "@oh-my-soup/pi-ai/error";
-import { logger, readSseJson } from "@oh-my-soup/pi-utils";
+import { logger, readSseEvents, readSseJson } from "@oh-my-soup/pi-utils";
 import type {
 	JsonRpcError,
 	JsonRpcMessage,
@@ -19,9 +20,30 @@ import type {
 import { toJsonRpcError } from "../../mcp/types";
 import { RequestIdAllocator } from "../request-id";
 import { createMCPTimeout, getNeverAbortSignal, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "../timeout";
-import { type MCPFetchInit, mcpFetch } from "./header-policy";
+import { type MCPFetchInit, mcpFetch, withoutHeader } from "./header-policy";
 
 const HTTP_SSE_CONNECT_TIMEOUT_MS = 1_000;
+const DEFAULT_SSE_RETRY_MS = 3_000;
+
+interface SSEResumeState {
+	lastEventId: string | null;
+	retryMs: number;
+}
+
+/** Wait for the server-provided SSE retry interval while remaining abortable. */
+async function waitForSSERetry(ms: number, signal: AbortSignal): Promise<void> {
+	if (signal.aborted) throw signal.reason;
+	const { promise, resolve, reject } = Promise.withResolvers<void>();
+	const timer = setTimeout(resolve, ms);
+	const onAbort = (): void => reject(signal.reason);
+	signal.addEventListener("abort", onAbort, { once: true });
+	try {
+		await promise;
+	} finally {
+		clearTimeout(timer);
+		signal.removeEventListener("abort", onAbort);
+	}
+}
 /**
  * Best-effort startup deadline for the optional Streamable HTTP GET SSE listener.
  *
@@ -45,6 +67,14 @@ export class HttpTransport implements MCPTransport {
 	#sessionId: string | null = null;
 	#sseConnection: AbortController | null = null;
 	readonly #requestIds = new RequestIdAllocator();
+	/**
+	 * Protocol version echoed in the `MCP-Protocol-Version` header. `null` until
+	 * the `initialize` response is negotiated (via {@link setProtocolVersion}):
+	 * the MCP spec requires the header only on requests *after* `initialize`, and
+	 * a server that supports only an older revision may reject a header carrying
+	 * a newer version sent before negotiation completes.
+	 */
+	#protocolVersion: string | null = null;
 
 	onClose?: () => void;
 	onError?: (error: Error) => void;
@@ -55,14 +85,30 @@ export class HttpTransport implements MCPTransport {
 
 	constructor(private config: MCPHttpServerConfig | MCPSseServerConfig) {}
 
-	/** Fetch the configured endpoint with header precedence and origin policy. */
+	/**
+	 * Fetch the configured endpoint with header precedence and origin policy.
+	 *
+	 * The transport fully owns `MCP-Protocol-Version`: it is stripped from
+	 * configured headers so a user's `mcp.json` can never inject it, and added
+	 * only once a version is negotiated (required by the MCP Streamable HTTP spec
+	 * after `initialize`). Before negotiation — the `initialize` request itself —
+	 * no protocol-version header is sent from either source.
+	 */
 	#fetch(init: MCPFetchInit, generated: Record<string, string>): Promise<Response> {
+		const configured = withoutHeader(this.config.headers, "MCP-Protocol-Version");
+		const withVersion =
+			this.#protocolVersion === null ? generated : { "MCP-Protocol-Version": this.#protocolVersion, ...generated };
 		return mcpFetch(
 			this.config.url,
 			init,
-			{ generated, configured: this.config.headers },
+			{ generated: withVersion, configured },
 			this.config.headerPolicy === "origin-locked",
 		);
+	}
+
+	/** Record the protocol version negotiated during `initialize`. */
+	setProtocolVersion(version: string): void {
+		this.#protocolVersion = version;
 	}
 
 	get connected(): boolean {
@@ -298,40 +344,64 @@ export class HttpTransport implements MCPTransport {
 		const signal = operation.signal ?? getNeverAbortSignal();
 
 		const { promise, resolve, reject } = Promise.withResolvers<T>();
+		const resume: SSEResumeState = { lastEventId: null, retryMs: DEFAULT_SSE_RETRY_MS };
 		let captured = false;
 
-		// Drain the SSE stream from a single iterator. We resolve the deferred
-		// promise as soon as the matching response arrives, then keep iterating
-		// in the background to pick up piggybacked notifications/requests.
-		// Re-reading `response.body` after `for await` breaks would lock the
-		// stream a second time and surface as "ReadableStream already has a
-		// controller", so we must not exit the loop early.
+		// Drain each physical SSE connection without leaving its iterator early.
+		// A server may close a connection without terminating the logical stream;
+		// when it supplied an event ID, resume that stream via GET + Last-Event-ID.
 		const drain = async (): Promise<void> => {
+			let current = response;
 			try {
-				for await (const raw of readSseJson<JsonRpcMessage | JsonRpcMessage[]>(response.body!, signal)) {
-					const messages = Array.isArray(raw) ? raw : [raw];
-					for (const message of messages) {
-						if (
-							!captured &&
-							"id" in message &&
-							message.id === expectedId &&
-							("result" in message || "error" in message)
-						) {
-							captured = true;
-							operation.clear();
-							if (message.error) {
-								reject(new Error(`MCP error ${message.error.code}: ${message.error.message}`));
-							} else {
-								resolve(message.result as T);
+				for (;;) {
+					if (!current.body) throw new Error("SSE response did not include a body");
+					for await (const event of readSseEvents(current.body, signal)) {
+						if (event.id !== undefined) resume.lastEventId = event.id || null;
+						if (event.retry !== undefined) resume.retryMs = event.retry;
+						if (event.data === "") continue;
+						const raw = JSON.parse(event.data) as JsonRpcMessage | JsonRpcMessage[];
+						const messages = Array.isArray(raw) ? raw : [raw];
+						for (const message of messages) {
+							if (
+								!captured &&
+								"id" in message &&
+								message.id === expectedId &&
+								("result" in message || "error" in message)
+							) {
+								captured = true;
+								operation.clear();
+								if (message.error) {
+									reject(new Error(`MCP error ${message.error.code}: ${message.error.message}`));
+								} else {
+									resolve(message.result as T);
+								}
+								continue;
 							}
-							continue;
+							if (!this.#connected) continue;
+							this.#dispatchSSEMessage(message);
 						}
-						if (!this.#connected) continue;
-						this.#dispatchSSEMessage(message);
 					}
-				}
-				if (!captured) {
-					reject(new Error(`No response received for request ID ${expectedId}`));
+					if (captured) return;
+					if (resume.lastEventId === null) {
+						throw new Error(`No response received for request ID ${expectedId}`);
+					}
+
+					await waitForSSERetry(resume.retryMs, signal);
+					const generated: Record<string, string> = {
+						Accept: "text/event-stream",
+						"Last-Event-ID": resume.lastEventId,
+					};
+					if (this.#sessionId) generated["Mcp-Session-Id"] = this.#sessionId;
+					current = await this.#fetch({ method: "GET", signal }, generated);
+					if (!current.ok) {
+						const text = await current.text();
+						throw new Error(`HTTP ${current.status} resuming MCP SSE stream: ${text}`);
+					}
+					const contentType = current.headers.get("Content-Type") ?? "";
+					if (!contentType.includes("text/event-stream")) {
+						await current.body?.cancel();
+						throw new Error(`MCP SSE resume returned unsupported Content-Type: ${contentType || "(missing)"}`);
+					}
 				}
 			} catch (error) {
 				if (captured) return;

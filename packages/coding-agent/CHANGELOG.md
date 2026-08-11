@@ -27,6 +27,26 @@
 - Broadened context-overflow detection with explicit Mistral and Ollama error patterns and added non-overflow exclusions so AWS throttling and rate-limit errors are no longer misclassified as overflow. (Ported from prime-agent.)
 - **Install is binary-only.** Every documented install method now delivers the same prebuilt release binary: `scripts/install.sh` and `scripts/install.ps1` fetch the GitHub release asset for the host platform and smoke-test it before reporting success (`--ref`/`-Ref` pins a specific release tag), and the Bun/npm install line is gone — nothing is published to a package registry. Homebrew (`brew install pickpocket/tap/oms`) and mise (`mise use -g github:pickpocket/oh-my-soup`) install that same binary.
 - `oms update` and the startup update notice now resolve the newest version from the GitHub release feed instead of the npm registry. Both read the `releases/latest` redirect rather than the REST API, so the check needs no token and is not subject to the API's 60-requests-per-hour unauthenticated limit.
+- `omp cleanse` default subagent cap raised from 8 to 32 (`--agents`/`-n` still overrides).
+
+## [17.2.14] - 2026-08-11
+
+### Added
+
+- Added `externalThinking` setting for private scratchpad reasoning via the new `think` tool
+### Fixed
+
+- Fixed the MCP Streamable HTTP transport never sending the `MCP-Protocol-Version` header and negotiating the stale `2025-03-26` revision, which made spec-current servers (e.g. AWS Bedrock AgentCore Gateway with an outbound per-user OAuth target) reject every `tools/call` with a generic internal error. The client now negotiates `2025-11-25`, echoes the negotiated version on every request after `initialize`, and resumes server-closed POST response streams with `Last-Event-ID` after the requested SSE retry interval ([#8264](https://github.com/can1357/oh-my-pi/issues/8264)).
+
+## [17.2.13] - 2026-08-11
+
+### Added
+
+- Added `searxng.safesearch` setting option for SearXNG searches
+- `omp update` now honors an `omp.dist` distribution field published in the release's npm manifest and treats major-version bumps without one as binary-only: bun/npm-managed installs are migrated to the standalone GitHub release binary in place instead of running a package-manager install that a non-npm release (e.g. a runtime change) would break. Windows script-shim installs (npm's `omp.cmd`/`omp.ps1`) are taken over seamlessly by installing `omp.exe` beside the shims and retiring them.
+- Added support for Cloudflare AI Gateway routing for Gemini search
+- Added support for Exa MCP search provider
+- Added domain inclusion/exclusion filtering and URL deduplication for TinyFish search
 - Fixed `/vibe` mode losing the pre-vibe toolset when a session already in vibe mode switches into another session that is also in vibe mode, which left `bash`, `edit`, `write`, `grep`, `glob`, `task`, and `hub` silently unavailable after exiting the mode; the pre-vibe toolset is now recorded on the `mode_change` entry and restored from there.
 - Preserved extension-filtered pasted image payloads and source links when `/goal`, `/plan`, or `/vibe` submits the composer draft.
 - Fixed Agent Hub lineage registration timestamps displaying in UTC instead of the user's local timezone.
