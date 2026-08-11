@@ -345,6 +345,17 @@ function formatContextTokenCount(value: number): string {
 	return formatNumber(Math.max(0, Math.round(value))).toLowerCase();
 }
 
+/**
+ * Reads a tool-name snapshot out of a persisted `mode_change` payload. Session
+ * files are user-editable and survive across versions, so anything that is not
+ * a plain array of strings is treated as absent rather than trusted.
+ */
+function readPersistedToolNames(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	if (!value.every(name => typeof name === "string")) return undefined;
+	return value as string[];
+}
+
 /** Options for creating an InteractiveMode instance (for future API use) */
 export interface InteractiveModeOptions {
 	/** Providers that were migrated during startup */
@@ -2543,6 +2554,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#vibeModeOwnerScope?.ownerId === targetVibeScope.ownerId &&
 			this.#vibeModeOwnerScope.parentSessionId === targetVibeScope.parentSessionId &&
 			this.#vibeModeOwnerScope.parentSessionFile === targetVibeScope.parentSessionFile;
+		// #clearTransientModeState below keeps the live active set instead of
+		// applying a snapshot, so for a vibe -> vibe switch the live toolset is
+		// already the reduced vibe set and cannot serve as the pre-vibe snapshot.
+		// That is the only case the persisted snapshot is for: a cold resume or a
+		// switch in from a non-vibe session built its toolset from the current CLI
+		// flags and settings, and that set — not a historical one — is what exiting
+		// vibe must restore.
+		const vibeToolsetLostToTeardown = this.vibeModeEnabled && !preserveVibe;
 		await this.#clearTransientModeState({ preserveVibe, vibeScopeAlreadySuspended });
 		await VibeSessionRegistry.global().rehydrate(vibeSession);
 		const goalEnabled = this.session.settings.get("goal.enabled");
@@ -2579,7 +2598,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.session.goalRuntime.clearAccounting();
 		if (sessionContext.mode === "vibe") {
-			if (!preserveVibe) await this.#enterVibeMode({ persistModeChange: false });
+			if (!preserveVibe) {
+				await this.#enterVibeMode({
+					persistModeChange: false,
+					previousTools: vibeToolsetLostToTeardown
+						? readPersistedToolNames(sessionContext.modeData?.previousTools)
+						: undefined,
+				});
+			}
 			return;
 		}
 		if (!this.session.settings.get("plan.enabled")) {
@@ -3392,7 +3418,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async #enterVibeMode(options?: { persistModeChange?: boolean }): Promise<void> {
+	async #enterVibeMode(options?: { persistModeChange?: boolean; previousTools?: string[] }): Promise<void> {
 		if (this.vibeModeEnabled) {
 			return;
 		}
@@ -3408,7 +3434,12 @@ export class InteractiveMode implements InteractiveModeContext {
 		const vibeRegistry = VibeSessionRegistry.global();
 		const ownerScope = vibeRegistry.ownerScope(this.#vibeParentSession());
 		vibeRegistry.activateScope(ownerScope);
-		const previousTools = this.session.getEnabledToolNames();
+		// When a vibe session switches into another session that is also in vibe
+		// mode, the teardown keeps the live active set, which is by then the reduced
+		// vibe set, so re-snapshotting it here would make the snapshot useless. That
+		// path passes the pre-vibe toolset recorded on the target's own mode_change
+		// entry instead.
+		const previousTools = options?.previousTools ?? this.session.getEnabledToolNames();
 		const vibeBaseTools = ["read"];
 		if (this.session.hasBuiltInTool("todo")) vibeBaseTools.push("todo");
 		await this.session.activateVibeTools(vibeBaseTools);
@@ -3423,7 +3454,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.session.sendVibeModeContext({ deliverAs: "steer" });
 		}
 		this.#updateVibeModeStatus();
-		if (options?.persistModeChange !== false) this.sessionManager.appendModeChange("vibe");
+		if (options?.persistModeChange !== false) this.sessionManager.appendModeChange("vibe", { previousTools });
 		this.showStatus(
 			"Vibe mode enabled. You direct fast/good worker sessions; toolset is read + optional parent Todo + vibe tools.",
 		);
