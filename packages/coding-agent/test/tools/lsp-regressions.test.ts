@@ -945,7 +945,7 @@ describe("lsp regressions", () => {
 
 			const events: string[] = [];
 			let statusRequests = 0;
-			installFakeLsp((message, srv) => {
+			const fakeServer = installFakeLsp((message, srv) => {
 				if (message.method === "initialize") {
 					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: { definitionProvider: true } } });
 					srv.send({
@@ -1025,6 +1025,12 @@ describe("lsp regressions", () => {
 			expect(output).toContain("Found 1 definition(s)");
 			expect(events[0]).toBe("open");
 			expect(events.filter(line => line === "status").length).toBeGreaterThanOrEqual(3);
+			const firstStatusRequest = fakeServer.received.find(
+				message => message.method === "rust-analyzer/analyzerStatus",
+			);
+			if (!firstStatusRequest) throw new Error("Expected the timed-out analyzer status request");
+			const cancellation = await fakeServer.waitFor(message => message.method === "$/cancelRequest");
+			expect(cancellation.params).toEqual({ id: firstStatusRequest.id });
 		} finally {
 			vi.restoreAllMocks();
 			await lspClient.shutdownAll();

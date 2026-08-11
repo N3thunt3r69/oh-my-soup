@@ -1339,6 +1339,7 @@ export async function sendRequest(
 		timeout = setTimeout(() => {
 			if (client.pendingRequests.has(id)) {
 				client.pendingRequests.delete(id);
+				void sendNotification(client, "$/cancelRequest", { id }).catch(() => {});
 				const err = new Error(`LSP request ${method} timed out after ${effectiveTimeoutMs}ms`);
 				cleanup();
 				reject(err);
