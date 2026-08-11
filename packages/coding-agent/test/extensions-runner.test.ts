@@ -20,9 +20,12 @@ import {
 	testSetExtensionHandlerTimeoutMs,
 } from "@oh-my-soup/pi-coding-agent/extensibility/extensions/runner";
 import type {
+	Extension,
 	ExtensionError,
 	ExtensionServiceTier,
 	ExtensionUIContext,
+	InputEvent,
+	InputEventResult,
 } from "@oh-my-soup/pi-coding-agent/extensibility/extensions/types";
 import { ExtensionToolWrapper } from "@oh-my-soup/pi-coding-agent/extensibility/extensions/wrapper";
 import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
@@ -3258,6 +3261,38 @@ describe("ExtensionRunner", () => {
 			);
 			// A fresh chain at depth 0 is unaffected by another chain's depth.
 			await expect(runner.invokeNativeTool("bash", { command: "echo hi" }, { depth: 0 })).resolves.toBeDefined();
+		});
+	});
+
+	describe("input attachment transforms", () => {
+		const inputRunner = (handler: (event: InputEvent) => InputEventResult): ExtensionRunner => {
+			const extensionPath = path.join(extensionsDir, "input-transform.ts");
+			const extension: Extension = {
+				path: extensionPath,
+				resolvedPath: extensionPath,
+				handlers: new Map([["input", [async (...args: unknown[]) => handler(args[0] as InputEvent)]]]),
+				tools: new Map(),
+				assistantThinkingRenderers: [],
+				messageRenderers: new Map(),
+				commands: new Map(),
+				flags: new Map(),
+				shortcuts: new Map(),
+			};
+			return new ExtensionRunner([extension], new ExtensionRuntime(), tempDir.path(), sessionManager, modelRegistry);
+		};
+
+		it("applies image-only removal independently of text", async () => {
+			const runner = inputRunner(() => ({ images: [] }));
+			const image: ImageContent = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" };
+
+			expect(await runner.emitInput("keep text", [image], "interactive")).toEqual({ images: [] });
+		});
+
+		it("omits unchanged images from a text-only transform result", async () => {
+			const runner = inputRunner(event => ({ text: event.text.toUpperCase() }));
+			const image: ImageContent = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" };
+
+			expect(await runner.emitInput("rewrite me", [image], "interactive")).toEqual({ text: "REWRITE ME" });
 		});
 	});
 });

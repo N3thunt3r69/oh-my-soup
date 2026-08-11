@@ -1242,13 +1242,14 @@ export class ExtensionRunner {
 					| InputEventResult
 					| undefined;
 				if (result?.handled) return result;
-				if (result?.text !== undefined) {
-					currentText = result.text;
-					currentImages = result.images ?? currentImages;
-				}
+				if (result?.text !== undefined) currentText = result.text;
+				if (result?.images !== undefined) currentImages = result.images;
 			}
 		}
-		return currentText !== text || currentImages !== images ? { text: currentText, images: currentImages } : {};
+		const transformed: InputEventResult = {};
+		if (currentText !== text) transformed.text = currentText;
+		if (currentImages !== images) transformed.images = currentImages;
+		return transformed;
 	}
 
 	async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
