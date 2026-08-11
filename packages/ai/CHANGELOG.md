@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Codex Responses Lite requests for opaque model codenames such as Daybreak omitting the required `reasoning.context: "all_turns"` value and failing with HTTP 400.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

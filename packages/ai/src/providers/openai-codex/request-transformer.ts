@@ -443,13 +443,15 @@ export async function transformRequestBody(
 			...body.reasoning,
 			...reasoningConfig,
 		};
-		// Responses Lite requires `all_turns`; the full transport leaves context to the server unless explicitly set.
-		const context = responsesLite ? "all_turns" : options.reasoningContext;
-		if (context !== undefined) {
-			if (context === "all_turns" && !supportsAllTurnsReasoningContext(model.id)) {
+		// Lite requires `all_turns` even for opaque/codenamed model ids. Only explicit
+		// full-transport overrides are gated by the known model wire generation.
+		if (responsesLite) {
+			body.reasoning.context = "all_turns";
+		} else if (options.reasoningContext !== undefined) {
+			if (options.reasoningContext === "all_turns" && !supportsAllTurnsReasoningContext(model.id)) {
 				delete body.reasoning.context;
 			} else {
-				body.reasoning.context = context;
+				body.reasoning.context = options.reasoningContext;
 			}
 		}
 	} else {

@@ -661,8 +661,8 @@ describe("openai-codex Responses Lite and client metadata wire format", () => {
 		]);
 	});
 
-	it("sends the lite header when the model defaults to Responses Lite", async () => {
-		const model = createCodexModel("gpt-5.6-terra", { useResponsesLite: true });
+	it("sends required lite context for opaque model codenames", async () => {
+		const model = createCodexModel("gpt-daybreak-blue-latest", { useResponsesLite: true });
 		let captured: CapturedCodexRequest | undefined;
 		const fetchMock = createCodexFetchMock(createCodexSse(COMPLETED_CODEX_EVENTS), request => {
 			captured = request;
