@@ -190,10 +190,11 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		const configuredMode = (settings?.get("tools.approvalMode") ?? "yolo") as ApprovalMode;
 		const approvalMode: ApprovalMode = cliAutoApprove ? "yolo" : configuredMode;
 		const userPolicies = (settings?.get("tools.approval") ?? {}) as Record<string, unknown>;
-		if (resolveApproval(this.tool, approvalArgs(params, context), approvalMode, userPolicies).policy === "deny") {
+		const preResolved = resolveApproval(this.tool, approvalArgs(params, context), approvalMode, userPolicies);
+		if (preResolved.policy === "deny") {
 			throw new Error(
-				`Tool "${this.tool.name}" is blocked by user policy.\n` +
-					`To allow: remove "tools.approval.${this.tool.name}: deny" from config.`,
+				`Tool "${preResolved.policyKey ?? this.tool.name}" is blocked by user policy.\n` +
+					`To allow: remove "tools.approval.${preResolved.policyKey ?? this.tool.name}: deny" from config.`,
 			);
 		}
 
@@ -242,8 +243,8 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		context?.xdevTierResolved?.(resolved.tier);
 		if (resolved.policy === "deny") {
 			throw new Error(
-				`Tool "${this.tool.name}" is blocked by user policy.\n` +
-					`To allow: remove "tools.approval.${this.tool.name}: deny" from config.`,
+				`Tool "${resolved.policyKey ?? this.tool.name}" is blocked by user policy.\n` +
+					`To allow: remove "tools.approval.${resolved.policyKey ?? this.tool.name}: deny" from config.`,
 			);
 		}
 		const pendingSafetyChecks = computerSafetyChecks(context);
@@ -255,7 +256,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		// and tool-demanded overrides still prompt. Provider safety checks are
 		// stronger: yolo, per-tool allow, and xdev approval never acknowledge
 		// them on the user's behalf.
-		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, this.tool.name);
+		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, resolved.policyKey ?? this.tool.name);
 		const xdevBypass = context?.xdevApproved === true && effectiveParams === params;
 		const approvalCheck = {
 			required: pendingSafetyChecks.length > 0 || (resolved.policy === "prompt" && (explicitPrompt || !xdevBypass)),
