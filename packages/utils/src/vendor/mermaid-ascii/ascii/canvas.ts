@@ -370,6 +370,8 @@ const VERTICAL_FLIP_MAP: Record<string, string> = {
   // Unicode corners
   '┌': '└', '└': '┌',
   '┐': '┘', '┘': '┐',
+  '╭': '╰', '╰': '╭',
+  '╮': '╯', '╯': '╮',
   // Unicode junctions (T-pieces flip vertically)
   '┬': '┴', '┴': '┬',
   // Box-start junctions (exit points from node boxes)
@@ -442,6 +444,7 @@ export function drawText(
     }
   }
 }
+
 
 /**
  * Set the canvas size to fit all grid columns and rows.

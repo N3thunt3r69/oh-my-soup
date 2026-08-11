@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Mermaid ASCII state pseudostates rendering empty boxes, miscoloring final-state borders, and inverting rounded corners in bottom-to-top diagrams.
+
 ## [17.2.11] - 2026-08-07
 
 ### Added
