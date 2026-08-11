@@ -1795,6 +1795,56 @@ describe("ExtensionRunner", () => {
 			delete globalState.__approvalEvents;
 		});
 
+		it("does not present approval before the tool preview is ready", async () => {
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const preview = Promise.withResolvers<void>();
+			const order: string[] = [];
+			runner.setToolApprovalPreviewWaiter(async toolCallId => {
+				order.push(`preview_wait:${toolCallId}`);
+				await preview.promise;
+				order.push("preview_ready");
+			});
+			initializeRunner(
+				runner,
+				vi.fn(async () => {
+					order.push("ui_select");
+					return "Approve";
+				}),
+			);
+
+			const wrapper = new ExtensionToolWrapper(approvalTool, runner);
+			const execution = (wrapper as ExtensionToolWrapper<any>).execute("call-preview", {}, undefined, undefined, {
+				sessionManager,
+				modelRegistry,
+				model: undefined,
+				isIdle: () => true,
+				hasQueuedMessages: () => false,
+				abort: () => {},
+				settings: {
+					get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}),
+				} as never,
+				toolCall: {
+					batchId: "batch-preview",
+					index: 0,
+					total: 1,
+					toolCalls: [{ id: "call-preview", name: "dangerous_tool" }],
+				},
+			});
+			await Promise.resolve();
+			expect(order).toEqual(["preview_wait:call-preview"]);
+
+			preview.resolve();
+			await execution;
+			expect(order).toEqual(["preview_wait:call-preview", "preview_ready", "ui_select"]);
+		});
+
 		it("emits resolved false when approval is denied", async () => {
 			const events: Array<{ type: string; approved?: boolean; reason?: string }> = [];
 			const extCode = `

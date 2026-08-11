@@ -334,6 +334,7 @@ const noOpUIContext: ExtensionUIContext = {
 
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
+	#toolApprovalPreviewWaiter?: (toolCallId: string) => Promise<void>;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
 	#getModel: () => Model | undefined = () => undefined;
 	#isIdleFn: () => boolean = () => true;
@@ -649,6 +650,18 @@ export class ExtensionRunner {
 	async emitSessionStop(event: Omit<SessionStopEvent, "type">): Promise<SessionStopEventResult | undefined> {
 		if (event.signal.aborted) return undefined;
 		return await this.emit({ type: "session_stop", ...event });
+	}
+	/** Registers the interactive transcript gate that must settle before a tool approval is presented. */
+	setToolApprovalPreviewWaiter(waiter: (toolCallId: string) => Promise<void>): () => void {
+		this.#toolApprovalPreviewWaiter = waiter;
+		return () => {
+			if (this.#toolApprovalPreviewWaiter === waiter) this.#toolApprovalPreviewWaiter = undefined;
+		};
+	}
+
+	/** Waits until the interactive transcript can show the tool call being approved. */
+	async waitForToolApprovalPreview(toolCallId: string): Promise<void> {
+		await this.#toolApprovalPreviewWaiter?.(toolCallId);
 	}
 
 	getUIContext(): ExtensionUIContext {
