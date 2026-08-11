@@ -228,8 +228,8 @@ export type ExtensionWidgetContent = string[] | ExtensionUiComponentFactory | un
 export interface ExtensionCustomOptions {
 	/** Render the component as an overlay over the transcript instead of replacing the editor area. */
 	overlay?: boolean;
-	/** Overlay positioning/sizing options forwarded to `showOverlay` when `overlay` is true. */
-	overlayOptions?: OverlayOptions;
+	/** Static or lazily resolved overlay positioning/sizing options forwarded to `showOverlay`. */
+	overlayOptions?: OverlayOptions | (() => OverlayOptions);
 	/** Invoked with the overlay handle once the overlay is created (overlay mode only). */
 	onHandle?: (handle: OverlayHandle) => void;
 }

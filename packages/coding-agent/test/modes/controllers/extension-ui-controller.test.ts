@@ -285,6 +285,22 @@ describe("ExtensionUiController custom overlay", () => {
 		expect(onHandle).toHaveBeenCalledWith(harness.fakeHandle);
 	});
 
+	it("resolves overlayOptions factories before showing the overlay", async () => {
+		const harness = makeHarness();
+		const ui = await harness.init();
+		const overlayOptions: OverlayOptions = { anchor: "top-right", width: 40 };
+		const resolveOverlayOptions = vi.fn(() => overlayOptions);
+
+		ui.custom<void>(() => new Container(), {
+			overlay: true,
+			overlayOptions: resolveOverlayOptions,
+		});
+
+		await flushMicrotasks();
+		expect(resolveOverlayOptions).toHaveBeenCalledTimes(1);
+		expect(harness.showOverlay).toHaveBeenCalledWith(expect.any(Container), overlayOptions);
+	});
+
 	it("falls back to the full-cover defaults when overlayOptions is absent", async () => {
 		const harness = makeHarness();
 		const ui = await harness.init();

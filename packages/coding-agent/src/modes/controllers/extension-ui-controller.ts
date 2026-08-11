@@ -1081,9 +1081,11 @@ export class ExtensionUiController {
 			}
 			component = c;
 			if (options?.overlay) {
+				const overlayOptions =
+					typeof options.overlayOptions === "function" ? options.overlayOptions() : options.overlayOptions;
 				overlayHandle = this.ctx.ui.showOverlay(
 					component,
-					options.overlayOptions ?? {
+					overlayOptions ?? {
 						anchor: "bottom-center",
 						width: "100%",
 						maxHeight: "100%",
