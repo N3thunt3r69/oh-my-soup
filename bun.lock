@@ -230,6 +230,7 @@
       "version": "17.2.13",
       "dependencies": {
         "@oh-my-soup/pi-ai": "catalog:",
+        "@oh-my-soup/pi-catalog": "catalog:",
         "@oh-my-soup/pi-natives": "catalog:",
         "@oh-my-soup/pi-utils": "catalog:",
         "@oh-my-soup/pi-wire": "catalog:",
