@@ -660,7 +660,9 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 				sawFinishReason = false;
 			};
 
-			const streamResponse = async (activeResponse: Response): Promise<boolean> => {
+			const streamResponse = async (
+				activeResponse: Response,
+			): Promise<{ meaningful: boolean; strippedPlanningLeak: boolean }> => {
 				if (!activeResponse.body) {
 					throw new AIError.ProviderResponseError("No response body", {
 						provider: model.provider,
@@ -680,6 +682,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 				let isBuffering = false;
 				let textBuffer = "";
 				let bufferedTextSignature: string | undefined;
+				let strippedPlanningLeak = false;
 
 				const endCurrentBlock = (): void => {
 					if (!currentBlock) return;
@@ -835,6 +838,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 									if (isBuffering) {
 										const buffered = consumePlanningBuffer(textBuffer, toolNames);
 										if (buffered.kind !== "incomplete") {
+											if (buffered.kind === "leak") strippedPlanningLeak = true;
 											const visibleSignature = bufferedTextSignature;
 											isBuffering = false;
 											textBuffer = "";
@@ -915,6 +919,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 					const buffered = consumePlanningBuffer(textBuffer, toolNames, true);
 
 					if (buffered.kind !== "incomplete") {
+						if (buffered.kind === "leak") strippedPlanningLeak = true;
 						feedVisibleText(buffered.visibleText, bufferedTextSignature);
 					}
 					bufferedTextSignature = undefined;
@@ -925,7 +930,10 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 				flushVisibleText(bufferedTextSignature);
 				endCurrentBlock();
 
-				return hasMeaningfulGoogleContent(output);
+				return {
+					meaningful: hasMeaningfulGoogleContent(output),
+					strippedPlanningLeak,
+				};
 			};
 
 			let receivedContent = false;
@@ -1018,8 +1026,14 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 						}
 
 						const streamed = await streamResponse(currentResponse);
-						if (output.stopReason !== "stop" || streamed) {
-							receivedContent = streamed;
+						// Only accept an empty STOP as valid silence once every fallback
+						// endpoint is exhausted: an earlier endpoint returning empty
+						// successful streams must still fail over (Antigravity auto mode)
+						// rather than be recorded as a real silent review.
+						const acceptedSilence =
+							options?.acceptEmptyResponse === true && !streamed.strippedPlanningLeak && isLastEndpoint;
+						if (output.stopReason !== "stop" || streamed.meaningful || acceptedSilence) {
+							receivedContent = streamed.meaningful || acceptedSilence;
 							break;
 						}
 

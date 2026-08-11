@@ -785,14 +785,22 @@ export class SessionAdvisors {
 				mcpResources: this.#advisorMcpResources,
 			});
 			const baseAdvisorStreamFn = this.#advisorStreamFn ?? streamSimple;
-			const advisorStreamFn: StreamFn = (requestModel, context, options) =>
-				baseAdvisorStreamFn(
-					requestModel,
-					context,
-					requestModel.api === "openai-codex-responses"
-						? { ...options, codexSseMaxAttempts: ADVISOR_CODEX_SSE_MAX_ATTEMPTS }
-						: options,
-				);
+			const advisorStreamFn: StreamFn = (requestModel, context, options) => {
+				if (requestModel.api === "openai-codex-responses") {
+					return baseAdvisorStreamFn(requestModel, context, {
+						...options,
+						codexSseMaxAttempts: ADVISOR_CODEX_SSE_MAX_ATTEMPTS,
+					});
+				}
+				if (
+					requestModel.api === "google-generative-ai" ||
+					requestModel.api === "google-gemini-cli" ||
+					requestModel.api === "google-vertex"
+				) {
+					return baseAdvisorStreamFn(requestModel, context, { ...options, acceptEmptyResponse: true });
+				}
+				return baseAdvisorStreamFn(requestModel, context, options);
+			};
 			const advisorAgent = new Agent({
 				initialState: {
 					systemPrompt,

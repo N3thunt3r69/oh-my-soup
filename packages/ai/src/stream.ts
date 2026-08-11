@@ -1512,6 +1512,7 @@ function mapOptionsForApi<TApi extends Api>(
 		execHandlers: options?.execHandlers,
 		fetch: options?.fetch,
 		fallbacks: options?.fallbacks,
+		acceptEmptyResponse: options?.acceptEmptyResponse,
 		...simpleProviderOptions,
 	};
 
