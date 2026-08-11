@@ -15,7 +15,7 @@ import { wrapToolWithMetaNotice } from "@oh-my-soup/pi-coding-agent/tools/output
 import { ReadTool } from "@oh-my-soup/pi-coding-agent/tools/read";
 import * as toolTimeouts from "@oh-my-soup/pi-coding-agent/tools/tool-timeouts";
 import { WriteTool } from "@oh-my-soup/pi-coding-agent/tools/write";
-import { unzip } from "@oh-my-soup/pi-coding-agent/utils/zip";
+import { readArchiveEntries, unzip } from "@oh-my-soup/pi-coding-agent/utils/zip";
 import { $which, removeSyncWithRetries, Snowflake } from "@oh-my-soup/pi-utils";
 import { GlobTool } from "../src/tools/glob";
 import { DEFAULT_FILE_LIMIT, GrepTool, MULTI_FILE_PER_FILE_MATCHES } from "../src/tools/grep";
@@ -64,6 +64,9 @@ function createFifoOrSkip(fifoPath: string): boolean {
 interface ArchiveFixtureEntry {
 	path: string;
 	content: string;
+	prefix?: string;
+	typeFlag?: "0" | "1" | "2";
+	linkName?: string;
 }
 
 function writeTarString(buffer: Buffer, offset: number, length: number, value: string): void {
@@ -85,13 +88,15 @@ function createTarArchive(entries: ArchiveFixtureEntry[]): Buffer {
 		const content = Buffer.from(entry.content, "utf-8");
 
 		writeTarString(header, 0, 100, entry.path);
+		if (entry.prefix) writeTarString(header, 345, 155, entry.prefix);
+		if (entry.linkName) writeTarString(header, 157, 100, entry.linkName);
 		writeTarOctal(header, 100, 8, 0o644);
 		writeTarOctal(header, 108, 8, 0);
 		writeTarOctal(header, 116, 8, 0);
 		writeTarOctal(header, 124, 12, content.length);
 		writeTarOctal(header, 136, 12, Math.floor(Date.now() / 1000));
 		header.fill(0x20, 148, 156);
-		header[156] = "0".charCodeAt(0);
+		header[156] = (entry.typeFlag ?? "0").charCodeAt(0);
 		writeTarString(header, 257, 6, "ustar");
 		writeTarString(header, 263, 2, "00");
 
@@ -109,6 +114,67 @@ function createTarArchive(entries: ArchiveFixtureEntry[]): Buffer {
 		}
 	}
 
+	parts.push(Buffer.alloc(1024, 0));
+	return Buffer.concat(parts);
+}
+
+function tarChecksum(header: Buffer): void {
+	header.fill(0x20, 148, 156);
+	let checksum = 0;
+	for (const byte of header) checksum += byte;
+	header.write(checksum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+	header[154] = 0;
+	header[155] = 0x20;
+}
+
+function paxRecord(key: string, value: string): Buffer {
+	const suffix = ` ${key}=${value}\n`;
+	let length = suffix.length;
+	while (`${length}`.length + suffix.length !== length) {
+		length = `${length}`.length + suffix.length;
+	}
+	return Buffer.from(`${length}${suffix}`, "utf-8");
+}
+
+/**
+ * Build a GNU 1.0 sparse PAX archive: an `x` extended header carrying the
+ * user-visible `GNU.sparse.name`/`GNU.sparse.realsize`, followed by a regular
+ * file header using the internal `GNUSparseFile.NNN` path.
+ */
+function createSparsePaxTarArchive(realName: string, realSize: number, storedData: Buffer): Buffer {
+	const paxBody = Buffer.concat([
+		paxRecord("GNU.sparse.major", "1"),
+		paxRecord("GNU.sparse.minor", "0"),
+		paxRecord("GNU.sparse.name", realName),
+		paxRecord("GNU.sparse.realsize", `${realSize}`),
+		paxRecord("size", `${storedData.length}`),
+	]);
+	const paxHeader = Buffer.alloc(512, 0);
+	writeTarString(paxHeader, 0, 100, "./PaxHeaders/sparse");
+	writeTarOctal(paxHeader, 100, 8, 0o644);
+	writeTarOctal(paxHeader, 124, 12, paxBody.length);
+	writeTarOctal(paxHeader, 136, 12, Math.floor(Date.now() / 1000));
+	paxHeader[156] = "x".charCodeAt(0);
+	writeTarString(paxHeader, 257, 6, "ustar");
+	writeTarString(paxHeader, 263, 2, "00");
+	tarChecksum(paxHeader);
+
+	const fileHeader = Buffer.alloc(512, 0);
+	writeTarString(fileHeader, 0, 100, "./GNUSparseFile.0/sparse.bin");
+	writeTarOctal(fileHeader, 100, 8, 0o644);
+	writeTarOctal(fileHeader, 124, 12, storedData.length);
+	writeTarOctal(fileHeader, 136, 12, Math.floor(Date.now() / 1000));
+	fileHeader[156] = "0".charCodeAt(0);
+	writeTarString(fileHeader, 257, 6, "ustar");
+	writeTarString(fileHeader, 263, 2, "00");
+	tarChecksum(fileHeader);
+
+	const parts: Buffer[] = [paxHeader];
+	const paxRemainder = paxBody.length % 512;
+	parts.push(paxBody, paxRemainder === 0 ? Buffer.alloc(0) : Buffer.alloc(512 - paxRemainder, 0));
+	parts.push(fileHeader, storedData);
+	const dataRemainder = storedData.length % 512;
+	if (dataRemainder !== 0) parts.push(Buffer.alloc(512 - dataRemainder, 0));
 	parts.push(Buffer.alloc(1024, 0));
 	return Buffer.concat(parts);
 }
@@ -751,6 +817,203 @@ describe("Coding Agent Tools", () => {
 			expect(output).toContain("pkg/");
 			expect(output).toContain("top.txt");
 			expect(result.details?.isDirectory).toBe(true);
+		});
+
+		it("should read tar.gz members with UTF-8 ustar prefixes", async () => {
+			const archivePath = path.join(testDir, "unicode-prefix.tar.gz");
+			const prefix = "bun-da3851e57ae130c5594d0e208a5da5ba8c13edfb/test/js/node/test/fixtures/copy/utf/新建文件夹";
+			const memberPath = `${prefix}/experimental.json`;
+			fs.writeFileSync(
+				archivePath,
+				zlib.gzipSync(
+					createTarArchive([
+						{
+							path: "experimental.json",
+							prefix,
+							content: '{ "type": "module" }',
+						},
+					]),
+				),
+			);
+
+			const rootResult = await readTool.execute("test-call-tar-unicode-prefix-root", { path: archivePath });
+			expect(getTextOutput(rootResult)).toContain("bun-da3851e57ae130c5594d0e208a5da5ba8c13edfb/");
+			expect(rootResult.details?.isDirectory).toBe(true);
+
+			const memberResult = await readTool.execute("test-call-tar-unicode-prefix-member", {
+				path: `${archivePath}:${memberPath}`,
+			});
+			expect(getTextOutput(memberResult)).toContain('{ "type": "module" }');
+		});
+
+		it("should preserve tar hard-link members", async () => {
+			const archivePath = path.join(testDir, "hard-link.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "pkg/original.txt", content: "shared content\n" },
+					{ path: "pkg/linked.txt", content: "", typeFlag: "1", linkName: "pkg/original.txt" },
+				]),
+			);
+
+			const rootResult = await readTool.execute("test-call-tar-hard-link-root", { path: `${archivePath}:pkg` });
+			expect(getTextOutput(rootResult)).toContain("linked.txt");
+
+			const linkedResult = await readTool.execute("test-call-tar-hard-link-member", {
+				path: `${archivePath}:pkg/linked.txt`,
+			});
+			expect(getTextOutput(linkedResult)).toContain("shared content");
+
+			const entries = await readArchiveEntries(archivePath);
+			const linkedContent = entries.get("pkg/linked.txt");
+			if (!(linkedContent instanceof Uint8Array)) {
+				throw new Error("Expected hard-link content to materialize as bytes");
+			}
+			expect(new TextDecoder().decode(linkedContent)).toBe("shared content\n");
+		});
+
+		it("should preserve safe relative tar file symlinks", async () => {
+			const archivePath = path.join(testDir, "file-symlink.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "pkg/lib/tool.js", content: "export const linked = true;\n" },
+					{ path: "pkg/bin/tool", content: "", typeFlag: "2", linkName: "../lib/tool.js" },
+				]),
+			);
+
+			const linkedResult = await readTool.execute("test-call-tar-symlink-member", {
+				path: `${archivePath}:pkg/bin/tool`,
+			});
+			expect(getTextOutput(linkedResult)).toContain("export const linked = true");
+
+			const entries = await readArchiveEntries(archivePath);
+			const linkedContent = entries.get("pkg/bin/tool");
+			if (!(linkedContent instanceof Uint8Array)) {
+				throw new Error("Expected symlink content to materialize as bytes");
+			}
+			expect(new TextDecoder().decode(linkedContent)).toBe("export const linked = true;\n");
+		});
+
+		it("should resolve directory symlinks lazily without materializing subtrees", async () => {
+			const archivePath = path.join(testDir, "directory-symlinks.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "pkg/lib/tool.js", content: "export const linked = true;\n" },
+					{ path: "pkg/lib/extra.js", content: "export const extra = true;\n" },
+					{ path: "pkg/current-a", content: "", typeFlag: "2", linkName: "lib" },
+					{ path: "pkg/current-b", content: "", typeFlag: "2", linkName: "lib" },
+					{ path: "pkg/current-c", content: "", typeFlag: "2", linkName: "lib" },
+				]),
+			);
+
+			const linkedResult = await readTool.execute("test-call-tar-directory-symlink-member", {
+				path: `${archivePath}:pkg/current-a/tool.js`,
+			});
+			expect(getTextOutput(linkedResult)).toContain("export const linked = true");
+
+			const directoryResult = await readTool.execute("test-call-tar-directory-symlink-directory", {
+				path: `${archivePath}:pkg/current-b`,
+			});
+			expect(getTextOutput(directoryResult)).toContain("extra.js");
+
+			await expect(readArchiveEntries(archivePath)).rejects.toThrow(/cannot be materialized/);
+		});
+
+		it("should resolve tar symlinks whose target is the archive root", async () => {
+			const archivePath = path.join(testDir, "root-symlinks.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "top.txt", content: "top level\n" },
+					{ path: "dir/inner.txt", content: "inner\n" },
+					// `current -> .` and `dir/up -> ..` both normalize to the archive root.
+					{ path: "current", content: "", typeFlag: "2", linkName: "." },
+					{ path: "dir/up", content: "", typeFlag: "2", linkName: ".." },
+				]),
+			);
+
+			const currentNode = await readTool.execute("test-call-tar-root-symlink-current", {
+				path: `${archivePath}:current/top.txt`,
+			});
+			expect(getTextOutput(currentNode)).toContain("top level");
+
+			const upNode = await readTool.execute("test-call-tar-root-symlink-up", {
+				path: `${archivePath}:dir/up/top.txt`,
+			});
+			expect(getTextOutput(upNode)).toContain("top level");
+		});
+
+		it("should list dangling tar symlinks but reject their materialization", async () => {
+			const archivePath = path.join(testDir, "dangling-symlink.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([{ path: "pkg/dangling", content: "", typeFlag: "2", linkName: "missing-target" }]),
+			);
+
+			const rootResult = await readTool.execute("test-call-tar-dangling-symlink-root", {
+				path: `${archivePath}:pkg`,
+			});
+			expect(getTextOutput(rootResult)).toContain("dangling");
+			await expect(
+				readTool.execute("test-call-tar-dangling-symlink-member", {
+					path: `${archivePath}:pkg/dangling`,
+				}),
+			).rejects.toThrow(/cannot be materialized/);
+			await expect(readArchiveEntries(archivePath)).rejects.toThrow(/cannot be materialized/);
+		});
+
+		it("should surface GNU sparse PAX names and reject sparse reads", async () => {
+			const archivePath = path.join(testDir, "sparse-pax.tar");
+			fs.writeFileSync(
+				archivePath,
+				createSparsePaxTarArchive("data/sparse.bin", 1048576, Buffer.from("sparse-map\n")),
+			);
+
+			// The listing must show the real GNU.sparse.name, not the internal
+			// GNUSparseFile.NNN path.
+			const rootResult = await readTool.execute("test-call-tar-sparse-root", { path: `${archivePath}:data` });
+			expect(getTextOutput(rootResult)).toContain("sparse.bin");
+			expect(getTextOutput(rootResult)).not.toContain("GNUSparseFile");
+
+			// Reading the real member name resolves the entry and rejects it as
+			// sparse (a catchable error), rather than reporting it missing.
+			await expect(
+				readTool.execute("test-call-tar-sparse-member", { path: `${archivePath}:data/sparse.bin` }),
+			).rejects.toThrow(/sparse file and cannot be read/);
+		});
+
+		it("should reject a truncated tar member while indexing", async () => {
+			const archivePath = path.join(testDir, "truncated.tar");
+			// A full, valid archive declares 2048 bytes for `big.txt`; slicing the
+			// payload mid-member leaves the header's declared size pointing past EOF.
+			const complete = createTarArchive([{ path: "big.txt", content: "A".repeat(2048) }]);
+			fs.writeFileSync(archivePath, complete.subarray(0, 512 + 256));
+
+			await expect(readTool.execute("test-call-tar-truncated", { path: archivePath })).rejects.toThrow(/truncated/);
+		});
+
+		it("should reject a tar truncated before its terminating zero block", async () => {
+			const archivePath = path.join(testDir, "unterminated.tar");
+			const complete = createTarArchive([{ path: "complete.txt", content: "complete member\n" }]);
+			fs.writeFileSync(archivePath, complete.subarray(0, complete.length - 1024));
+
+			await expect(readTool.execute("test-call-tar-unterminated", { path: archivePath })).rejects.toThrow(
+				/missing terminating zero block/,
+			);
+		});
+
+		it("should reject a gzip payload that is not a tar archive", async () => {
+			// `sniffArchiveFormat` classifies any gzip magic as tar.gz, so a plain
+			// `.txt.gz` (decompressed payload shorter than one 512-byte tar block)
+			// must raise a catchable error instead of listing an empty directory.
+			const archivePath = path.join(testDir, "note.tar.gz");
+			fs.writeFileSync(archivePath, zlib.gzipSync(Buffer.from("hello world\n")));
+
+			await expect(readTool.execute("test-call-gzip-non-tar", { path: archivePath })).rejects.toThrow(
+				/not a valid tar archive/i,
+			);
 		});
 
 		it("should list archive subdirectories", async () => {
