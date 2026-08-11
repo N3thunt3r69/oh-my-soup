@@ -28,6 +28,9 @@
 - **Install is binary-only.** Every documented install method now delivers the same prebuilt release binary: `scripts/install.sh` and `scripts/install.ps1` fetch the GitHub release asset for the host platform and smoke-test it before reporting success (`--ref`/`-Ref` pins a specific release tag), and the Bun/npm install line is gone — nothing is published to a package registry. Homebrew (`brew install pickpocket/tap/oms`) and mise (`mise use -g github:pickpocket/oh-my-soup`) install that same binary.
 - `oms update` and the startup update notice now resolve the newest version from the GitHub release feed instead of the npm registry. Both read the `releases/latest` redirect rather than the REST API, so the check needs no token and is not subject to the API's 60-requests-per-hour unauthenticated limit.
 - `omp cleanse` default subagent cap raised from 8 to 32 (`--agents`/`-n` still overrides).
+### Fixed
+
+- Fixed `plan.defaultOnStartup: true` making headless `omp -p` runs hang until `--max-time` with no output. Print mode armed an interactive plan-review flow whose only headless exit was the model emitting a valid `xd://propose` execute-dispatch, so any turn that did not stranded to the deadline. Print mode no longer honors the startup default (it has no surface to review, approve, or exit a plan); `--plan-yolo` remains the supported headless plan flow ([#8272](https://github.com/can1357/oh-my-pi/issues/8272)).
 
 ## [17.2.14] - 2026-08-11
 
