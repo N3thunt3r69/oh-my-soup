@@ -1406,6 +1406,7 @@ export async function sendNotification(
  * Shutdown all LSP clients.
  */
 export async function shutdownAll(): Promise<void> {
+	stopIdleChecker();
 	const clientsToShutdown = Array.from(clients.values());
 	clients.clear();
 	// Mid-initialize clients live only in clientLocks (publication is deferred

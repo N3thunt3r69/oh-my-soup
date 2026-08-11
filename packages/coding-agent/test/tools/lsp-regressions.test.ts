@@ -353,7 +353,7 @@ describe("lsp regressions", () => {
 		}
 	});
 
-	it("sends the LSP exit notification after shutdown completes", async () => {
+	it("sends the LSP exit notification and releases the idle checker after shutdown", async () => {
 		const tempDir = TempDir.createSync("@oms-lsp-shutdown-");
 		try {
 			const server = installFakeLsp((message, srv) => {
@@ -385,6 +385,24 @@ describe("lsp regressions", () => {
 			expect(shutdownIndex).toBeGreaterThanOrEqual(0);
 			expect(exitIndex).toBeGreaterThan(shutdownIndex);
 			expect(server.killed).toBe(false);
+
+			const clientModule = new URL("../../src/lsp/client.ts", import.meta.url).href;
+			const shutdownProbe = Bun.spawn(
+				[
+					process.execPath,
+					"-e",
+					`import { setIdleTimeout, shutdownAll } from ${JSON.stringify(clientModule)}; setIdleTimeout(60_000); await shutdownAll();`,
+				],
+				{ stdout: "ignore", stderr: "inherit" },
+			);
+			// Real time is required because fake timers cannot advance a separate Bun process.
+			// The process exit itself proves shutdown released the event loop.
+			const probeExit = await Promise.race([shutdownProbe.exited, Bun.sleep(1_000).then(() => null)]);
+			if (probeExit === null) {
+				shutdownProbe.kill();
+				await shutdownProbe.exited;
+			}
+			expect(probeExit).toBe(0);
 		} finally {
 			await lspClient.shutdownAll();
 			tempDir.removeSync();
