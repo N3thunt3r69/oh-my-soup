@@ -16,6 +16,7 @@ import {
 	sortAndValidateTextEdits,
 } from "@oh-my-soup/pi-coding-agent/lsp/edits";
 import { renderCall, renderResult } from "@oh-my-soup/pi-coding-agent/lsp/render";
+import { configCache, getConfig } from "@oh-my-soup/pi-coding-agent/lsp/servers";
 import {
 	type CodeAction,
 	type CreateFile,
@@ -397,7 +398,7 @@ describe("lsp regressions", () => {
 			);
 			// Real time is required because fake timers cannot advance a separate Bun process.
 			// The process exit itself proves shutdown released the event loop.
-			const probeExit = await Promise.race([shutdownProbe.exited, Bun.sleep(1_000).then(() => null)]);
+			const probeExit = await Promise.race([shutdownProbe.exited, Bun.sleep(5_000).then(() => null)]);
 			if (probeExit === null) {
 				shutdownProbe.kill();
 				await shutdownProbe.exited;
@@ -406,6 +407,24 @@ describe("lsp regressions", () => {
 		} finally {
 			await lspClient.shutdownAll();
 			tempDir.removeSync();
+		}
+	});
+
+	it("rearms the idle checker from cached config after global shutdown", async () => {
+		const cwd = "/cached-lsp-config";
+		const intervalSpy = vi.spyOn(globalThis, "setInterval");
+		configCache.set(cwd, { servers: {}, idleTimeoutMs: 60_000 });
+		try {
+			lspClient.setIdleTimeout(60_000);
+			expect(intervalSpy).toHaveBeenCalledTimes(1);
+
+			await lspClient.shutdownAll();
+			getConfig(cwd);
+
+			expect(intervalSpy).toHaveBeenCalledTimes(2);
+		} finally {
+			lspClient.setIdleTimeout(null);
+			configCache.delete(cwd);
 		}
 	});
 
