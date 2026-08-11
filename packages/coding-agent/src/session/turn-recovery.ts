@@ -939,10 +939,81 @@ export class TurnRecovery {
 
 		// Credential rotation and classifier fallbacks are safe only before
 		// committed text, images, tool calls, or server tools. Thinking-only
-		// output remains replay-safe.
-		if (this.#hasReplayUnsafeOutput(message)) return false;
+		// output remains replay-safe. The one exception is a refusal whose ONLY
+		// replay-unsafe output is tool calls the agent loop proved never ran
+		// (`#refusalReplaySafe`): nothing reached the user and no side effect
+		// happened, so discarding the turn duplicates nothing and the fallback
+		// chain gets its chance.
+		if (this.#hasReplayUnsafeOutput(message) && !this.#refusalReplaySafe(message)) return false;
 		if (AIError.is(id, AIError.Flag.AccountPolicy) || this.isClassifierRefusal(message)) return true;
 		return AIError.retriable(id);
+	}
+
+	/**
+	 * True when a classifier refusal is replay-safe *despite* having emitted tool
+	 * calls, because every emitted call provably never executed.
+	 *
+	 * Anthropic's request classifier can fire after the model has already streamed
+	 * a tool call, which used to strand the turn: `#hasReplayUnsafeOutput` sees the
+	 * `toolCall` block and vetoes retry one line before the refusal could reach the
+	 * fallback-chain consult, so a refusal that a different model family would very
+	 * likely have served just ended the turn.
+	 *
+	 * That veto exists to protect against duplicating work or visible output. Neither
+	 * risk is present here: the agent loop pairs each emitted-but-unrun call with a
+	 * synthetic `executed: false` result (see {@link isSyntheticToolResultMessage}),
+	 * which is a positive record that `tool.execute()` never ran. So the veto is
+	 * lifted only when ALL of the following hold, and any uncertainty (assistant
+	 * message missing from state, a call with no result, a non-synthetic result, an
+	 * `executed` that is not exactly `false`) keeps it in place:
+	 *
+	 * - the stop is a classifier refusal/sensitivity stop;
+	 * - the only replay-unsafe blocks are tool calls — an `image`, an
+	 *   `anthropicServerTool`, or committed non-whitespace text has already rendered
+	 *   or has side effects, so replaying would duplicate it;
+	 * - at least one tool call was emitted (otherwise the plain refusal path already
+	 *   handles it);
+	 * - every emitted call id has a result after the assistant message in state, and
+	 *   every such result is synthetic with `executed === false`.
+	 */
+	#refusalReplaySafe(message: AssistantMessage): boolean {
+		if (!this.isClassifierRefusal(message)) return false;
+
+		const emittedToolCallIds = new Set<string>();
+		for (const block of message.content) {
+			if (block.type === "toolCall") {
+				emittedToolCallIds.add(block.id);
+				continue;
+			}
+			if (block.type === "image" || block.type === "anthropicServerTool") return false;
+			if (block.type === "text" && this.#host.textOutputCommitted() && hasNonWhitespace(block.text)) return false;
+		}
+		if (emittedToolCallIds.size === 0) return false;
+
+		// The refused assistant message is NOT the tail of state: the agent loop
+		// appends the synthetic results after it before the turn ends, so locate it
+		// by walking backwards exactly as `classifyResolvedInterruptedToolTurn` does.
+		const messages = this.#host.agent.state.messages;
+		let assistantIndex = -1;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const candidate = messages[i];
+			if (candidate.role === "assistant" && this.#isSameAssistantMessage(candidate, message)) {
+				assistantIndex = i;
+				break;
+			}
+		}
+		if (assistantIndex < 0) return false;
+
+		const unexecutedToolCallIds = new Set<string>();
+		for (let i = assistantIndex + 1; i < messages.length; i++) {
+			const candidate = messages[i];
+			if (candidate.role !== "toolResult" || !emittedToolCallIds.has(candidate.toolCallId)) continue;
+			// Every result for an emitted call is inspected, not just the first: a
+			// real result anywhere in the tail means the tool ran.
+			if (!isSyntheticToolResultMessage(candidate) || candidate.details?.executed !== false) return false;
+			unexecutedToolCallIds.add(candidate.toolCallId);
+		}
+		return unexecutedToolCallIds.size === emittedToolCallIds.size;
 	}
 
 	/**
