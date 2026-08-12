@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { applyEdits, parseLid, parsePatch, parsePatchStreaming, Tokenizer } from "@oh-my-soup/hashline";
+import {
+	applyEdits,
+	formatNumberedLines,
+	parseLid,
+	parsePatch,
+	parsePatchStreaming,
+	Tokenizer,
+} from "@oh-my-soup/hashline";
 
 function applyPatch(text: string, diff: string): string {
 	return applyEdits(text, parsePatch(diff).edits).text;
@@ -96,6 +103,11 @@ describe("hashline format v4", () => {
 		// "a\nb\n" splits into ["a", "b", ""]; line 3 is the phantom sentinel.
 		const edits = parsePatch("CUT 3").edits;
 		expect(applyEdits("a\nb\n", edits).text).toBe("a\nb\n");
+	});
+
+	it("does not expose the terminal newline as an editable blank line", () => {
+		expect(formatNumberedLines("a\nb\n")).toBe("1:a\n2:b");
+		expect(formatNumberedLines("a\nb\n\n")).toBe("1:a\n2:b\n3:");
 	});
 
 	it("treats a cut range ending at the trailing sentinel as ending at the last real line", () => {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopped `formatNumberedLines` from exposing a terminal newline as an editable blank line; deleting that synthetic row previously produced a misleading no-op.
+
 ### Added
 
 - Post-apply parse advisory: when the applied result stops parsing while the pre-edit content parsed, the response now carries a warning naming the first changed line. This catches balance-neutral misplacements — a statement swapped onto the wrong line number leaves no delimiter anomaly for the repair heuristics — which previously applied with zero feedback and surfaced only at the next compile.
