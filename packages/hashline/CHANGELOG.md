@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Post-apply parse advisory: when the applied result stops parsing while the pre-edit content parsed, the response now carries a warning naming the first changed line. This catches balance-neutral misplacements — a statement swapped onto the wrong line number leaves no delimiter anomaly for the repair heuristics — which previously applied with zero feedback and surfaced only at the next compile.
+
+### Fixed
+
+- Fixed Rust lifetimes blinding the delimiter-balance scanner. `'` entered string state to end-of-line, so `&'static str {` hid its opening brace; a replacement range swallowing such a signature line looked balance-neutral and the mid-block advisory never fired, silently deleting the signature. Single-quote lexing is now language-aware: on `.rs` targets, `'` opens a literal only when it lexes as a real char literal (`'a'`, `'\n'`, `'\u{7FFF}'`), and lifetimes stay ordinary characters — apostrophes are never paired across lifetimes, which would swallow the delimiters between them (`<'a>(x: &'a str)`).
+
 ## [17.2.12] - 2026-08-08
 
 ### Breaking Changes
