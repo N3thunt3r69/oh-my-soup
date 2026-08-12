@@ -3930,7 +3930,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			group: "Disassembler",
 			label: "Default Backend",
-			description: "Backend used when disasm calls omit backend (ida or ghidra)",
+			description: "Backend used when disasm calls omit backend (ida, ghidra, or binaryninja)",
 		},
 	},
 
@@ -3986,6 +3986,28 @@ export const SETTINGS_SCHEMA = {
 			group: "Disassembler",
 			label: "Ghidra Java Home",
 			description: "Java 21+ home used by analyzeHeadless; defaults to JAVA_HOME or a sibling JDK",
+		},
+	},
+
+	"disasm.binaryNinja.installDir": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "Binary Ninja Installation Directory",
+			description: "Binary Ninja directory containing the Python API and core library",
+		},
+	},
+
+	"disasm.binaryNinja.python": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Disassembler",
+			label: "Binary Ninja Python Executable",
+			description: "Python executable compatible with the installed Binary Ninja API",
 		},
 	},
 

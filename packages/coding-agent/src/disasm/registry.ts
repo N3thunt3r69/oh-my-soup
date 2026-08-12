@@ -1,3 +1,4 @@
+import { BinaryNinjaDisassemblerAdapter } from "./binaryninja/adapter";
 import { GhidraDisassemblerAdapter } from "./ghidra/adapter";
 import { IdaDisassemblerAdapter } from "./ida/adapter";
 import type { DisassemblerAdapter, DisassemblerAdapterFactory, DisassemblerAdapterOptions } from "./types";
@@ -17,6 +18,14 @@ const factories = new Map<string, DisassemblerAdapterFactory>([
 			id: "ghidra",
 			label: "Ghidra",
 			create: options => new GhidraDisassemblerAdapter(options),
+		},
+	],
+	[
+		"binaryninja",
+		{
+			id: "binaryninja",
+			label: "Binary Ninja",
+			create: options => new BinaryNinjaDisassemblerAdapter(options),
 		},
 	],
 ]);
