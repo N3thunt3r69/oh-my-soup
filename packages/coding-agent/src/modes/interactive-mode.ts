@@ -3516,47 +3516,43 @@ export class InteractiveMode implements InteractiveModeContext {
 		rest?: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
 	): Promise<boolean> {
-		try {
-			if (this.planModeEnabled || this.planModePaused) {
-				this.showWarning("Exit plan mode first.");
-				return false;
-			}
-			if (this.vibeModeEnabled) {
-				this.showWarning("Exit vibe mode first.");
-				return false;
-			}
-			if (!this.session.settings.get("goal.enabled")) {
-				this.showWarning("Goal mode is disabled. Enable it in settings (goal.enabled).");
-				return false;
-			}
-			const { sub, rest: subRest } = parseGoalSubcommand(rest ?? "");
-			if (sub) return await this.#dispatchGoalSubcommand(sub, subRest, input);
-			if (this.goalModeEnabled) {
-				if (subRest) {
-					this.showStatus("Goal mode is already active. Use /goal to manage it, or /goal drop to start over.");
-					return false;
-				}
-				await this.#openGoalMenu("active");
-				return false;
-			}
-			const pausedState = this.#getPausedGoalState();
-			if (pausedState) {
-				if (subRest) {
-					this.showWarning("Resume the current goal first, or drop it before setting a new objective.");
-					return false;
-				}
-				await this.#openGoalMenu("paused");
-				return false;
-			}
-			if (subRest) return await this.#startGoalFromObjective(subRest, input);
-			const objective = (
-				await this.showHookEditor("Goal objective", undefined, undefined, { promptStyle: true })
-			)?.trim();
-			if (!objective) return false;
-			return await this.#startGoalFromObjective(objective, input);
-		} catch (error) {
-			throw error;
+		if (this.planModeEnabled || this.planModePaused) {
+			this.showWarning("Exit plan mode first.");
+			return false;
 		}
+		if (this.vibeModeEnabled) {
+			this.showWarning("Exit vibe mode first.");
+			return false;
+		}
+		if (!this.session.settings.get("goal.enabled")) {
+			this.showWarning("Goal mode is disabled. Enable it in settings (goal.enabled).");
+			return false;
+		}
+		const { sub, rest: subRest } = parseGoalSubcommand(rest ?? "");
+		if (sub) return await this.#dispatchGoalSubcommand(sub, subRest, input);
+		if (this.goalModeEnabled) {
+			if (subRest) {
+				this.showStatus("Goal mode is already active. Use /goal to manage it, or /goal drop to start over.");
+				return false;
+			}
+			await this.#openGoalMenu("active");
+			return false;
+		}
+		const pausedState = this.#getPausedGoalState();
+		if (pausedState) {
+			if (subRest) {
+				this.showWarning("Resume the current goal first, or drop it before setting a new objective.");
+				return false;
+			}
+			await this.#openGoalMenu("paused");
+			return false;
+		}
+		if (subRest) return await this.#startGoalFromObjective(subRest, input);
+		const objective = (
+			await this.showHookEditor("Goal objective", undefined, undefined, { promptStyle: true })
+		)?.trim();
+		if (!objective) return false;
+		return await this.#startGoalFromObjective(objective, input);
 	}
 	async handleGuidedGoalCommand(
 		rest?: string,

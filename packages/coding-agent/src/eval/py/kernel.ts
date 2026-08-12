@@ -37,7 +37,6 @@ export { renderKernelDisplay } from "./display";
 
 const TRACE_IPC = $flag("PI_PYTHON_IPC_TRACE");
 
-
 const SHUTDOWN_GRACE_MS = 1_000;
 const STARTUP_TIMEOUT_MS = 10_000;
 // How long to wait after SIGINT for the runner to emit `done`. If the cell is

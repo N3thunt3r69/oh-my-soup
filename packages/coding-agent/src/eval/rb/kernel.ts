@@ -32,7 +32,6 @@ export { renderKernelDisplay } from "../py/display";
 
 const TRACE_IPC = $flag("PI_RUBY_IPC_TRACE");
 
-
 const SHUTDOWN_GRACE_MS = 1_000;
 const STARTUP_TIMEOUT_MS = 10_000;
 // How long to wait after SIGINT for the runner to emit `done` before escalating

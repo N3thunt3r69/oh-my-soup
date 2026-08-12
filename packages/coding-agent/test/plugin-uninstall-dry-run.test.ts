@@ -11,10 +11,10 @@
  * theme (`runPluginCommand` does not initialize the theme on its own).
  */
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { runPluginCommand } from "@oh-my-pi/pi-coding-agent/cli/plugin-cli";
-import { PluginManager } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/manager";
-import type { InstalledPluginSummary } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
-import { MarketplaceManager } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
+import { runPluginCommand } from "@oh-my-soup/pi-coding-agent/cli/plugin-cli";
+import { PluginManager } from "@oh-my-soup/pi-coding-agent/extensibility/plugins/manager";
+import type { InstalledPluginSummary } from "@oh-my-soup/pi-coding-agent/extensibility/plugins/marketplace";
+import { MarketplaceManager } from "@oh-my-soup/pi-coding-agent/extensibility/plugins/marketplace";
 
 describe("runPluginCommand({ action: 'uninstall', flags: { dryRun } })", () => {
 	beforeEach(() => {

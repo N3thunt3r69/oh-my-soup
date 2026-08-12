@@ -48,6 +48,7 @@ async function runScenario(scenario: string): Promise<ScenarioResult> {
 			env: {
 				...process.env,
 				HOME: primaryDir,
+				USERPROFILE: primaryDir,
 				PI_CONFIG_DIR: ".oms",
 				OMS_PROFILE: "",
 				PI_PROFILE: "",

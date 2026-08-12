@@ -61,6 +61,13 @@ describe("tokenizeCredentialProcessCommand", () => {
 		]);
 	});
 
+	test("bare Windows paths preserve separators", () => {
+		expect(tokenizeCredentialProcessCommand("C:\\Users\\alpha\\bin\\auth.exe --json")).toEqual([
+			"C:\\Users\\alpha\\bin\\auth.exe",
+			"--json",
+		]);
+	});
+
 	test('double quotes still escape $ ` " and \\', () => {
 		expect(tokenizeCredentialProcessCommand(`"a\\"b" "\\$x" "\\\\n"`)).toEqual([`a"b`, "$x", "\\n"]);
 	});

@@ -117,13 +117,16 @@ export function piGrepSkip(offset?: number): number | undefined {
  * pattern ignores the path, and an absent or `.` path leaves the pattern
  * standing alone rather than building a `./`- or `//`-prefixed spec.
  *
- * Uses `node:path` rather than string surgery so Windows absolutes (`C:\…`,
- * UNC) are recognised and separators stay normalized.
+ * Uses `node:path` to recognise native absolute paths, then emits `/`
+ * separators because these values are glob expressions rather than filesystem
+ * API arguments. Backslashes would escape wildcard tokens on Windows.
  */
 export function piJoinPath(basePath: string | undefined, pattern: string): string {
-	if (path.isAbsolute(pattern)) return pattern;
-	if (!basePath || basePath === ".") return pattern;
-	return path.join(basePath, pattern);
+	const normalizedPattern = path.sep === "\\" ? pattern.replaceAll("\\", "/") : pattern;
+	if (path.isAbsolute(pattern)) return normalizedPattern;
+	if (!basePath || basePath === ".") return normalizedPattern;
+	const normalizedBase = path.sep === "\\" ? basePath.replaceAll("\\", "/") : basePath;
+	return path.posix.join(normalizedBase, normalizedPattern);
 }
 
 /**

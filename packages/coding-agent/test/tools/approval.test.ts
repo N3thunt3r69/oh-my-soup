@@ -189,12 +189,12 @@ describe("decision policyKey scopes user policy to a sub-tool", () => {
 	});
 
 	it("device policy wins over the invoking tool's policy", () => {
-		expect(
-			resolveApproval(dispatch, {}, "always-ask", { write: "prompt", knowledge_search: "allow" }).policy,
-		).toBe("allow");
-		expect(
-			resolveApproval(dispatch, {}, "always-ask", { write: "allow", knowledge_search: "deny" }).policy,
-		).toBe("deny");
+		expect(resolveApproval(dispatch, {}, "always-ask", { write: "prompt", knowledge_search: "allow" }).policy).toBe(
+			"allow",
+		);
+		expect(resolveApproval(dispatch, {}, "always-ask", { write: "allow", knowledge_search: "deny" }).policy).toBe(
+			"deny",
+		);
 	});
 
 	it("names the policy key in user-deny refusals", () => {

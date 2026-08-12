@@ -10,7 +10,6 @@ import type {
 	AgentToolResult,
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
-	ToolTier,
 } from "@oh-my-soup/pi-agent-core";
 import { type Component, Text } from "@oh-my-soup/pi-tui";
 import { isEnoent, isRecord, prompt, untilAborted } from "@oh-my-soup/pi-utils";

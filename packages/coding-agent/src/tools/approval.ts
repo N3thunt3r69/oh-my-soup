@@ -144,7 +144,13 @@ export function resolveApproval(
 		};
 	}
 	if (effectiveUserPolicy === "deny") {
-		return { policy: "deny", tier: decision.tier, override: decision.override, source: "user", policyKey: userPolicyKey };
+		return {
+			policy: "deny",
+			tier: decision.tier,
+			override: decision.override,
+			source: "user",
+			policyKey: userPolicyKey,
+		};
 	}
 
 	if (mode === "yolo") {
@@ -190,7 +196,13 @@ export function resolveApproval(
 	}
 
 	if (effectiveUserPolicy) {
-		return { policy: effectiveUserPolicy, tier: decision.tier, override: false, source: "user", policyKey: userPolicyKey };
+		return {
+			policy: effectiveUserPolicy,
+			tier: decision.tier,
+			override: false,
+			source: "user",
+			policyKey: userPolicyKey,
+		};
 	}
 
 	if (modeApprovesTier(mode, decision.tier)) {

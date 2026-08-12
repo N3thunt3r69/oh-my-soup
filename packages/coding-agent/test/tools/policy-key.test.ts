@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentTool, ToolApproval } from "@oh-my-pi/pi-agent-core";
-import { requiresApproval, resolveApproval } from "@oh-my-pi/pi-coding-agent/tools/approval";
+import type { AgentTool, ToolApproval } from "@oh-my-soup/pi-agent-core";
+import { requiresApproval, resolveApproval } from "@oh-my-soup/pi-coding-agent/tools/approval";
 
 type ApprovalTool = Pick<AgentTool, "name" | "approval" | "formatApprovalDetails">;
 
@@ -35,12 +35,12 @@ describe("decision policyKey scopes user policy to a sub-tool", () => {
 	});
 
 	it("device policy wins over the invoking tool's policy", () => {
-		expect(
-			resolveApproval(dispatch, {}, "always-ask", { write: "prompt", knowledge_search: "allow" }).policy,
-		).toBe("allow");
-		expect(
-			resolveApproval(dispatch, {}, "always-ask", { write: "allow", knowledge_search: "deny" }).policy,
-		).toBe("deny");
+		expect(resolveApproval(dispatch, {}, "always-ask", { write: "prompt", knowledge_search: "allow" }).policy).toBe(
+			"allow",
+		);
+		expect(resolveApproval(dispatch, {}, "always-ask", { write: "allow", knowledge_search: "deny" }).policy).toBe(
+			"deny",
+		);
 	});
 
 	it("names the policy key in user-deny refusals", () => {
@@ -95,7 +95,7 @@ describe("WriteTool xd:// device policy key integration", () => {
 
 		// Use dynamic import to avoid loading the WriteTool module at parse time
 		// (it chains into native addon code during module init).
-		return import("@oh-my-pi/pi-coding-agent/tools/write").then(({ WriteTool }) => {
+		return import("@oh-my-soup/pi-coding-agent/tools/write").then(({ WriteTool }) => {
 			const write = new WriteTool(session as any);
 			const approvalFn = write.approval;
 			expect(typeof approvalFn).toBe("function");
