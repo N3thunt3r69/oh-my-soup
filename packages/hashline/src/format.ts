@@ -140,12 +140,19 @@ export function formatNumberedLine(lineNumber: number, line: string): string {
 }
 
 /**
- * Format file text with hashline-mode line-number prefixes for display.
- * A terminal newline terminates the preceding line; it is not an addressable
- * blank line.
+ * Split LF-delimited file text into lines hashline anchors can address.
+ * A terminal newline terminates the preceding line; it is not content.
  */
-export function formatNumberedLines(text: string, startLine = 1): string {
+export function splitAddressableFileLines(text: string): string[] {
 	const lines = text.split("\n");
 	if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-	return lines.map((line, i) => formatNumberedLine(startLine + i, line)).join("\n");
+	return lines;
+}
+
+/** Format file text with hashline-mode line-number prefixes for display. */
+export function formatNumberedLines(text: string, startLine = 1): string {
+	return text
+		.split("\n")
+		.map((line, i) => formatNumberedLine(startLine + i, line))
+		.join("\n");
 }

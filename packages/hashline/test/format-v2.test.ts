@@ -5,6 +5,7 @@ import {
 	parseLid,
 	parsePatch,
 	parsePatchStreaming,
+	splitAddressableFileLines,
 	Tokenizer,
 } from "@oh-my-soup/hashline";
 
@@ -105,9 +106,14 @@ describe("hashline format v4", () => {
 		expect(applyEdits("a\nb\n", edits).text).toBe("a\nb\n");
 	});
 
-	it("does not expose the terminal newline as an editable blank line", () => {
-		expect(formatNumberedLines("a\nb\n")).toBe("1:a\n2:b");
-		expect(formatNumberedLines("a\nb\n\n")).toBe("1:a\n2:b\n3:");
+	it("separates terminal newline sentinels from addressable file lines", () => {
+		expect(splitAddressableFileLines("a\nb\n")).toEqual(["a", "b"]);
+		expect(splitAddressableFileLines("a\nb\n\n")).toEqual(["a", "b", ""]);
+	});
+
+	it("keeps a selected terminal blank line when formatting", () => {
+		const selected = splitAddressableFileLines("a\n\nb\n").slice(0, 2).join("\n");
+		expect(formatNumberedLines(selected)).toBe("1:a\n2:");
 	});
 
 	it("treats a cut range ending at the trailing sentinel as ending at the last real line", () => {

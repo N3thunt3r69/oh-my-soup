@@ -1,5 +1,10 @@
 import * as path from "node:path";
-import { formatHashlineHeader, formatNumberedLine, formatNumberedLines } from "@oh-my-soup/hashline";
+import {
+	formatHashlineHeader,
+	formatNumberedLine,
+	formatNumberedLines,
+	splitAddressableFileLines,
+} from "@oh-my-soup/hashline";
 import type { AgentToolResult } from "@oh-my-soup/pi-agent-core";
 import { canonicalSnapshotKey, getFileSnapshotStore, recordSeenLines } from "../edit/file-snapshot-store";
 import { normalizeToLF } from "../edit/normalize";
@@ -290,7 +295,7 @@ export function buildInMemoryTextResult(
 ): AgentToolResult<ReadToolDetails> {
 	const displayMode = resolveFileDisplayMode(session, { raw: options.raw, immutable: options.immutable });
 	const details = options.details ?? {};
-	const allLines = text.split("\n");
+	const allLines = options.raw === true ? text.split("\n") : splitAddressableFileLines(text);
 	const totalLines = allLines.length;
 	details.totalLines = totalLines;
 	// User-requested 0-indexed range start. Lines BEFORE this are leading
