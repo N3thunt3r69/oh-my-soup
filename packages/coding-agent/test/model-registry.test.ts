@@ -1312,7 +1312,7 @@ describe("ModelRegistry", () => {
 				},
 			});
 			costPartial = readonlyRegistry({
-				providers: { openrouter: { modelOverrides: { "anthropic/claude-sonnet-4": { cost: { input: 99 } } } } },
+				providers: { openai: { modelOverrides: { "gpt-5.6": { cost: { input: 99 } } } } },
 			});
 			addHeaders = readonlyRegistry({
 				providers: {
@@ -1438,12 +1438,15 @@ describe("ModelRegistry", () => {
 			expect(invalid.find("myprovider", "my-model")).toBeUndefined();
 		});
 
-		test("model override can change cost fields partially", () => {
-			const sonnet = getModelsForProvider(costPartial, "openrouter").find(m => m.id === "anthropic/claude-sonnet-4");
-			// Input cost should be overridden
-			expect(sonnet?.cost.input).toBe(99);
-			// Other cost fields should be preserved from built-in
-			expect(sonnet?.cost.output).toBeGreaterThan(0);
+		test("model override can change cost fields partially without dropping long-context pricing", () => {
+			const gpt56 = getModelsForProvider(costPartial, "openai").find(m => m.id === "gpt-5.6");
+			expect(gpt56?.cost.input).toBe(99);
+			expect(gpt56?.cost.output).toBeGreaterThan(0);
+			expect(gpt56?.cost.longContext).toMatchObject({
+				inputThreshold: 272_000,
+				input: 10,
+				output: 45,
+			});
 		});
 
 		test("model override can add headers", () => {

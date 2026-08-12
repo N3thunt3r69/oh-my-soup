@@ -72260,7 +72260,14 @@
 				"input": 5,
 				"output": 30,
 				"cacheRead": 0.5,
-				"cacheWrite": 6.25
+				"cacheWrite": 6.25,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 10,
+					"output": 45,
+					"cacheRead": 1,
+					"cacheWrite": 12.5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,
@@ -72274,6 +72281,9 @@
 					"xhigh",
 					"max"
 				]
+			},
+			"compat": {
+				"reasoningDisableMode": "none-effort"
 			}
 		},
 		"gpt-5.6-luna": {
@@ -72291,7 +72301,14 @@
 				"input": 0.2,
 				"output": 1.2,
 				"cacheRead": 0.02,
-				"cacheWrite": 0.25
+				"cacheWrite": 0.25,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 0.4,
+					"output": 1.8,
+					"cacheRead": 0.04,
+					"cacheWrite": 0.5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,
@@ -72305,6 +72322,9 @@
 					"xhigh",
 					"max"
 				]
+			},
+			"compat": {
+				"reasoningDisableMode": "none-effort"
 			}
 		},
 		"gpt-5.6-luna-pro": {
@@ -72322,7 +72342,14 @@
 				"input": 0.2,
 				"output": 1.2,
 				"cacheRead": 0.02,
-				"cacheWrite": 0.25
+				"cacheWrite": 0.25,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 0.4,
+					"output": 1.8,
+					"cacheRead": 0.04,
+					"cacheWrite": 0.5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,
@@ -72338,6 +72365,9 @@
 					"xhigh",
 					"max"
 				]
+			},
+			"compat": {
+				"reasoningDisableMode": "none-effort"
 			}
 		},
 		"gpt-5.6-sol": {
@@ -72355,7 +72385,14 @@
 				"input": 5,
 				"output": 30,
 				"cacheRead": 0.5,
-				"cacheWrite": 6.25
+				"cacheWrite": 6.25,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 10,
+					"output": 45,
+					"cacheRead": 1,
+					"cacheWrite": 12.5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,
@@ -72389,7 +72426,14 @@
 				"input": 5,
 				"output": 30,
 				"cacheRead": 0.5,
-				"cacheWrite": 6.25
+				"cacheWrite": 6.25,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 10,
+					"output": 45,
+					"cacheRead": 1,
+					"cacheWrite": 12.5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,
@@ -72405,6 +72449,9 @@
 					"xhigh",
 					"max"
 				]
+			},
+			"compat": {
+				"reasoningDisableMode": "none-effort"
 			}
 		},
 		"gpt-5.6-terra": {
@@ -72422,7 +72469,14 @@
 				"input": 2,
 				"output": 12,
 				"cacheRead": 0.2,
-				"cacheWrite": 2.5
+				"cacheWrite": 2.5,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 4,
+					"output": 18,
+					"cacheRead": 0.4,
+					"cacheWrite": 5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,
@@ -72436,6 +72490,9 @@
 					"xhigh",
 					"max"
 				]
+			},
+			"compat": {
+				"reasoningDisableMode": "none-effort"
 			}
 		},
 		"gpt-5.6-terra-pro": {
@@ -72453,7 +72510,14 @@
 				"input": 2,
 				"output": 12,
 				"cacheRead": 0.2,
-				"cacheWrite": 2.5
+				"cacheWrite": 2.5,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 4,
+					"output": 18,
+					"cacheRead": 0.4,
+					"cacheWrite": 5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,
@@ -72469,6 +72533,9 @@
 					"xhigh",
 					"max"
 				]
+			},
+			"compat": {
+				"reasoningDisableMode": "none-effort"
 			}
 		},
 		"gpt-realtime-2.1": {
@@ -72763,7 +72830,14 @@
 				"input": 5,
 				"output": 30,
 				"cacheRead": 0.5,
-				"cacheWrite": 6.25
+				"cacheWrite": 6.25,
+				"longContext": {
+					"inputThreshold": 272000,
+					"input": 10,
+					"output": 45,
+					"cacheRead": 1,
+					"cacheWrite": 12.5
+				}
 			},
 			"contextWindow": 1050000,
 			"maxTokens": 128000,

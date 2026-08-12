@@ -221,11 +221,13 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 	}
 	if (patch.premiumMultiplier !== undefined) result.premiumMultiplier = patch.premiumMultiplier;
 	if (patch.cost) {
+		const longContext = patch.cost.longContext ?? base.cost.longContext;
 		result.cost = {
 			input: patch.cost.input ?? base.cost.input,
 			output: patch.cost.output ?? base.cost.output,
 			cacheRead: patch.cost.cacheRead ?? base.cost.cacheRead,
 			cacheWrite: patch.cost.cacheWrite ?? base.cost.cacheWrite,
+			...(longContext ? { longContext } : {}),
 		};
 	}
 	let compat: ModelSpec<Api>["compat"];

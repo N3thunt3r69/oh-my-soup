@@ -91,6 +91,35 @@ describe("generated model policies", () => {
 		expect(models[3]?.priority).toBe(1);
 	});
 
+	it("applies GPT-5.6 off and long-context pricing through request-model aliases", () => {
+		const models: ModelSpec<Api>[] = [
+			createSpec({ id: "gpt-5.6", api: "openai-responses", provider: "openai" }),
+			createSpec({ id: "gpt-5.6-luna", api: "openai-responses", provider: "openai" }),
+			{
+				...createSpec({ id: "gpt-5.6-sol-pro", api: "openai-responses", provider: "openai" }),
+				requestModelId: "gpt-5.6-sol",
+			},
+			{
+				...createSpec({ id: "gpt-5.6-terra-pro", api: "openai-responses", provider: "openai" }),
+				requestModelId: "gpt-5.6-terra",
+			},
+			createSpec({ id: "gpt-5.6", api: "openai-responses", provider: "openrouter" }),
+		];
+
+		applyGeneratedModelPolicies(models);
+
+		for (const model of models.slice(0, 4)) {
+			expect(model.compat).toMatchObject({ reasoningDisableMode: "none-effort" });
+			expect(model.cost.longContext?.inputThreshold).toBe(272_000);
+		}
+		expect(models[0]?.cost.longContext).toMatchObject({ input: 10, output: 45 });
+		expect(models[1]?.cost.longContext).toMatchObject({ input: 0.4, output: 1.8 });
+		expect(models[2]?.cost.longContext).toMatchObject({ input: 10, output: 45 });
+		expect(models[3]?.cost.longContext).toMatchObject({ input: 4, output: 18 });
+		expect(models[4]?.compat).toBeUndefined();
+		expect(models[4]?.cost.longContext).toBeUndefined();
+	});
+
 	it("pins GPT-5.6 Codex-transport context window to the 372K hard capacity (#5705)", () => {
 		const models: ModelSpec<Api>[] = [
 			// Codex discovery underreports these via DEFAULT_CONTEXT_WINDOW=272000.
