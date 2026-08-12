@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a managed headless Binary Ninja backend to `disasm`: open raw binaries or `.bndb` databases through the installed Python API, discover the canonical schema and required bounds through SQL catalogs, query disassembly, IL, references, symbols, types, variables, comments, and search, mutate writable properties with atomic same-table DML and canonical `RETURNING` readback, run stateless or session-scoped Binary Ninja Python against the live `BinaryView`, and independently reset, save, or close each target.
+
 ## [17.2.13] - 2026-08-09
 
 ### Added

@@ -45,16 +45,19 @@ const disasmSchema = type({
 	action: disasmActionSchema,
 	"backend?": type("string").describe("native adapter id; defaults to disasm.defaultBackend"),
 	"endpoint?": type("string").describe("one-call IDA bridge endpoint override"),
-	"file?": type("string").describe("open only: binary or existing IDA database/Ghidra .gpr project"),
+	"file?": type("string").describe("open only: binary or existing IDA, Ghidra, or Binary Ninja database"),
 	"output_db?": type("string").describe("open only: persistent backend database path for a raw binary"),
 	"program?": type("string").describe("open only: domain path inside an existing Ghidra project"),
-	"python?": type("string").describe("open only: one-call Python executable override"),
+	"python?": type("string").describe("open only: one-call Python executable override for IDA or Binary Ninja"),
 	"ida_dir?": type("string").describe("open only: one-call IDA installation directory override"),
 	"java_home?": type("string").describe("open only: one-call Java home override for Ghidra"),
 	"ghidra_dir?": type("string").describe("open only: one-call Ghidra installation directory override"),
+	"binaryninja_dir?": type("string").describe("open only: one-call Binary Ninja installation directory override"),
 	"target?": type("string").describe("target id returned by list"),
-	"sql?": type("string").describe("backend-neutral read-only SQL query; scoped SQL mutations are IDA-only"),
-	"code?": type("string").describe("backend-native code (IDAPython or Ghidra Java)"),
+	"sql?": type("string").describe(
+		"shared SQL analysis interface; writable relations use same-table INSERT, UPDATE, and DELETE",
+	),
+	"code?": type("string").describe("backend-native code (IDAPython, Ghidra Java, or Binary Ninja Python)"),
 	"stateful?": type("boolean").describe("persist the backend execution namespace between calls"),
 	"session_id?": type("string").describe("stateful namespace owner id"),
 	"takeover?": type("boolean").describe("reset only: replace a foreign stateful owner; user-directed only"),
@@ -153,7 +156,7 @@ export const disasmToolRenderer = {
 export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDetails> {
 	readonly name = "disasm";
 	readonly label = "Disassembler";
-	readonly summary = "Open binaries and query headless IDA or Ghidra via SQL or native analysis code";
+	readonly summary = "Open binaries and query headless IDA, Ghidra, or Binary Ninja via SQL or native code";
 	readonly description: string;
 	readonly parameters = disasmSchema;
 	readonly strict = true;
@@ -174,6 +177,7 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 		if (params.ida_dir) lines.push(`IDA directory: ${truncateForPrompt(params.ida_dir)}`);
 		if (params.java_home) lines.push(`Java home: ${truncateForPrompt(params.java_home)}`);
 		if (params.ghidra_dir) lines.push(`Ghidra directory: ${truncateForPrompt(params.ghidra_dir)}`);
+		if (params.binaryninja_dir) lines.push(`Binary Ninja directory: ${truncateForPrompt(params.binaryninja_dir)}`);
 		if (params.sql) lines.push(`SQL: ${truncateForPrompt(firstLine(params.sql))}`);
 		if (params.code) lines.push(`Code: ${truncateForPrompt(firstLine(params.code))}`);
 		return lines;
@@ -187,6 +191,15 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 		{
 			caption: "Open a binary in a managed headless Ghidra worker",
 			call: { action: "open", backend: "ghidra", file: "./sample.exe", output_db: "./sample.gpr" },
+		},
+		{
+			caption: "Open a binary in a managed headless Binary Ninja worker",
+			call: {
+				action: "open",
+				backend: "binaryninja",
+				file: "./sample.exe",
+				output_db: "./sample.bndb",
+			},
 		},
 		{ caption: "Discover IDA databases", call: { action: "list", backend: "ida" } },
 		{
@@ -249,13 +262,19 @@ export class DisasmTool implements AgentTool<typeof disasmSchema, DisasmToolDeta
 				endpoint,
 				idaDir:
 					params.ida_dir ?? (backend === "ida" ? this.session.settings.get("disasm.ida.installDir") : undefined),
-				python: params.python ?? (backend === "ida" ? this.session.settings.get("disasm.ida.python") : undefined),
+				python: backend === "ida" ? (params.python ?? this.session.settings.get("disasm.ida.python")) : undefined,
 				ghidraInstallDir:
 					params.ghidra_dir ??
 					(backend === "ghidra" ? this.session.settings.get("disasm.ghidra.installDir") : undefined),
 				ghidraJavaHome:
 					params.java_home ??
 					(backend === "ghidra" ? this.session.settings.get("disasm.ghidra.javaHome") : undefined),
+				binaryNinjaInstallDir:
+					params.binaryninja_dir ??
+					(backend === "binaryninja" ? this.session.settings.get("disasm.binaryNinja.installDir") : undefined),
+				binaryNinjaPython:
+					params.python ??
+					(backend === "binaryninja" ? this.session.settings.get("disasm.binaryNinja.python") : undefined),
 				cwd: this.session.cwd,
 			});
 		} catch (error) {
@@ -379,6 +398,7 @@ function validateActionParameters(params: DisasmParams): void {
 		["ida_dir", params.ida_dir],
 		["java_home", params.java_home],
 		["ghidra_dir", params.ghidra_dir],
+		["binaryninja_dir", params.binaryninja_dir],
 	] as const;
 	if (params.action === "open") {
 		if (!params.file?.trim()) throw new ToolError("file is required for open");
@@ -401,22 +421,25 @@ function validateActionParameters(params: DisasmParams): void {
 }
 
 function validateBackendParameters(params: DisasmParams, backend: string): void {
-	const mismatched =
-		backend === "ghidra"
-			? ([
-					["endpoint", params.endpoint],
-					["ida_dir", params.ida_dir],
-					["python", params.python],
-				] as const)
-			: backend === "ida"
-				? ([
-						["ghidra_dir", params.ghidra_dir],
-						["java_home", params.java_home],
-						["program", params.program],
-					] as const)
-				: [];
-	const invalid = mismatched.find(([, value]) => value !== undefined);
+	const backendSpecific = [
+		["endpoint", params.endpoint, ["ida"]],
+		["ida_dir", params.ida_dir, ["ida"]],
+		["python", params.python, ["ida", "binaryninja"]],
+		["ghidra_dir", params.ghidra_dir, ["ghidra"]],
+		["java_home", params.java_home, ["ghidra"]],
+		["program", params.program, backend === "ida" || backend === "binaryninja" ? ["ghidra"] : [backend]],
+		["binaryninja_dir", params.binaryninja_dir, ["binaryninja"]],
+	] as const;
+	const invalid = backendSpecific.find(
+		([, value, allowed]) => value !== undefined && !allowed.some(id => id === backend),
+	);
 	if (invalid) throw new ToolError(`${invalid[0]} is not valid for the ${backend} backend`);
+	if (backend === "binaryninja" && params.action !== "execute" && params.action !== "reset" && params.stateful) {
+		throw new ToolError("stateful Binary Ninja Python namespaces are only valid for execute");
+	}
+	if (backend === "binaryninja" && (params.takeover !== undefined || params.release !== undefined)) {
+		throw new ToolError("takeover and release are not valid for the binaryninja backend");
+	}
 }
 function requireTarget(params: DisasmParams): string {
 	if (!params.target?.trim()) throw new ToolError(`target is required for ${params.action}; run list first`);

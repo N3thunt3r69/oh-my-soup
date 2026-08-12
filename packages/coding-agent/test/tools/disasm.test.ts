@@ -380,6 +380,39 @@ describe("disasm tool adapter boundary", () => {
 			unregister();
 		}
 	});
+	it("lists Binary Ninja and rejects backend options before dispatch", async () => {
+		const tool = new DisasmTool(makeSession());
+		const listed = await tool.execute("backends", { action: "backends" });
+		expect(listed.details?.backends).toContainEqual({ id: "binaryninja", label: "Binary Ninja" });
+
+		await expect(
+			tool.execute("open", {
+				action: "open",
+				backend: "binaryninja",
+				file: "./sample.bin",
+				program: "/firmware/sample.bin",
+			}),
+		).rejects.toThrow("program is not valid for the binaryninja backend");
+		await expect(
+			tool.execute("query", {
+				action: "query",
+				backend: "binaryninja",
+				target: "binaryninja-target",
+				sql: "SELECT 1",
+				stateful: true,
+				session_id: "analysis-session",
+			}),
+		).rejects.toThrow("stateful Binary Ninja Python namespaces are only valid for execute");
+		await expect(
+			tool.execute("reset", {
+				action: "reset",
+				backend: "binaryninja",
+				target: "binaryninja-target",
+				session_id: "analysis-session",
+				takeover: true,
+			}),
+		).rejects.toThrow("takeover and release are not valid for the binaryninja backend");
+	});
 
 	it("rejects a stateful operation without an owner id", async () => {
 		const backendId = `test-stateful-${crypto.randomUUID()}`;

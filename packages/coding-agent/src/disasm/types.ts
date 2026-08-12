@@ -20,7 +20,7 @@ export interface DisassemblerQueryResult {
 	truncated?: boolean;
 }
 
-/** Result of backend-native execution (IDAPython for IDA, Ghidra Java for Ghidra). */
+/** Result of backend-native execution (IDAPython, Ghidra Java, or Binary Ninja Python). */
 export interface DisassemblerExecutionResult {
 	result?: unknown;
 	stdout?: string;
@@ -44,6 +44,7 @@ export interface DisassemblerResetOptions {
 export interface DisassemblerAdapterCapabilities {
 	/** Human-readable language accepted by execute(). */
 	executionLanguage: string;
+	/** execute() can retain a namespace selected by DisassemblerExecutionOptions.sessionId. */
 	statefulExecution: boolean;
 	open: boolean;
 	reset: boolean;
@@ -93,6 +94,8 @@ export interface DisassemblerAdapterOptions {
 	python?: string;
 	ghidraInstallDir?: string;
 	ghidraJavaHome?: string;
+	binaryNinjaInstallDir?: string;
+	binaryNinjaPython?: string;
 	cwd?: string;
 }
 
