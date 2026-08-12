@@ -114,6 +114,14 @@ describe("generated model policies", () => {
 			}),
 			// The first-party API-key entry uses openai-responses and is untouched.
 			createSpec({ id: "gpt-5.6-sol", api: "openai-responses", provider: "openai", contextWindow: 1050000 }),
+			// The Codex registry actively reports 272K for this alias, so the
+			// luna/sol/terra correction must not overwrite it.
+			createSpec({
+				id: "gpt-daybreak-blue-latest",
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				contextWindow: 272000,
+			}),
 		];
 
 		applyGeneratedModelPolicies(models);
@@ -122,6 +130,7 @@ describe("generated model policies", () => {
 		expect(models[1]?.contextWindow).toBe(372000);
 		expect(models[2]?.contextWindow).toBe(372000);
 		expect(models[3]?.contextWindow).toBe(1050000);
+		expect(models[4]?.contextWindow).toBe(272000);
 	});
 
 	it("pins Claude Mythos 5 first-party Anthropic catalog metadata", () => {

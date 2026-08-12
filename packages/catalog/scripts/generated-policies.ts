@@ -143,6 +143,12 @@ const CODEX_GPT_5_4_PRIORITY_BY_VARIANT: Partial<Record<OpenAIVariant, number>> 
 	nano: 2,
 };
 
+const CODEX_GPT_5_6_372K_MODEL_IDS: Record<string, true> = {
+	"gpt-5.6-luna": true,
+	"gpt-5.6-sol": true,
+	"gpt-5.6-terra": true,
+};
+
 const OPENAI_DAYBREAK_REASONING_MODEL_IDS: Record<string, true> = {
 	"daybreak-blue-latest": true,
 	"daybreak-red-latest": true,
@@ -502,7 +508,7 @@ function applyOpenAICatalogPolicy(model: ModelSpec<Api>, parsedModel: OpenAIMode
 	// discovery omits `context_window` for these SKUs and falls back to
 	// DEFAULT_CONTEXT_WINDOW (272000, src/discovery/codex.ts), which regressed
 	// the bundled hard capacity (#5705). Pin the true 372K input window.
-	if (model.api === "openai-codex-responses" && semverEqual(parsedModel.version, "5.6")) {
+	if (model.api === "openai-codex-responses" && CODEX_GPT_5_6_372K_MODEL_IDS[model.id]) {
 		model.contextWindow = 372000;
 	}
 }

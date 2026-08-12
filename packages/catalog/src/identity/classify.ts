@@ -128,7 +128,9 @@ export const parseAnthropicModel = parser((modelId): AnthropicModel | null => {
  */
 const OPENAI_ALIAS_VERSIONS: Readonly<Record<string, string>> = {
 	"daybreak-blue-latest": "5.6",
+	"gpt-daybreak-blue-latest": "5.6",
 	"daybreak-red-latest": "5.6",
+	"gpt-daybreak-red-latest": "5.6",
 };
 
 export const parseOpenAIModel = parser((modelId): OpenAIModel | null => {
