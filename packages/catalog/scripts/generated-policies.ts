@@ -143,6 +143,13 @@ const CODEX_GPT_5_4_PRIORITY_BY_VARIANT: Partial<Record<OpenAIVariant, number>> 
 	nano: 2,
 };
 
+const OPENAI_DAYBREAK_REASONING_MODEL_IDS: Record<string, true> = {
+	"daybreak-blue-latest": true,
+	"daybreak-red-latest": true,
+	"gpt-5.6-cyber": true,
+	"gpt-5.6-sol": true,
+};
+
 const COPILOT_GENERATED_LIMITS: Record<string, { contextWindow: number; maxTokens: number }> = {
 	"claude-opus-4.6": { contextWindow: 168000, maxTokens: 32000 },
 	"gpt-5.2": { contextWindow: 272000, maxTokens: 128000 },
@@ -464,6 +471,14 @@ function inferGeneratedApplyPatchToolType(
 }
 
 function applyOpenAICatalogPolicy(model: ModelSpec<Api>, parsedModel: OpenAIModel): void {
+	if (
+		model.provider === "openai" &&
+		model.api === "openai-responses" &&
+		OPENAI_DAYBREAK_REASONING_MODEL_IDS[model.id]
+	) {
+		model.compat = { ...(model.compat ?? {}), reasoningDisableMode: "none-effort" };
+	}
+
 	// Codex models: 400K figure includes output budget; input window is 272K.
 	if (parsedModel.variant.startsWith("codex") && parsedModel.variant !== "codex-spark") {
 		model.contextWindow = 272000;

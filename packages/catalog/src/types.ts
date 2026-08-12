@@ -155,6 +155,7 @@ export type OpenAIReasoningFormat = "openai" | "openrouter" | "zai" | "kimi" | "
 export type OpenAIReasoningDisableMode =
 	| "omit"
 	| "lowest-effort"
+	| "none-effort"
 	| "openrouter-enabled-false"
 	| "zai-thinking-disabled"
 	| "qwen-enable-thinking-false"

@@ -866,6 +866,15 @@ export function umansModelManagerOptions(config?: UmansModelManagerConfig): Mode
 // 1. OpenAI
 // ---------------------------------------------------------------------------
 
+const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_GPT_56_SOL_STANDARD_COST = { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 } as const;
+const OPENAI_GPT_56_CYBER_STANDARD_COST = {
+	input: 12.5,
+	output: 75,
+	cacheRead: 1.25,
+	cacheWrite: 15.625,
+} as const;
+
 export interface OpenAIModelManagerConfig {
 	apiKey?: string;
 	baseUrl?: string;
@@ -876,13 +885,57 @@ export function openaiModelManagerOptions(config?: OpenAIModelManagerConfig): Mo
 	return createOpenAICompatibleModelManagerOptions({
 		api: "openai-responses",
 		providerId: "openai",
-		defaultBaseUrl: "https://api.openai.com/v1",
+		defaultBaseUrl: OPENAI_API_BASE_URL,
 		config,
 		requireApiKey: true,
 		filterModel: (_entry, model, references) => isLikelyOpenAIResponsesModelId(model.id, references),
 		mapModel: mapWithBundledReference,
 	});
 }
+
+/**
+ * Daybreak models are approval-gated first-party Responses models that are not
+ * yet present in stencil.so. Seed the documented aliases and current Cyber
+ * snapshot so fresh installs expose them without credentialed discovery.
+ */
+export const OPENAI_DAYBREAK_CURATED_FALLBACK_MODELS: readonly ModelSpec<"openai-responses">[] = [
+	{
+		id: "daybreak-blue-latest",
+		name: "Daybreak Blue",
+		api: "openai-responses",
+		provider: "openai",
+		baseUrl: OPENAI_API_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: OPENAI_GPT_56_SOL_STANDARD_COST,
+		contextWindow: 1_050_000,
+		maxTokens: 128_000,
+	},
+	{
+		id: "daybreak-red-latest",
+		name: "Daybreak Red",
+		api: "openai-responses",
+		provider: "openai",
+		baseUrl: OPENAI_API_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: OPENAI_GPT_56_CYBER_STANDARD_COST,
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+	},
+	{
+		id: "gpt-5.6-cyber",
+		name: "GPT-5.6 Cyber",
+		api: "openai-responses",
+		provider: "openai",
+		baseUrl: OPENAI_API_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: OPENAI_GPT_56_CYBER_STANDARD_COST,
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+	},
+];
 
 /** First-party gpt-5.6 SKUs that accept `reasoning: { mode: "pro" }` on the Responses APIs. */
 const OPENAI_PRO_REASONING_BASE_IDS: Record<string, true> = {
