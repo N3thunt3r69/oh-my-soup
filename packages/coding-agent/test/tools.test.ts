@@ -921,6 +921,42 @@ describe("Coding Agent Tools", () => {
 			await expect(readArchiveEntries(archivePath)).rejects.toThrow(/cannot be materialized/);
 		});
 
+		it("should resolve file symlinks routed through directory symlinks", async () => {
+			const archivePath = path.join(testDir, "aliased-file-symlink.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					// The file symlink precedes the directory alias it routes
+					// through, so resolution must defer until the alias settles.
+					{ path: "pkg/bin/tool", content: "", typeFlag: "2", linkName: "../current/tool.js" },
+					{ path: "pkg/lib/tool.js", content: "export const linked = true;\n" },
+					{ path: "pkg/current", content: "", typeFlag: "2", linkName: "lib" },
+				]),
+			);
+
+			const linkedResult = await readTool.execute("test-call-tar-aliased-symlink-member", {
+				path: `${archivePath}:pkg/bin/tool`,
+			});
+			expect(getTextOutput(linkedResult)).toContain("export const linked = true");
+		});
+
+		it("should reject directory symlinks targeting their own subtree instead of looping", async () => {
+			const archivePath = path.join(testDir, "self-cycle-symlink.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "a/b/f.txt", content: "unreachable\n" },
+					// `a -> a/b` grows the resolved path on every rewrite; the
+					// pre-fix resolver looped forever on this shape.
+					{ path: "a", content: "", typeFlag: "2", linkName: "a/b" },
+				]),
+			);
+
+			await expect(
+				readTool.execute("test-call-tar-self-cycle", { path: `${archivePath}:a/b/f.txt` }),
+			).rejects.toThrow(/cyclic or unsupported links/);
+		});
+
 		it("should resolve tar symlinks whose target is the archive root", async () => {
 			const archivePath = path.join(testDir, "root-symlinks.tar");
 			fs.writeFileSync(

@@ -908,11 +908,36 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		for (const entry of entries) entriesByPath.set(entry.path, entry);
 		const unresolved = new Set(pendingLinks.keys());
 
+		// True while the target itself or any directory on its path is a link
+		// that has not been classified yet; such targets must wait a pass so a
+		// file symlink routed through a directory alias is not misjudged
+		// dangling before the alias resolves.
+		const dependsOnUnresolvedLink = (targetPath: string): boolean => {
+			const parts = targetPath.split("/");
+			for (let end = parts.length; end > 0; end--) {
+				const prefixEntry = entriesByPath.get(parts.slice(0, end).join("/"));
+				if (prefixEntry && unresolved.has(prefixEntry)) return true;
+			}
+			return false;
+		};
+
 		while (unresolved.size > 0) {
 			let resolved = 0;
 			for (const entry of unresolved) {
 				const pending = pendingLinks.get(entry)!;
-				const target = entriesByPath.get(pending.targetPath);
+				if (dependsOnUnresolvedLink(pending.targetPath)) continue;
+
+				// Targets may route through directory aliases classified in an
+				// earlier pass; rewrite before the exact-path lookup.
+				let targetPath = pending.targetPath;
+				try {
+					targetPath = resolveDirectoryAliasPath(entriesByPath, targetPath);
+				} catch {
+					// Cyclic alias chain: fall through to the dangling-symlink path.
+				}
+				if (targetPath !== pending.targetPath && dependsOnUnresolvedLink(targetPath)) continue;
+
+				const target = entriesByPath.get(targetPath);
 				if (target?.storage && !target.isDirectory) {
 					entry.size = target.size;
 					entry.storage = target.storage;
@@ -920,12 +945,11 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 					resolved++;
 					continue;
 				}
-				if (target && unresolved.has(target)) continue;
 
 				// An empty target is the archive root, which is always a directory.
-				const targetPrefix = `${pending.targetPath}/`;
+				const targetPrefix = `${targetPath}/`;
 				const targetIsDirectory =
-					pending.targetPath === "" ||
+					targetPath === "" ||
 					target?.isDirectory === true ||
 					entries.some(candidate => candidate.path.startsWith(targetPrefix));
 				if (!targetIsDirectory) {
@@ -974,6 +998,40 @@ function extractTarMember(storage: TarStorage, size: number, memberPath: string)
 
 function throwUnreadableTarLink(storage: TarLinkStorage, memberPath: string): never {
 	throw new ToolError(`Archive symlink '${memberPath}' cannot be materialized from target '${storage.targetPath}'`);
+}
+
+/** ELOOP-style bound on directory-alias rewrites during a single path lookup. */
+const MAX_LINK_RESOLUTION_DEPTH = 40;
+
+/**
+ * Rewrite `archivePath` through directory symlink aliases until it no longer
+ * crosses one. Bounded: an exact revisit and an alias chain that keeps growing
+ * the path (e.g. a directory symlink targeting its own subtree, `a -> a/b`)
+ * both throw a catchable cyclic-symlink error instead of looping forever.
+ */
+function resolveDirectoryAliasPath(entries: ReadonlyMap<string, ArchiveIndexEntry>, archivePath: string): string {
+	let resolvedPath = archivePath;
+	const seen = new Set<string>();
+	for (let depth = 0; depth < MAX_LINK_RESOLUTION_DEPTH && !seen.has(resolvedPath); depth++) {
+		seen.add(resolvedPath);
+		const parts = resolvedPath.split("/");
+		let replacement: string | undefined;
+		for (let end = parts.length; end > 0; end--) {
+			const prefix = parts.slice(0, end).join("/");
+			const entry = entries.get(prefix);
+			if (!entry?.isDirectory || entry.storage?.type !== "tar-link") continue;
+			const suffix = parts.slice(end).join("/");
+			replacement = suffix
+				? entry.storage.targetPath
+					? `${entry.storage.targetPath}/${suffix}`
+					: suffix
+				: entry.storage.targetPath;
+			break;
+		}
+		if (replacement === undefined) return resolvedPath;
+		resolvedPath = replacement;
+	}
+	throw new ToolError(`Archive path '${archivePath}' crosses a cyclic symlink`);
 }
 
 async function readZipEntries(source: ByteSource): Promise<ArchiveIndexEntry[]> {
@@ -1030,34 +1088,6 @@ export class ArchiveReader {
 		ensureParentDirectories(this.#entries);
 	}
 
-	#resolveDirectoryAliases(archivePath: string): string {
-		let resolvedPath = archivePath;
-		const seen = new Set<string>();
-		while (true) {
-			if (seen.has(resolvedPath)) {
-				throw new ToolError(`Archive path '${archivePath}' crosses a cyclic symlink`);
-			}
-			seen.add(resolvedPath);
-
-			const parts = resolvedPath.split("/");
-			let replacement: string | undefined;
-			for (let end = parts.length; end > 0; end--) {
-				const prefix = parts.slice(0, end).join("/");
-				const entry = this.#entries.get(prefix);
-				if (!entry?.isDirectory || entry.storage?.type !== "tar-link") continue;
-				const suffix = parts.slice(end).join("/");
-				replacement = suffix
-					? entry.storage.targetPath
-						? `${entry.storage.targetPath}/${suffix}`
-						: suffix
-					: entry.storage.targetPath;
-				break;
-			}
-			if (replacement === undefined) return resolvedPath;
-			resolvedPath = replacement;
-		}
-	}
-
 	getNode(subPath?: string): ArchiveNode | undefined {
 		const normalizedPath = normalizeArchiveLookupPath(subPath);
 		if (normalizedPath === undefined) return undefined;
@@ -1065,7 +1095,7 @@ export class ArchiveReader {
 			return { path: "", isDirectory: true, size: 0 };
 		}
 
-		const resolvedPath = this.#resolveDirectoryAliases(normalizedPath);
+		const resolvedPath = resolveDirectoryAliasPath(this.#entries, normalizedPath);
 		if (resolvedPath === "") {
 			return { path: normalizedPath, isDirectory: true, size: 0 };
 		}
@@ -1085,7 +1115,7 @@ export class ArchiveReader {
 			throw new ToolError("Archive path cannot contain '..'");
 		}
 
-		const resolvedPath = normalizedPath ? this.#resolveDirectoryAliases(normalizedPath) : "";
+		const resolvedPath = normalizedPath ? resolveDirectoryAliasPath(this.#entries, normalizedPath) : "";
 		if (normalizedPath && resolvedPath !== "") {
 			const entry = this.#entries.get(resolvedPath);
 			if (!entry) {
@@ -1134,7 +1164,7 @@ export class ArchiveReader {
 			throw new ToolError("Archive file path is required");
 		}
 
-		const resolvedPath = this.#resolveDirectoryAliases(normalizedPath);
+		const resolvedPath = resolveDirectoryAliasPath(this.#entries, normalizedPath);
 		if (resolvedPath === "") {
 			throw new ToolError(`Archive path '${normalizedPath}' is a directory`);
 		}
