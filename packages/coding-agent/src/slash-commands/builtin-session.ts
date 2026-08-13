@@ -137,6 +137,83 @@ async function handleSessionPinCommand(
 	await output(`Pinned ${account.label} to this session for ${providerName}.`);
 }
 
+const ROTATE_ACCOUNT_PROVIDER_ALIASES: Readonly<Record<string, string>> = {
+	openai: "openai-codex",
+};
+
+function resolveRotateAccountProvider(input: string): { id: string; name: string } | undefined {
+	const normalized = input.trim().toLowerCase();
+	if (!normalized) return undefined;
+	const providers = getOAuthProviders();
+	const providerId = ROTATE_ACCOUNT_PROVIDER_ALIASES[normalized] ?? normalized;
+	const matched =
+		providers.find(provider => provider.id.toLowerCase() === providerId) ??
+		providers.find(provider => provider.name.toLowerCase() === normalized);
+	if (!matched) return undefined;
+	const id = matched.storeCredentialsAs ?? matched.id;
+	const storageProvider = providers.find(provider => provider.id === id);
+	return { id, name: storageProvider?.name ?? matched.name };
+}
+
+async function handleRotateAccountCommand(
+	arg: string,
+	session: AgentSession,
+	output: SlashCommandRuntime["output"],
+): Promise<void> {
+	if (session.isStreaming) {
+		await output("Cannot rotate an account while the session is streaming.");
+		return;
+	}
+	const requestedProvider = arg.trim();
+	if (!requestedProvider) {
+		await output("Usage: /rotateaccount <provider>");
+		return;
+	}
+	const provider = resolveRotateAccountProvider(requestedProvider);
+	if (!provider) {
+		await output(`Unknown OAuth provider: ${requestedProvider}`);
+		return;
+	}
+
+	const authStorage = session.modelRegistry.authStorage;
+	let accounts = toSessionPinAccounts(authStorage.listOAuthAccounts(provider.id, session.sessionId));
+	if (accounts.length > 1 && !accounts.some(account => account.active)) {
+		try {
+			await authStorage.getOAuthAccess(provider.id, session.sessionId);
+		} catch (error) {
+			await output(`Could not resolve the active ${provider.name} account: ${errorMessage(error)}`);
+			return;
+		}
+		accounts = toSessionPinAccounts(authStorage.listOAuthAccounts(provider.id, session.sessionId));
+	}
+
+	if (accounts.length === 0) {
+		await output(
+			`No stored OAuth accounts for ${provider.name}. Account rotation only applies to stored OAuth accounts.`,
+		);
+		return;
+	}
+	if (accounts.length === 1) {
+		await output(`Only one stored OAuth account exists for ${provider.name}; nothing to rotate.`);
+		return;
+	}
+
+	const currentIndex = accounts.findIndex(account => account.active);
+	if (currentIndex === -1) {
+		await output(`Could not resolve an active ${provider.name} account to rotate.`);
+		return;
+	}
+	const current = accounts[currentIndex];
+	const next = accounts[(currentIndex + 1) % accounts.length];
+	if (!current || !next || !authStorage.pinSessionOAuthAccount(provider.id, session.sessionId, next.credentialId)) {
+		await output(`The next ${provider.name} account is no longer available to select.`);
+		return;
+	}
+	await output(
+		`Rotated ${provider.name} from ${current.label} to ${next.label}. Pinned ${next.label} for this session.`,
+	);
+}
+
 export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "todo",
@@ -551,6 +628,16 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			}
 			void runtime.ctx.showOAuthSelector("logout");
 			runtime.ctx.editor.setText("");
+		},
+	},
+	{
+		name: "rotateaccount",
+		description: "Rotate to the next OAuth account for a provider",
+		inlineHint: "<provider>",
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			await handleRotateAccountCommand(command.args, runtime.session, runtime.output);
+			return commandConsumed();
 		},
 	},
 	{

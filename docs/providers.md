@@ -46,6 +46,7 @@ Use the interactive slash commands inside a session:
 
 - `/login` — opens the OAuth/key selector. `/login <provider>` jumps straight to one provider (e.g. `/login anthropic`); for an OAuth flow that needs a pasted callback, run `/login <redirect-url>` to complete it.
 - `/logout` — opens the provider selector to remove stored credentials.
+- `/rotateaccount <provider>` — pins the next stored OAuth account to the current session, wrapping at the end of the provider's account list. Use `/rotateaccount openai` or `/rotateaccount openai-codex` for ChatGPT subscription accounts.
 
 For headless or remote setups backed by a shared auth broker, the CLI exposes `oms auth-broker login <provider>` / `oms auth-broker logout` (and `status`, `list`, `import`, `migrate`). See [Secrets and credentials](./secrets.md) for the broker model.
 
