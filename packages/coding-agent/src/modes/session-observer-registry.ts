@@ -34,6 +34,45 @@ const STATUS_MAP: Record<string, ObservableSession["status"]> = {
 	aborted: "aborted",
 };
 
+/** Longest task-prompt preview kept on a terminal row (Agent Hub detail line). */
+const TERMINAL_TASK_PREVIEW_CHARS = 2048;
+
+/**
+ * Terminal rows stay listed (HUD history, Agent Hub, transcript stats read
+ * them), but the registry outlives every subagent, so the last progress
+ * snapshot must not pin run-sized payloads — `extractedToolData` grows with
+ * every nested task/yield of the run and `inflightTaskDetails` holds a whole
+ * nested batch tree. Keep the scalar metrics and short strings those
+ * surfaces read; drop the rest.
+ */
+function slimTerminalProgress(progress: AgentProgress): AgentProgress {
+	return {
+		index: progress.index,
+		id: progress.id,
+		agent: progress.agent,
+		agentSource: progress.agentSource,
+		status: progress.status,
+		task:
+			progress.task.length > TERMINAL_TASK_PREVIEW_CHARS
+				? `${progress.task.slice(0, TERMINAL_TASK_PREVIEW_CHARS)}…`
+				: progress.task,
+		description: progress.description,
+		lastIntent: progress.lastIntent,
+		recentTools: [],
+		recentOutput: [],
+		toolCount: progress.toolCount,
+		requests: progress.requests,
+		tokens: progress.tokens,
+		contextTokens: progress.contextTokens,
+		contextWindow: progress.contextWindow,
+		cost: progress.cost,
+		durationMs: progress.durationMs,
+		modelRole: progress.modelRole,
+		resolvedModel: progress.resolvedModel,
+		resolvedModelIsFallback: progress.resolvedModelIsFallback,
+	};
+}
+
 export class SessionObserverRegistry {
 	#sessions = new Map<string, ObservableSession>();
 	#listeners = new Set<(kind: SessionObserverChangeKind) => void>();
@@ -164,6 +203,9 @@ export class SessionObserverRegistry {
 					existing.detached = payload.detached ?? existing.detached;
 					if (payload.description) existing.description = payload.description;
 					if (payload.sessionFile) existing.sessionFile = payload.sessionFile;
+					if (status !== "active" && existing.progress) {
+						existing.progress = slimTerminalProgress(existing.progress);
+					}
 				} else {
 					this.#sessions.set(payload.id, {
 						id: payload.id,
@@ -197,7 +239,7 @@ export class SessionObserverRegistry {
 					existing.index = payload.index;
 					existing.parentToolCallId = payload.parentToolCallId ?? existing.parentToolCallId;
 					existing.detached = payload.detached ?? existing.detached;
-					existing.progress = progress;
+					existing.progress = existing.status !== "active" ? slimTerminalProgress(progress) : progress;
 					if (progress.description) existing.description = progress.description;
 					if (payload.sessionFile) existing.sessionFile = payload.sessionFile;
 				} else {

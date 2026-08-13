@@ -7,6 +7,12 @@
 - Added a managed headless Binary Ninja backend to `disasm`: open raw binaries or `.bndb` databases through the installed Python API, discover the canonical schema and required bounds through SQL catalogs, query disassembly, IL, references, symbols, types, variables, comments, and search, mutate writable properties with atomic same-table DML and canonical `RETURNING` readback, run stateless or session-scoped Binary Ninja Python against the live `BinaryView`, and independently reset, save, or close each target.
 - Added `/rotateaccount <provider>` to move the current session to the next stored OAuth account for a provider; `openai` is accepted as shorthand for `openai-codex`.
 
+### Fixed
+
+- Fixed multi-agent spawns burning quadratic CPU on progress forwarding: every forwarded tick rebuilt render details for ALL spawns in the call, and the executor's per-tool-end flush bypasses its 150 ms coalescer, so N busy agents cost O(N² × tool rate) snapshot copies per second. Batch forwarding (async job path and sync fan-out) is now rate-limited to the same 150 ms cadence with an immediate leading edge, the job-manager progress hook reuses the details it was handed instead of rebuilding them, and the per-event model display string is recomputed only when the model object actually changes.
+- Fixed unbounded memory retention across many-subagent sessions: the session observer registry kept every finished subagent's last full progress snapshot — pinning its `extractedToolData` and nested task trees — for the life of the main session. Terminal rows now retain only the scalar metrics the HUD, Agent Hub, and transcript stats read; `extractedToolData` display slots are capped at the newest 24 entries per tool (`yield` entries all fold into the final payload and stay uncapped); and keep-alive adoption clears the raw-SSE debug ring (≤512 KB per agent) at idle instead of holding it for the whole idle-TTL window.
+- Fixed isolated (worktree) subagent runs leaking language-server processes: LSP clients are keyed by working directory and the idle reaper is off by default, so each worktree spawn's servers survived until process exit — and their open handles could break worktree removal on Windows. Isolation cleanup now shuts down every LSP client rooted under the worktree before deleting it.
+
 ## [17.2.13] - 2026-08-09
 
 ### Added

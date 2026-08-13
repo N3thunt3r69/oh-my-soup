@@ -410,6 +410,48 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("shuts down only the clients keyed under a removed isolation root", async () => {
+		const tempDir = TempDir.createSync("@oms-lsp-under-");
+		try {
+			const config: ServerConfig = {
+				command: "fake-lsp",
+				fileTypes: ["ts"],
+				rootMarkers: [],
+			};
+			const handshake: FakeLspHandler = (message, srv) => {
+				if (message.method === "initialize") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			};
+			const worktreeBase = path.join(tempDir.path(), "wt-1234");
+			const worktreeCwd = path.join(worktreeBase, "m");
+			const projectCwd = path.join(tempDir.path(), "project");
+
+			// Each installFakeLsp rebinds the ptree.spawn spy, so create the
+			// worktree client under fake A and the project client under fake B.
+			const worktreeServer = installFakeLsp(handshake);
+			await lspClient.getOrCreateClient(config, worktreeCwd, 1_000);
+			const projectServer = installFakeLsp(handshake);
+			const projectClient = await lspClient.getOrCreateClient(config, projectCwd, 1_000);
+
+			await lspClient.shutdownClientsUnder(worktreeBase);
+
+			// The worktree-keyed client went through the graceful handshake...
+			expect(worktreeServer.received.map(message => message.method)).toContain("shutdown");
+			// ...while the sibling project client was untouched and stays registered.
+			expect(projectServer.received.map(message => message.method)).not.toContain("shutdown");
+			expect(await lspClient.getActiveOrPendingClient(config, worktreeCwd)).toBeUndefined();
+			expect(await lspClient.getActiveOrPendingClient(config, projectCwd)).toBe(projectClient);
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
 	it("rearms the idle checker from cached config after global shutdown", async () => {
 		const cwd = "/cached-lsp-config";
 		const intervalSpy = vi.spyOn(globalThis, "setInterval");

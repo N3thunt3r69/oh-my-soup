@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as natives from "@oh-my-soup/pi-natives";
 import { getWorktreeDir, logger, Snowflake } from "@oh-my-soup/pi-utils";
+import { shutdownClientsUnder } from "../lsp/client";
 import * as git from "../utils/git";
 import * as jj from "../utils/jj";
 import { writeIsolationOwner } from "./isolation-ownership";
@@ -473,6 +474,13 @@ export async function ensureIsolation(
 
 /** Tear down a handle returned by {@link ensureIsolation}. */
 export async function cleanupIsolation(handle: IsolationHandle): Promise<void> {
+	// baseDir is the parent of the merged directory
+	const baseDir = path.dirname(handle.mergedDir);
+	// Language servers spawned for this isolation are keyed by its cwd and can
+	// never be reused once the directory is deleted — stop them before the
+	// backend unmount so their processes neither pin the mount/rm (Windows
+	// EBUSY) nor idle until process exit.
+	await shutdownClientsUnder(baseDir);
 	try {
 		try {
 			await natives.isoStop(handle.backend, handle.mergedDir);
@@ -484,8 +492,6 @@ export async function cleanupIsolation(handle: IsolationHandle): Promise<void> {
 			});
 		}
 	} finally {
-		// baseDir is the parent of the merged directory
-		const baseDir = path.dirname(handle.mergedDir);
 		await fs.rm(baseDir, { recursive: true, force: true });
 	}
 }

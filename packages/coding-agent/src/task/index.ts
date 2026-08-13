@@ -98,6 +98,57 @@ function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
 	target.cost.total += cost.total;
 }
 
+/**
+ * Interval for {@link coalesceProgressForwards}. Matches the executor's
+ * PROGRESS_COALESCE_MS so per-spawn forwarding never lags the source cadence.
+ */
+const PROGRESS_FORWARD_COALESCE_MS = 150;
+
+interface ProgressForwardCoalescer {
+	/** Request a flush: immediate when outside the window, else one trailing flush. */
+	schedule: () => void;
+	/** Drop any pending trailing flush (terminal reports emit their own details). */
+	cancel: () => void;
+}
+
+/**
+ * Leading+trailing rate limiter for progress forwarding whose flush cost is
+ * O(batch size). The executor flushes each subagent's progress on every tool
+ * end, and every forwarded tick rebuilds details for ALL spawns in the call
+ * ({@link TaskTool.execute}'s buildAsyncDetails / emitCombined) — unthrottled,
+ * N agents grinding cheap tools cost O(N² × tool rate) snapshot copies per
+ * second. Bounding each forwarder to ~6.6 Hz keeps the rebuild O(N) per
+ * interval while the leading edge preserves first-tick responsiveness.
+ * `flush` reads current state at call time, so a trailing flush is never
+ * staler than the coalescing window.
+ */
+function coalesceProgressForwards(flush: () => void): ProgressForwardCoalescer {
+	let lastFlushMs = 0;
+	let timer: NodeJS.Timeout | null = null;
+	return {
+		schedule: () => {
+			if (timer) return;
+			const elapsed = Date.now() - lastFlushMs;
+			if (elapsed >= PROGRESS_FORWARD_COALESCE_MS) {
+				lastFlushMs = Date.now();
+				flush();
+				return;
+			}
+			timer = setTimeout(() => {
+				timer = null;
+				lastFlushMs = Date.now();
+				flush();
+			}, PROGRESS_FORWARD_COALESCE_MS - elapsed);
+		},
+		cancel: () => {
+			if (timer) {
+				clearTimeout(timer);
+				timer = null;
+			}
+		},
+	};
+}
+
 // Re-export types and utilities
 export { loadBundledAgents as BUNDLED_AGENTS } from "./agents";
 export { discoverCommands, expandCommand, getCommand } from "./commands";
@@ -1120,14 +1171,18 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					onSettled?.(true);
 					throw new Error("Aborted before execution");
 				}
+				let lastForwardText = `Running background task ${agentId}...`;
+				// Rate-limits the O(batch)-cost rebuild: the executor flushes each
+				// subagent's progress on every tool end, and every forwarded tick
+				// rebuilds details for ALL spawns in this call via buildDetails().
+				const forwardCoalescer = coalesceProgressForwards(() => {
+					void reportProgress(lastForwardText, buildDetails() as unknown as Record<string, unknown>);
+				});
 				try {
 					markRunning();
 					progress.status = "running";
-					await reportProgress(
-						`Running background task ${agentId}...`,
-						buildDetails() as unknown as Record<string, unknown>,
-					);
-					const forwardSyncProgress: AgentToolUpdateCallback<TaskToolDetails> = async update => {
+					await reportProgress(lastForwardText, buildDetails() as unknown as Record<string, unknown>);
+					const forwardSyncProgress: AgentToolUpdateCallback<TaskToolDetails> = update => {
 						const nextProgress = update.details?.progress?.[0];
 						if (nextProgress) {
 							// The job body owns status and identity (id/index/agent);
@@ -1152,9 +1207,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 							progress.retryState = nextProgress.retryState;
 							progress.retryFailure = nextProgress.retryFailure;
 						}
-						const updateText =
-							update.content.find(part => part.type === "text")?.text ?? `Running background task ${agentId}...`;
-						await reportProgress(updateText, buildDetails() as unknown as Record<string, unknown>);
+						lastForwardText = update.content.find(part => part.type === "text")?.text ?? lastForwardText;
+						forwardCoalescer.schedule();
 					};
 					const result = await this.#executeSync(
 						toolCallId,
@@ -1214,6 +1268,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					const hint = AgentRegistry.global().get(agentId) ? await buildFollowUpHint(false) : "";
 					throw new TaskJobError(`${message}${hint}`);
 				} finally {
+					forwardCoalescer.cancel();
 					releasePermit();
 				}
 			},
@@ -1222,8 +1277,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				agentId,
 				queued: true,
 				ownerId: this.session.getAgentId?.() ?? undefined,
-				onProgress: text => {
-					onUpdate?.({ content: [{ type: "text", text }], details: buildDetails() });
+				onProgress: (text, details) => {
+					onUpdate?.({
+						content: [{ type: "text", text }],
+						details: (details as TaskToolDetails | undefined) ?? buildDetails(),
+					});
 				},
 			},
 		);
@@ -1280,6 +1338,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				},
 			});
 		};
+		// Same O(batch)-cost rebuild as the async path: coalesce so one busy
+		// spawn can't drive whole-batch re-emits at its tool-call rate.
+		const combinedCoalescer = coalesceProgressForwards(emitCombined);
 
 		const payloads = await this.#runSyncSpawns({
 			toolCallId,
@@ -1290,10 +1351,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			onItemProgress: onUpdate
 				? (index, progress) => {
 						latestProgress.set(index, { ...progress, index });
-						emitCombined();
+						combinedCoalescer.schedule();
 					}
 				: undefined,
 		});
+		combinedCoalescer.cancel();
 
 		const merged = mergeSyncPayloads(spawns, payloads);
 		return {

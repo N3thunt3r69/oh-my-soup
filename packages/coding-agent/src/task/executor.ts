@@ -899,6 +899,15 @@ export type AbortReason = "signal" | "shutdown" | "terminate" | "timeout" | "bud
 
 const MAX_YIELD_TOOL_ERRORS = 6;
 
+/**
+ * Cap on retained `extractedToolData` entries per tool. `yield` is exempt:
+ * every yield call folds into the final payload (incremental yields append
+ * sections — see {@link assembleYieldResult}), so dropping one corrupts the
+ * result. Everything else (today: nested `task` details snapshots, each
+ * pinning a whole nested batch's results) is display-only; keep the newest.
+ */
+const EXTRACTED_TOOL_DATA_CAP = 24;
+
 /** Inputs for the run monitor driving one subagent assignment. */
 interface RunMonitorArgs {
 	index: number;
@@ -1367,6 +1376,9 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		progress.extractedToolData = progress.extractedToolData || {};
 		const existing = progress.extractedToolData[toolName] || [];
 		existing.push(data);
+		if (toolName !== "yield" && existing.length > EXTRACTED_TOOL_DATA_CAP) {
+			existing.splice(0, existing.length - EXTRACTED_TOOL_DATA_CAP);
+		}
 		progress.extractedToolData[toolName] = existing;
 		if (toolName === "yield") {
 			yieldCalled = true;
@@ -1674,14 +1686,21 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	};
 
 	const attach = (session: AgentSession): (() => void) => {
-		let activeModel = session.model ? formatModelStringWithRouting(session.model) : undefined;
+		// Model display strings are recomputed only when the model object is
+		// swapped (model change / retry fallback): formatting on every event put
+		// an allocation on the per-text-delta hot path across all subagents.
+		let lastModel = session.model;
+		let activeModel = lastModel ? formatModelStringWithRouting(lastModel) : undefined;
 		return session.subscribe(event => {
 			emitSubagentEvent(event);
-			const nextModel = session.model ? formatModelStringWithRouting(session.model) : undefined;
-			if (nextModel && nextModel !== activeModel) {
-				activeModel = nextModel;
-				progress.resolvedModel = nextModel;
-				scheduleProgress(true);
+			if (session.model !== lastModel) {
+				lastModel = session.model;
+				const nextModel = lastModel ? formatModelStringWithRouting(lastModel) : undefined;
+				if (nextModel && nextModel !== activeModel) {
+					activeModel = nextModel;
+					progress.resolvedModel = nextModel;
+					scheduleProgress(true);
+				}
 			}
 			if (event.type === "auto_retry_start") {
 				progress.retryState = {
@@ -2502,6 +2521,12 @@ export async function finalizeSubagentLifecycle(args: {
 		await disposeSession();
 		return;
 	}
+	// The idle window keeps the whole live session; the SSE debug ring is
+	// last-request diagnostics with no reader on an idle subagent — drop up to
+	// 512KB per agent now instead of holding it until TTL park. A follow-up
+	// turn repopulates it. Optional-chained: lifecycle tests drive this path
+	// with partial session mocks.
+	args.session.rawSseDebugBuffer?.clear();
 	AgentLifecycleManager.global().adopt(
 		args.id,
 		{

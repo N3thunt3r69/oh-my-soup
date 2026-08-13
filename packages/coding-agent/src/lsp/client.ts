@@ -1273,6 +1273,28 @@ export async function shutdownClient(key: string): Promise<boolean> {
 	return await shutdownClientInstance(client);
 }
 
+/**
+ * Shut down every LSP client whose working directory is `root` or nested
+ * under it. Isolated (worktree) task cleanup calls this before deleting the
+ * worktree: clients are keyed `command:cwd`, so worktree-scoped servers can
+ * never be reused after the directory is gone — without this they would idle
+ * until process exit (the idle reaper is disabled by default) and their open
+ * handles can break the directory removal on Windows.
+ *
+ * Never rejects; per-client shutdown failures are logged by the caller's
+ * normal teardown warnings.
+ */
+export async function shutdownClientsUnder(root: string): Promise<void> {
+	const resolvedRoot = path.resolve(root);
+	const doomed: LspClient[] = [];
+	for (const client of clients.values()) {
+		const rel = path.relative(resolvedRoot, path.resolve(client.cwd));
+		if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) doomed.push(client);
+	}
+	if (doomed.length === 0) return;
+	await Promise.all(doomed.map(client => shutdownClientInstance(client).catch(() => false)));
+}
+
 // =============================================================================
 // LSP Protocol Methods
 // =============================================================================
