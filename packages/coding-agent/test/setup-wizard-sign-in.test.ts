@@ -1,11 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-pi/pi-ai/oauth/types";
-import { SignInTab } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/sign-in";
-import type { SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import * as clipboard from "@oh-my-pi/pi-coding-agent/utils/clipboard";
-import type { Component } from "@oh-my-pi/pi-tui";
+import type { AuthStorage } from "@oh-my-soup/pi-ai";
+import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-soup/pi-ai/oauth/types";
+import { SignInTab } from "@oh-my-soup/pi-coding-agent/modes/setup-wizard/scenes/sign-in";
+import type { SetupSceneHost } from "@oh-my-soup/pi-coding-agent/modes/setup-wizard/scenes/types";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import * as clipboard from "@oh-my-soup/pi-coding-agent/utils/clipboard";
+import type { Component } from "@oh-my-soup/pi-tui";
 
 beforeAll(async () => {
 	await initTheme();
@@ -17,7 +17,7 @@ afterEach(() => {
 
 describe("SignInTab", () => {
 	it("keeps the OSC8 login link and manual-code prompt above clipped wizard rows", async () => {
-		const url = `https://example.com/oauth/authorize?client_id=omp&redirect_uri=http%3A%2F%2Flocalhost%3A45454%2Fcallback&state=${"a".repeat(96)}`;
+		const url = `https://example.com/oauth/authorize?client_id=oms&redirect_uri=http%3A%2F%2Flocalhost%3A45454%2Fcallback&state=${"a".repeat(96)}`;
 		const loginGate = Promise.withResolvers<void>();
 		const copySpy = vi.spyOn(clipboard, "copyToClipboard").mockResolvedValue(undefined);
 		let focusTarget: Component | undefined;
@@ -91,7 +91,7 @@ describe("SignInTab", () => {
 	});
 
 	it("copies the active login URL from the keyboard while the setup TUI owns selection", async () => {
-		const url = "https://example.com/oauth/authorize?client_id=omp&state=copy";
+		const url = "https://example.com/oauth/authorize?client_id=oms&state=copy";
 		const loginGate = Promise.withResolvers<void>();
 		const copySpy = vi.spyOn(clipboard, "copyToClipboard").mockResolvedValue(undefined);
 

@@ -8,7 +8,7 @@
  * the `patch` mode.
  */
 
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 import { parseApplyPatch, parseApplyPatchStreaming } from "../apply-patch/parser";
 import { ApplyPatchError } from "../diff";
 import type { PatchEditEntry } from "./patch";

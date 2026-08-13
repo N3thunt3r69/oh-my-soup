@@ -1,5 +1,5 @@
-import { toNumber } from "@oh-my-pi/pi-catalog/utils";
-import { parseAlibabaTokenPlanCredential } from "@oh-my-pi/pi-catalog/wire/alibaba-token-plan";
+import { toNumber } from "@oh-my-soup/pi-catalog/utils";
+import { parseAlibabaTokenPlanCredential } from "@oh-my-soup/pi-catalog/wire/alibaba-token-plan";
 import type {
 	CredentialRankingStrategy,
 	UsageFetchContext,

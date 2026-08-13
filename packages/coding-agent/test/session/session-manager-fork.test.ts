@@ -5,11 +5,11 @@ import {
 	CURRENT_SESSION_VERSION,
 	type SessionHeader,
 	type SessionMessageEntry,
-} from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { getTerminalId } from "@oh-my-pi/pi-tui";
-import { getAgentDir, getTerminalSessionsDir, removeWithRetries, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/session/session-entries";
+import { loadEntriesFromFile } from "@oh-my-soup/pi-coding-agent/session/session-loader";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import { getTerminalId } from "@oh-my-soup/pi-tui";
+import { getAgentDir, getTerminalSessionsDir, removeWithRetries, setAgentDir, TempDir } from "@oh-my-soup/pi-utils";
 
 interface JsonlMessageEntry {
 	type: "message";
@@ -25,11 +25,11 @@ interface JsonlMessageEntry {
 
 describe("SessionManager.forkFrom", () => {
 	it("suppresses terminal breadcrumbs while preserving source history under a new parented session", async () => {
-		using tempDir = TempDir.createSync("@omp-session-fork-");
+		using tempDir = TempDir.createSync("@oms-session-fork-");
 		const previousAgentDir = getAgentDir();
 		const previousTermSessionId = process.env.TERM_SESSION_ID;
 		setAgentDir(path.join(tempDir.path(), "agent"));
-		process.env.TERM_SESSION_ID = "omp-fork-test";
+		process.env.TERM_SESSION_ID = "oms-fork-test";
 		try {
 			const cwd = path.join(tempDir.path(), "project");
 			const sessionDir = path.join(tempDir.path(), "sessions");

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import {
 	ApplyPatchError,
 	applyCodexPatch,
@@ -12,9 +12,9 @@ import {
 	parseApplyPatch,
 	parseDiffHunks,
 	seekSequence,
-} from "@oh-my-pi/pi-coding-agent/edit";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/edit";
+import type { ToolSession } from "@oh-my-soup/pi-coding-agent/tools";
+import { removeSyncWithRetries } from "@oh-my-soup/pi-utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Test-local adapters over the production Codex envelope API.
@@ -814,7 +814,7 @@ describe("EditTool create-over-existing mode split", () => {
 
 	beforeEach(async () => {
 		resetSettingsForTest();
-		tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-apply-patch-overwrite-"));
+		tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "oms-apply-patch-overwrite-"));
 		await Settings.init({ inMemory: true, cwd: tempDir });
 	});
 

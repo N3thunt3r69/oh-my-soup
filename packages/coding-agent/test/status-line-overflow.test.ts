@@ -2,15 +2,15 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { StatusLineSegmentId } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
-import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
-import type { SegmentContext } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
-import { renderSegment } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-pi/pi-coding-agent/utils/session-color";
-import { visibleWidth } from "@oh-my-pi/pi-tui";
-import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
+import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import type { StatusLineSegmentId } from "@oh-my-soup/pi-coding-agent/config/settings-schema";
+import { StatusLineComponent } from "@oh-my-soup/pi-coding-agent/modes/components/status-line";
+import type { SegmentContext } from "@oh-my-soup/pi-coding-agent/modes/components/status-line/segments";
+import { renderSegment } from "@oh-my-soup/pi-coding-agent/modes/components/status-line/segments";
+import { initTheme, theme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-soup/pi-coding-agent/utils/session-color";
+import { visibleWidth } from "@oh-my-soup/pi-tui";
+import { getProjectDir, setProjectDir } from "@oh-my-soup/pi-utils";
 
 const originalProjectDir = getProjectDir();
 
@@ -216,7 +216,7 @@ describe("path segment truncation at varying maxLength", () => {
 	let tmpDir: string;
 
 	beforeAll(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-overflow-very-long-directory-name-for-testing-"));
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-overflow-very-long-directory-name-for-testing-"));
 		setProjectDir(tmpDir);
 	});
 
@@ -252,7 +252,7 @@ describe("overflow: path shrinks before git is dropped", () => {
 
 	beforeAll(() => {
 		// Long dir name guarantees the path segment is wide
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-overflow-a-very-long-worktree-directory-name-here-"));
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-overflow-a-very-long-worktree-directory-name-here-"));
 		setProjectDir(tmpDir);
 	});
 
@@ -364,7 +364,7 @@ describe("overflow: path shrinks before git is dropped", () => {
 
 	it("shrinks a short path when maxLength exceeds actual path length", () => {
 		// Short dir name — rendered path is well under the configured maxLength.
-		const shortDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-short-"));
+		const shortDir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-short-"));
 		setProjectDir(shortDir);
 		try {
 			const maxLength = 160;
@@ -391,7 +391,7 @@ describe("overflow: path shrinks before git is dropped", () => {
 		}
 	});
 	it("preserves git when overflow is only 1-2 columns", () => {
-		const shortDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-narrow-ovf-"));
+		const shortDir = fs.mkdtempSync(path.join(os.tmpdir(), "oms-narrow-ovf-"));
 		setProjectDir(shortDir);
 		try {
 			const ctx = createCtx({ pathMaxLength: 80, branch: "main" });
@@ -421,7 +421,7 @@ describe("overflow: path shrinks before git is dropped", () => {
 
 describe("overflow: path survives before model", () => {
 	it("drops the model segment before the cwd path when both cannot fit", () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-statusline-overflow-"));
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "oms-statusline-overflow-"));
 		const cwd = path.join(root, "cwdxyz");
 		fs.mkdirSync(cwd);
 		setProjectDir(cwd);

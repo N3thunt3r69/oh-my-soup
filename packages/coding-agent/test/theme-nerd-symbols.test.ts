@@ -2,8 +2,8 @@ import { afterEach, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { getAgentDir, getCustomThemesDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { getThemeByName } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { getAgentDir, getCustomThemesDir, removeWithRetries, setAgentDir } from "@oh-my-soup/pi-utils";
 
 const DARK_THEME_PATH = path.join(import.meta.dir, "..", "src", "modes", "theme", "dark.json");
 
@@ -26,7 +26,7 @@ afterEach(async () => {
 it("uses the Nerd Fonts v3 Material Design session icon", async () => {
 	originalAgentDir = getAgentDir();
 	originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
-	tempAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-nerd-symbols-"));
+	tempAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-nerd-symbols-"));
 	setAgentDir(tempAgentDir);
 
 	const dark = await Bun.file(DARK_THEME_PATH).json();

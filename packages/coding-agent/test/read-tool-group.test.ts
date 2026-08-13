@@ -1,13 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import * as url from "node:url";
-import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getDefault } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
+import { resetSettingsForTest, Settings, settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { getDefault } from "@oh-my-soup/pi-coding-agent/config/settings-schema";
 import {
 	ReadToolGroupComponent,
 	readArgsCollapseIntoGroup,
-} from "@oh-my-pi/pi-coding-agent/modes/components/read-tool-group";
-import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+} from "@oh-my-soup/pi-coding-agent/modes/components/read-tool-group";
+import * as themeModule from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 
 function extractLinkUris(text: string): string[] {
 	return [...text.matchAll(/\x1b\]8;[^;]*;([^\x1b]+)\x1b\\/g)].map(match => match[1]!);
@@ -362,9 +362,9 @@ describe("readArgsCollapseIntoGroup", () => {
 	it.each([
 		["skill://my-skill"],
 		["skill://my-skill/file.md"],
-		["omp://docs/tools/read.md"],
+		["oms://docs/tools/read.md"],
 		["issue://123"],
-		["pr://can1357/oh-my-pi/456"],
+		["pr://pickpocket/oh-my-soup/456"],
 		["agent://abc"],
 		["artifact://abc"],
 		["memory://root"],

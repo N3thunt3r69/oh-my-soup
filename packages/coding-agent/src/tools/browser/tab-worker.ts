@@ -2,8 +2,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
-import type { HTMLElement } from "@oh-my-pi/pi-utils/dom";
+import { postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-soup/pi-utils";
+import type { HTMLElement } from "@oh-my-soup/pi-utils/dom";
 import type {
 	Browser,
 	CDPSession,
@@ -922,8 +922,8 @@ export class WorkerCore {
 	}
 
 	/**
-	 * Tell the omp browser relay this worker drives the adopted page, so the
-	 * relay adds it to the per-window "omp" tab group. Best-effort: plain CDP
+	 * Tell the oms browser relay this worker drives the adopted page, so the
+	 * relay adds it to the per-window "oms" tab group. Best-effort: plain CDP
 	 * backends (real Chrome, cmux) reject the relay-private method.
 	 */
 	async #claimRelayTarget(page: Page): Promise<void> {
@@ -933,9 +933,9 @@ export class WorkerCore {
 			// Puppeteer's protocol map cannot express the relay-private method; the
 			// send signature is otherwise identical.
 			const raw = session as unknown as { send(method: string): Promise<unknown> };
-			await raw.send("OMP.claimTarget");
+			await raw.send("OMS.claimTarget");
 		} catch {
-			// Not the omp relay; nothing to claim.
+			// Not the oms relay; nothing to claim.
 		} finally {
 			await session?.detach().catch(() => undefined);
 		}
@@ -1710,7 +1710,7 @@ export class WorkerCore {
 					session.browserScreenshotDir,
 					`screenshot-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1)}.${ext}`,
 				)
-			: path.join(os.tmpdir(), `omp-sshots-${Snowflake.next()}.${ext}`);
+			: path.join(os.tmpdir(), `oms-sshots-${Snowflake.next()}.${ext}`);
 		await fs.promises.mkdir(path.dirname(dest), { recursive: true });
 		await Bun.write(dest, savedBuffer);
 		const info: ScreenshotResult = {

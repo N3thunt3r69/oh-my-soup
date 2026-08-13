@@ -6,26 +6,26 @@
   ...
 }:
 let
-  cfg = config.programs.omp;
+  cfg = config.programs.oms;
   yaml = pkgs.formats.yaml { };
 in
 {
-  options.programs.omp = {
-    enable = lib.mkEnableOption "OMP coding agent";
+  options.programs.oms = {
+    enable = lib.mkEnableOption "OMS coding agent";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-      defaultText = lib.literalExpression "inputs.omp.packages.${pkgs.stdenv.hostPlatform.system}.default";
-      description = "OMP package to install.";
+      defaultText = lib.literalExpression "inputs.oms.packages.${pkgs.stdenv.hostPlatform.system}.default";
+      description = "OMS package to install.";
     };
 
     settings = lib.mkOption {
       type = lib.types.nullOr yaml.type;
       default = null;
       description = ''
-        Settings written declaratively to {file}`~/.omp/agent/config.yml`.
-        The file is a read-only store symlink: changes made from inside OMP
+        Settings written declaratively to {file}`~/.oms/agent/config.yml`.
+        The file is a read-only store symlink: changes made from inside OMS
         (`/settings`, onboarding) replace it but revert on the next
         `home-manager switch`.
       '';
@@ -38,8 +38,8 @@ in
 
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
-    home.file.".omp/agent/config.yml" = lib.mkIf (cfg.settings != null) {
-      source = yaml.generate "omp-config.yml" cfg.settings;
+    home.file.".oms/agent/config.yml" = lib.mkIf (cfg.settings != null) {
+      source = yaml.generate "oms-config.yml" cfg.settings;
     };
   };
 }

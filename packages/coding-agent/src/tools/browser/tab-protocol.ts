@@ -1,4 +1,4 @@
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent, TextContent } from "@oh-my-soup/pi-ai";
 
 export type Transferable = Bun.Transferable;
 
@@ -38,7 +38,7 @@ export interface ScreenshotResult {
 export interface SessionSnapshot {
 	cwd: string;
 	browserScreenshotDir?: string;
-	/** Force non-WebP screenshot encoding (e.g. for Ollama). Unset honors `OMP_NO_WEBP`. */
+	/** Force non-WebP screenshot encoding (e.g. for Ollama). Unset honors `OMS_NO_WEBP`. */
 	excludeWebP?: boolean;
 }
 

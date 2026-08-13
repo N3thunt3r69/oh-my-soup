@@ -84,8 +84,8 @@ async function publishCompletionOwner(
 }
 
 async function startPtyDaemonWithShell(shell: string, initialMarker: string, expectedMarker: string): Promise<void> {
-	const projectDir = await tempDir("omp-daemon-shell-project-");
-	const runtimeDir = await tempDir("omp-daemon-shell-runtime-");
+	const projectDir = await tempDir("oms-daemon-shell-project-");
+	const runtimeDir = await tempDir("oms-daemon-shell-runtime-");
 	const runner = `
 		import { createDaemonBrokerClient } from "./src/launch/client";
 
@@ -104,7 +104,7 @@ async function startPtyDaemonWithShell(shell: string, initialMarker: string, exp
 					application: process.execPath,
 					args: [
 						"-e",
-						"process.stdout.write(process.env.OMP_TEST_SHELL_MARKER); process.stdout.write(String.fromCharCode(10)); process.stdin.resume();",
+						"process.stdout.write(process.env.OMS_TEST_SHELL_MARKER); process.stdout.write(String.fromCharCode(10)); process.stdin.resume();",
 					],
 					env: {},
 					cwd: projectDir,
@@ -149,7 +149,7 @@ async function startPtyDaemonWithShell(shell: string, initialMarker: string, exp
 		env: {
 			...process.env,
 			SHELL: shell,
-			OMP_TEST_SHELL_MARKER: initialMarker,
+			OMS_TEST_SHELL_MARKER: initialMarker,
 		},
 		stdout: "pipe",
 		stderr: "pipe",
@@ -172,8 +172,8 @@ afterEach(async () => {
 
 describe("daemon broker", () => {
 	it("keeps a valid RPC response authoritative after a malformed completion", async () => {
-		const projectDir = await tempDir("omp-daemon-malformed-completion-project-");
-		const runtimeDir = await tempDir("omp-daemon-malformed-completion-runtime-");
+		const projectDir = await tempDir("oms-daemon-malformed-completion-project-");
+		const runtimeDir = await tempDir("oms-daemon-malformed-completion-runtime-");
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const server = net.createServer(socket => {
 			let buffer = "";
@@ -227,8 +227,8 @@ describe("daemon broker", () => {
 	});
 
 	it("shares PTY output and input across project clients", async () => {
-		const projectDir = await tempDir("omp-daemon-project-");
-		const runtimeDir = await tempDir("omp-daemon-runtime-");
+		const projectDir = await tempDir("oms-daemon-project-");
+		const runtimeDir = await tempDir("oms-daemon-runtime-");
 		const scriptPath = path.join(projectDir, "service.ts");
 		await Bun.write(
 			scriptPath,
@@ -334,8 +334,8 @@ setInterval(() => {}, 1000);
 	}, 20_000);
 
 	it("omits terminal rows for non-PTY logs", async () => {
-		const projectDir = await tempDir("omp-daemon-plain-project-");
-		const runtimeDir = await tempDir("omp-daemon-plain-runtime-");
+		const projectDir = await tempDir("oms-daemon-plain-project-");
+		const runtimeDir = await tempDir("oms-daemon-plain-runtime-");
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		try {
 			const started = await client.request({
@@ -376,7 +376,7 @@ setInterval(() => {}, 1000);
 
 	it("uses a basic shell when the login shell cannot run POSIX commands", async () => {
 		if (process.platform === "win32") return;
-		const shellPath = path.join(await tempDir("omp-daemon-nonposix-shell-"), "csh");
+		const shellPath = path.join(await tempDir("oms-daemon-nonposix-shell-"), "csh");
 		await Bun.write(shellPath, "#!/bin/sh\nexit 1\n");
 		await fs.chmod(shellPath, 0o755);
 
@@ -385,8 +385,8 @@ setInterval(() => {}, 1000);
 
 	it("preserves compatible login shells for PTY daemons", async () => {
 		if (process.platform === "win32") return;
-		const shellPath = path.join(await tempDir("omp-daemon-posix-shell-"), "zsh");
-		await Bun.write(shellPath, '#!/bin/sh\nexport OMP_TEST_SHELL_MARKER="compatible-shell"\nexec /bin/sh "$@"\n');
+		const shellPath = path.join(await tempDir("oms-daemon-posix-shell-"), "zsh");
+		await Bun.write(shellPath, '#!/bin/sh\nexport OMS_TEST_SHELL_MARKER="compatible-shell"\nexec /bin/sh "$@"\n');
 		await fs.chmod(shellPath, 0o755);
 
 		await startPtyDaemonWithShell(shellPath, "basic-shell", "compatible-shell");
@@ -394,7 +394,7 @@ setInterval(() => {}, 1000);
 
 	it("returns promptly when a finite PTY child does not write the broker PID file", async () => {
 		if (process.platform === "win32") return;
-		const shellPath = path.join(await tempDir("omp-daemon-no-pid-shell-"), "zsh");
+		const shellPath = path.join(await tempDir("oms-daemon-no-pid-shell-"), "zsh");
 		await Bun.write(
 			shellPath,
 			`#!/bin/sh
@@ -410,8 +410,8 @@ esac
 `,
 		);
 		await fs.chmod(shellPath, 0o755);
-		const projectDir = await tempDir("omp-daemon-finite-project-");
-		const runtimeDir = await tempDir("omp-daemon-finite-runtime-");
+		const projectDir = await tempDir("oms-daemon-finite-project-");
+		const runtimeDir = await tempDir("oms-daemon-finite-runtime-");
 		const runner = `
 			import { createDaemonBrokerClient } from "./src/launch/client";
 
@@ -470,9 +470,9 @@ esac
 		expect(started.pid).toBeGreaterThan(0);
 	}, 20_000);
 
-	it("stops non-persistent daemons after the last project omp exits", async () => {
-		const projectDir = await tempDir("omp-daemon-exit-project-");
-		const runtimeDir = await tempDir("omp-daemon-exit-runtime-");
+	it("stops non-persistent daemons after the last project oms exits", async () => {
+		const projectDir = await tempDir("oms-daemon-exit-project-");
+		const runtimeDir = await tempDir("oms-daemon-exit-runtime-");
 		const scriptPath = path.join(projectDir, "service.ts");
 		await Bun.write(scriptPath, `process.stdout.write("READY\\n"); setInterval(() => {}, 1000);\n`);
 		const presence = await registerDaemonProjectPresence(projectDir, runtimeDir);
@@ -529,8 +529,8 @@ esac
 	}, 20_000);
 
 	it("keeps detached daemons alive through broker replacement", async () => {
-		const projectDir = await tempDir("omp-daemon-detached-project-");
-		const runtimeDir = await tempDir("omp-daemon-detached-runtime-");
+		const projectDir = await tempDir("oms-daemon-detached-project-");
+		const runtimeDir = await tempDir("oms-daemon-detached-runtime-");
 		const scriptPath = path.join(projectDir, "service.ts");
 		await Bun.write(scriptPath, `process.stdout.write("READY\\n"); setInterval(() => {}, 1000);\n`);
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
@@ -599,8 +599,8 @@ esac
 
 	it("reports a recovered detached daemon exit without a polling RPC", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-recovered-exit-project-");
-		const runtimeDir = await tempDir("omp-daemon-recovered-exit-runtime-");
+		const projectDir = await tempDir("oms-daemon-recovered-exit-project-");
+		const runtimeDir = await tempDir("oms-daemon-recovered-exit-runtime-");
 		const owner = "recovered-detached-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		let pid: number | undefined;
@@ -659,8 +659,8 @@ esac
 
 	it("replays a detached exit that precedes broker recovery", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-pre-recovery-exit-project-");
-		const runtimeDir = await tempDir("omp-daemon-pre-recovery-exit-runtime-");
+		const projectDir = await tempDir("oms-daemon-pre-recovery-exit-project-");
+		const runtimeDir = await tempDir("oms-daemon-pre-recovery-exit-runtime-");
 		const owner = "pre-recovery-exit-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		let recovered: DaemonBrokerClient | undefined;
@@ -708,8 +708,8 @@ esac
 
 	it("replays every pending generation completion after broker recovery", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-pending-recovery-project-");
-		const runtimeDir = await tempDir("omp-daemon-pending-recovery-runtime-");
+		const projectDir = await tempDir("oms-daemon-pending-recovery-project-");
+		const runtimeDir = await tempDir("oms-daemon-pending-recovery-runtime-");
 		const owner = "pending-recovery-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 500 });
 		let controller: DaemonBrokerClient | undefined;
@@ -807,8 +807,8 @@ esac
 	}, 12_000);
 
 	it("replays a zero-width completion without poisoning the next start", async () => {
-		const projectDir = await tempDir("omp-daemon-empty-ready-project-");
-		const runtimeDir = await tempDir("omp-daemon-empty-ready-runtime-");
+		const projectDir = await tempDir("oms-daemon-empty-ready-project-");
+		const runtimeDir = await tempDir("oms-daemon-empty-ready-runtime-");
 		const markerPath = path.join(projectDir, "victim-ran");
 		const owner = "empty-ready-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
@@ -891,8 +891,8 @@ esac
 
 	it("replays a recovered non-detached daemon exit", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-attached-recovery-project-");
-		const runtimeDir = await tempDir("omp-daemon-attached-recovery-runtime-");
+		const projectDir = await tempDir("oms-daemon-attached-recovery-project-");
+		const runtimeDir = await tempDir("oms-daemon-attached-recovery-runtime-");
 		const owner = "attached-recovery-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		let recovered: DaemonBrokerClient | undefined;
@@ -943,8 +943,8 @@ esac
 	// used to report "Ready: <match>" AND "Readiness timed out" with no hint of
 	// which condition failed. The snapshot now names the unmet condition(s).
 	it("names the unmet readiness condition when start times out", async () => {
-		const projectDir = await tempDir("omp-daemon-ready-project-");
-		const runtimeDir = await tempDir("omp-daemon-ready-runtime-");
+		const projectDir = await tempDir("oms-daemon-ready-project-");
+		const runtimeDir = await tempDir("oms-daemon-ready-runtime-");
 		const scriptPath = path.join(projectDir, "service.ts");
 		await Bun.write(scriptPath, `process.stdout.write("LISTENING\\n"); setInterval(() => {}, 1000);\n`);
 		// Reserve an ephemeral port and release it so nothing accepts connections there.
@@ -986,8 +986,8 @@ esac
 	// #waitUntil sampled the live (already "exited") state instead of the sticky
 	// readyAt marker #markReady durably recorded.
 	it("returns promptly when the process becomes ready then exits within a poll", async () => {
-		const projectDir = await tempDir("omp-daemon-fast-project-");
-		const runtimeDir = await tempDir("omp-daemon-fast-runtime-");
+		const projectDir = await tempDir("oms-daemon-fast-project-");
+		const runtimeDir = await tempDir("oms-daemon-fast-runtime-");
 		const scriptPath = path.join(projectDir, "fast.ts");
 		await Bun.write(scriptPath, `process.stdout.write("done\\n");\n`);
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
@@ -1033,8 +1033,8 @@ esac
 	// caller for the full timeout, and a for:"ready" wait on the settled daemon did
 	// the same. Terminal states now wake both waits immediately.
 	it('wakes start and for:"ready" waits when the process exits before readiness', async () => {
-		const projectDir = await tempDir("omp-daemon-preexit-project-");
-		const runtimeDir = await tempDir("omp-daemon-preexit-runtime-");
+		const projectDir = await tempDir("oms-daemon-preexit-project-");
+		const runtimeDir = await tempDir("oms-daemon-preexit-runtime-");
 		const scriptPath = path.join(projectDir, "preexit.ts");
 		// Exits without ever printing the ready pattern.
 		await Bun.write(scriptPath, `process.stdout.write("nope\\n"); process.exit(0);\n`);
@@ -1088,8 +1088,8 @@ esac
 	// clears readyAt/readyMatch when entering "restarting"; without that, start and
 	// for:"ready" waits race a dead service during the backoff.
 	it("clears stale readiness while a daemon is restarting", async () => {
-		const projectDir = await tempDir("omp-daemon-restart-project-");
-		const runtimeDir = await tempDir("omp-daemon-restart-runtime-");
+		const projectDir = await tempDir("oms-daemon-restart-project-");
+		const runtimeDir = await tempDir("oms-daemon-restart-runtime-");
 		const scriptPath = path.join(projectDir, "flap.ts");
 		// Becomes ready (prints the pattern), then crashes shortly after.
 		await Bun.write(scriptPath, `process.stdout.write("READY\\n"); setTimeout(() => process.exit(1), 50);\n`);
@@ -1133,8 +1133,8 @@ esac
 	}, 30_000);
 	it("delivers owner completions for spontaneous final exits only", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-completion-project-");
-		const runtimeDir = await tempDir("omp-daemon-completion-runtime-");
+		const projectDir = await tempDir("oms-daemon-completion-project-");
+		const runtimeDir = await tempDir("oms-daemon-completion-runtime-");
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const owner = "completion-owner";
 		const completions: DaemonSnapshot[] = [];
@@ -1216,8 +1216,8 @@ esac
 
 	it("acknowledges a completion only after its consumer accepts delivery", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-sink-acceptance-project-");
-		const runtimeDir = await tempDir("omp-daemon-sink-acceptance-runtime-");
+		const projectDir = await tempDir("oms-daemon-sink-acceptance-project-");
+		const runtimeDir = await tempDir("oms-daemon-sink-acceptance-runtime-");
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const owner = "delayed-owner";
 		const delivered = Promise.withResolvers<void>();
@@ -1262,8 +1262,8 @@ esac
 
 	it("replays an unacknowledged completion after the owner reconnects", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-reconnect-project-");
-		const runtimeDir = await tempDir("omp-daemon-reconnect-runtime-");
+		const projectDir = await tempDir("oms-daemon-reconnect-project-");
+		const runtimeDir = await tempDir("oms-daemon-reconnect-runtime-");
 		const owner = "reconnect-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		first.onCompletion(owner, () => {});
@@ -1305,8 +1305,8 @@ esac
 	}, 9_000);
 	it("prevents daemon name reuse until pending completions are acknowledged", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-pending-name-project-");
-		const runtimeDir = await tempDir("omp-daemon-pending-name-runtime-");
+		const projectDir = await tempDir("oms-daemon-pending-name-project-");
+		const runtimeDir = await tempDir("oms-daemon-pending-name-runtime-");
 		const owner = "pending-name-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		first.onCompletion(owner, () => {});
@@ -1345,8 +1345,8 @@ esac
 	}, 9_000);
 	it("publishes a restored owner subscription without another caller request", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-restored-owner-project-");
-		const runtimeDir = await tempDir("omp-daemon-restored-owner-runtime-");
+		const projectDir = await tempDir("oms-daemon-restored-owner-project-");
+		const runtimeDir = await tempDir("oms-daemon-restored-owner-runtime-");
 		const owner = "restored-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const second = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
@@ -1384,8 +1384,8 @@ esac
 
 	it("ignores an unsubscribe from a superseded owner subscription", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-superseded-owner-project-");
-		const runtimeDir = await tempDir("omp-daemon-superseded-owner-runtime-");
+		const projectDir = await tempDir("oms-daemon-superseded-owner-project-");
+		const runtimeDir = await tempDir("oms-daemon-superseded-owner-runtime-");
 		const owner = "shared-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const second = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
@@ -1442,8 +1442,8 @@ esac
 	}, 9_000);
 	it("preserves a superseding owner subscription through broker recovery", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-recovered-subscription-project-");
-		const runtimeDir = await tempDir("omp-daemon-recovered-subscription-runtime-");
+		const projectDir = await tempDir("oms-daemon-recovered-subscription-project-");
+		const runtimeDir = await tempDir("oms-daemon-recovered-subscription-runtime-");
 		const owner = "recovered-shared-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const second = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
@@ -1527,8 +1527,8 @@ esac
 
 	it("clears an owner unsubscribed after a transport reconnect", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-unsubscribe-project-");
-		const runtimeDir = await tempDir("omp-daemon-unsubscribe-runtime-");
+		const projectDir = await tempDir("oms-daemon-unsubscribe-project-");
+		const runtimeDir = await tempDir("oms-daemon-unsubscribe-runtime-");
 		const owner = "unsubscribed-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 200 });
 		let second: DaemonBrokerClient | undefined;
@@ -1584,8 +1584,8 @@ esac
 
 	it("preserves an owner's pending completion while its sink is detached", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-preserve-owner-project-");
-		const runtimeDir = await tempDir("omp-daemon-preserve-owner-runtime-");
+		const projectDir = await tempDir("oms-daemon-preserve-owner-project-");
+		const runtimeDir = await tempDir("oms-daemon-preserve-owner-runtime-");
 		const owner = "preserved-owner";
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 200 });
 		const unregister = client.onCompletion(owner, () => {});
@@ -1646,8 +1646,8 @@ esac
 
 	it("does not let a detached client reclaim a resumed owner", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-detached-owner-project-");
-		const runtimeDir = await tempDir("omp-daemon-detached-owner-runtime-");
+		const projectDir = await tempDir("oms-daemon-detached-owner-project-");
+		const runtimeDir = await tempDir("oms-daemon-detached-owner-runtime-");
 		const owner = "resumed-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const second = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
@@ -1688,8 +1688,8 @@ esac
 	}, 9_000);
 	it("drops a completion when its owner unsubscribes during settlement", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-settle-unsubscribe-project-");
-		const runtimeDir = await tempDir("omp-daemon-settle-unsubscribe-runtime-");
+		const projectDir = await tempDir("oms-daemon-settle-unsubscribe-project-");
+		const runtimeDir = await tempDir("oms-daemon-settle-unsubscribe-runtime-");
 		const owner = "settle-unsubscribe-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 200 });
 		const unregister = first.onCompletion(owner, () => {});
@@ -1738,8 +1738,8 @@ esac
 	}, 12_000);
 	it("does not retain completions for owners that did not advertise event support", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-legacy-owner-project-");
-		const runtimeDir = await tempDir("omp-daemon-legacy-owner-runtime-");
+		const projectDir = await tempDir("oms-daemon-legacy-owner-project-");
+		const runtimeDir = await tempDir("oms-daemon-legacy-owner-runtime-");
 		const owner = "legacy-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		await first.request({
@@ -1776,8 +1776,8 @@ esac
 	}, 9_000);
 	it("does not replay a completion after the owner unsubscribes", async () => {
 		if (process.platform === "win32") return;
-		const projectDir = await tempDir("omp-daemon-unsubscribe-project-");
-		const runtimeDir = await tempDir("omp-daemon-unsubscribe-runtime-");
+		const projectDir = await tempDir("oms-daemon-unsubscribe-project-");
+		const runtimeDir = await tempDir("oms-daemon-unsubscribe-runtime-");
 		const owner = "unsubscribe-owner";
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const unregisterFirst = first.onCompletion(owner, () => {});

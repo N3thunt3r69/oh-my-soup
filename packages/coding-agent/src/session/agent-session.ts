@@ -19,7 +19,7 @@ import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { isPromise } from "node:util/types";
 
-import type { Clipboard, InMemorySnapshotStore } from "@oh-my-pi/hashline";
+import type { Clipboard, InMemorySnapshotStore } from "@oh-my-soup/hashline";
 import {
 	type AfterToolCallContext,
 	type AfterToolCallResult,
@@ -42,7 +42,7 @@ import {
 	TERMINAL_TOOL_RESULT_ABORT_REASON,
 	type ThinkingLevel,
 	type ToolChoiceDirective,
-} from "@oh-my-pi/pi-agent-core";
+} from "@oh-my-soup/pi-agent-core";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -51,7 +51,7 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	type ShakeConfig,
-} from "@oh-my-pi/pi-agent-core/compaction";
+} from "@oh-my-soup/pi-agent-core/compaction";
 import type {
 	AssistantMessage,
 	CodexCompactionContext,
@@ -73,13 +73,13 @@ import type {
 	ToolResultMessage,
 	UsageReport,
 	UserMessage,
-} from "@oh-my-pi/pi-ai";
-import { type Effort, streamSimple } from "@oh-my-pi/pi-ai";
-import * as AIError from "@oh-my-pi/pi-ai/error";
-import { resetOpenAICodexHistoryAfterCompaction } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
+} from "@oh-my-soup/pi-ai";
+import { type Effort, streamSimple } from "@oh-my-soup/pi-ai";
+import * as AIError from "@oh-my-soup/pi-ai/error";
+import { resetOpenAICodexHistoryAfterCompaction } from "@oh-my-soup/pi-ai/providers/openai-codex-responses";
+import { toolWireSchema } from "@oh-my-soup/pi-ai/utils/schema";
+import { modelsAreEqual } from "@oh-my-soup/pi-catalog/models";
+import { MacOSPowerAssertion } from "@oh-my-soup/pi-natives";
 import {
 	$env,
 	APP_NAME,
@@ -96,7 +96,7 @@ import {
 	Snowflake,
 	stringProperty,
 	withTimeout,
-} from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-utils";
 import { type AdvisorConfig, type AdvisorRuntimeStatus, loadAdvisorTranscriptCosts } from "../advisor";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
@@ -675,7 +675,7 @@ export class AgentSession {
 		if (mode === "off") return;
 		try {
 			this.#powerAssertion = MacOSPowerAssertion.start({
-				reason: "Oh My Pi agent session",
+				reason: "Oh My Soup agent session",
 				idle: true,
 				display: mode === "display" || mode === "system",
 				system: mode === "system",
@@ -3662,7 +3662,7 @@ export class AgentSession {
 	 * `metadata.user_id` shaped like real Claude Code's `getAPIMetadata` output:
 	 * `{ session_id, account_uuid, device_id }`. `account_uuid` is included only
 	 * when an Anthropic OAuth credential with a known account UUID is loaded;
-	 * `device_id` is derived from both the persistent omp install id and that
+	 * `device_id` is derived from both the persistent oms install id and that
 	 * account UUID. Resolving live keeps the value in sync with auth-state changes
 	 * (login/logout, token refresh that surfaces a new account UUID) without
 	 * needing to re-call `#syncAgentSessionId()` on every such event.
@@ -5662,7 +5662,7 @@ export class AgentSession {
 				// Await the idempotent dispose() before exiting so the browser
 				// reaper and other bounded teardown complete — a fire-and-forget
 				// `void this.dispose()` raced process.exit() and could leave an
-				// OMP-owned Chromium alive (#5643).
+				// OMS-owned Chromium alive (#5643).
 				void this.dispose().finally(() => process.exit(0));
 			},
 			getContextUsage: () => this.getContextUsage(),
@@ -8129,7 +8129,7 @@ export class AgentSession {
 			 * (extensions, hooks, ACP, session-extension actions) leaves this
 			 * unset and gets the pre-#5642 plain leaf move onto `ask`
 			 * toolResults instead — they have no picker to re-open and would
-			 * otherwise report a successful no-op navigation (roboomp review on
+			 * otherwise report a successful no-op navigation (robooms review on
 			 * #5895).
 			 */
 			allowAskReopen?: boolean;
@@ -8203,7 +8203,7 @@ export class AgentSession {
 		// the actual sibling-branch construction once the caller has an answer.
 		// Gated on `allowAskReopen` — callers that don't understand `reopenAsk`
 		// fall straight through to the plain leaf move below instead of
-		// reporting a successful no-op (roboomp review on #5895).
+		// reporting a successful no-op (robooms review on #5895).
 		if (
 			options.allowAskReopen &&
 			!options.reanswerAskResult &&
@@ -8465,7 +8465,7 @@ export class AgentSession {
 	 * up from the toolResult's parent past any interleaved ancestor entries
 	 * — sibling toolResults from other tool calls in the same turn (`ask`
 	 * runs `exclusive`, which only serializes *execution*, not persistence
-	 * order — roboomp review on #5895), and bookkeeping entries such as the
+	 * order — robooms review on #5895), and bookkeeping entries such as the
 	 * `tool_execution_start` custom entry `#recordToolExecutionStart()`
 	 * appends before every toolResult in real persisted sessions (chatgpt-codex
 	 * review on #5895) — until it finds the assistant entry that actually
@@ -8506,7 +8506,7 @@ export class AgentSession {
 	 * so this mirrors `refreshMCPTools()`'s `getCustomToolContext` factory
 	 * with real session state instead of a `{ ... } as unknown as
 	 * AgentToolContext` cast that could silently compile with an incomplete
-	 * context (roboomp review on #5895) — every `CustomToolContext` field is
+	 * context (robooms review on #5895) — every `CustomToolContext` field is
 	 * backed by live session state, so a future required field fails to
 	 * compile here instead of surfacing as `undefined` at runtime.
 	 */
@@ -9133,7 +9133,7 @@ export class AgentSession {
 			})),
 			messages: llmMessages,
 		};
-		const filePath = path.join(os.tmpdir(), `omp-llm-request-${Snowflake.next()}.json`);
+		const filePath = path.join(os.tmpdir(), `oms-llm-request-${Snowflake.next()}.json`);
 		await Bun.write(filePath, `${JSON.stringify(payload, null, 2)}\n`);
 		return filePath;
 	}

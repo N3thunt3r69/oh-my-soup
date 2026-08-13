@@ -1,5 +1,5 @@
 // Adapted from markit-ai (MIT). See ../NOTICE.
-import { XMLParser } from "@oh-my-pi/pi-utils/xml";
+import { XMLParser } from "@oh-my-soup/pi-utils/xml";
 import { createTurndown, normalizeTablesHtml } from "../../utils/turndown";
 import { unzip, unzipText } from "../../utils/zip";
 import type { ConversionResult, Converter, StreamInfo } from "../types";

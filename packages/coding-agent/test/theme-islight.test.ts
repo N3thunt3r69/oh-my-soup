@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { generateThemeVars } from "@oh-my-pi/pi-coding-agent/export/html";
-import { defaultThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/defaults";
-import { getResolvedThemeColors, getThemeByName, isLightTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { getAgentDir, getCustomThemesDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { generateThemeVars } from "@oh-my-soup/pi-coding-agent/export/html";
+import { defaultThemes } from "@oh-my-soup/pi-coding-agent/modes/theme/defaults";
+import { getResolvedThemeColors, getThemeByName, isLightTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { getAgentDir, getCustomThemesDir, removeWithRetries, setAgentDir } from "@oh-my-soup/pi-utils";
 
 describe("Theme.isLight", () => {
 	it("classifies built-in themes by their status-line surface", async () => {
@@ -80,7 +80,7 @@ describe("getResolvedThemeColors HTML export defaults", () => {
 	it("uses light text when a light-status custom theme derives dark export surfaces from userMessageBg", async () => {
 		originalAgentDir = getAgentDir();
 		originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
-		tempAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-theme-export-"));
+		tempAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-theme-export-"));
 		setAgentDir(tempAgentDir);
 
 		const { export: _ignoredExport, ...themeWithoutExport } = defaultThemes.porcelain;

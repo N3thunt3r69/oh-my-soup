@@ -1,11 +1,11 @@
 /**
- * Standalone TUI pickers for `omp cleanse`.
+ * Standalone TUI pickers for `oms cleanse`.
  *
  * Mirrors {@link ./setup-model-picker.ts}: one-shot {@link TUI} instances over a
  * {@link SelectList} or {@link Input}, resolved on select/submit/cancel and torn
  * down immediately so the command can keep writing plain stdout afterwards.
  */
-import { Input, ProcessTerminal, type SelectItem, SelectList, TUI } from "@oh-my-pi/pi-tui";
+import { Input, ProcessTerminal, type SelectItem, SelectList, TUI } from "@oh-my-soup/pi-tui";
 import type { CleanseCheckerDescriptor } from "../cleanse/checkers";
 import { getSelectListTheme } from "../modes/theme/theme";
 

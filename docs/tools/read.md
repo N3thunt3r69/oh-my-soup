@@ -211,8 +211,8 @@ Literal filesystem paths take precedence over selector interpretation, so an exi
 - Unsupported/undecodable image formats throw a `ToolError`.
 
 ### Internal URLs
-- `read` delegates internal and MCP-advertised schemes to `InternalUrlRouter`; the built-in registry currently includes `agent://`, `artifact://`, `history://`, `issue://`, `local://`, `mcp://`, `memory://`, `omp://`, `pr://`, `rule://`, `security://`, `skill://`, `ssh://`, `vault://`, and `xd://`.
-  - `security://` is reserved for the OMP-owned, producer-neutral, read-only security-analysis store.
+- `read` delegates internal and MCP-advertised schemes to `InternalUrlRouter`; the built-in registry currently includes `agent://`, `artifact://`, `history://`, `issue://`, `local://`, `mcp://`, `memory://`, `oms://`, `pr://`, `rule://`, `security://`, `skill://`, `ssh://`, `vault://`, and `xd://`.
+  - `security://` is reserved for the OMS-owned, producer-neutral, read-only security-analysis store.
   - `xd://` lists mounted tool devices; `xd://<name>` returns that device's input documentation. Writing JSON to the same URI dispatches the device through `write`.
   - `ssh://host/<path>` reads a remote UTF-8 file or directory; bare `ssh://` lists configured hosts. Remote paths are limited to 1 MiB and require a POSIX remote shell. Percent-encode literal `:`, `?`, or `#` in the path.
 - `#handleInternalUrl()` behavior:

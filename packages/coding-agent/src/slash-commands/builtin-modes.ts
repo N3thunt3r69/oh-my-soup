@@ -152,7 +152,7 @@ export function formatTokenCount(value: number): string {
 export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "security",
-		description: "Plan, run, inspect, import, and compare OMP-native security scans",
+		description: "Plan, run, inspect, import, and compare OMS-native security scans",
 		allowArgs: true,
 		acpInputHint: "<plan|scan|status|cancel|scans|show|import|export|validate|compare|disposition>",
 		subcommands: [
@@ -164,7 +164,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			{ name: "show", description: "Render a scan or security:// resource" },
 			{ name: "import", description: "Import SARIF or a Codex Security bundle" },
 			{ name: "export", description: "Export a canonical bundle, SARIF, or report" },
-			{ name: "validate", description: "Validate one finding with OMP-native tools" },
+			{ name: "validate", description: "Validate one finding with OMS-native tools" },
 			{ name: "compare", description: "Compare finding lineage across two scans" },
 			{ name: "disposition", description: "Set a finding disposition with rationale" },
 		],

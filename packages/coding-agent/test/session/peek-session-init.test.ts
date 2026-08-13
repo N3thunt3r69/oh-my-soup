@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import { TempDir } from "@oh-my-soup/pi-utils";
 
 const tempDirs: TempDir[] = [];
 

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { refreshAgentDiscovery, TaskTool } from "@oh-my-pi/pi-coding-agent/task";
-import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { refreshAgentDiscovery, TaskTool } from "@oh-my-soup/pi-coding-agent/task";
+import * as discoveryModule from "@oh-my-soup/pi-coding-agent/task/discovery";
+import type { ToolSession } from "@oh-my-soup/pi-coding-agent/tools";
 
 const TEST_AGENTS = [
 	{
@@ -55,7 +55,7 @@ describe("TaskTool.create discovery memo", () => {
 			.mockResolvedValue({ agents: TEST_AGENTS, projectAgentsDir: null });
 
 		await TaskTool.create(createSession("/tmp"));
-		await TaskTool.create(createSession("/tmp/omp-memo-other"));
+		await TaskTool.create(createSession("/tmp/oms-memo-other"));
 
 		expect(spy).toHaveBeenCalledTimes(2);
 	});
@@ -78,7 +78,7 @@ describe("TaskTool.create discovery memo", () => {
 			.spyOn(discoveryModule, "discoverAgents")
 			.mockResolvedValueOnce({ agents: TEST_AGENTS, projectAgentsDir: null })
 			.mockResolvedValueOnce({ agents: REFRESHED_AGENTS, projectAgentsDir: null });
-		const session = createSession("/tmp/omp-memo-refresh");
+		const session = createSession("/tmp/oms-memo-refresh");
 		const existing = await TaskTool.create(session);
 
 		expect(existing.description).toContain("General-purpose task agent");

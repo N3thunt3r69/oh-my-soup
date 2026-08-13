@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { scheduler } from "node:timers/promises";
-import { streamSimple } from "@oh-my-pi/pi-ai";
+import { streamSimple } from "@oh-my-soup/pi-ai";
 import {
 	buildTransformedCodexRequestBody,
 	getOpenAICodexTransportDetails,
@@ -8,7 +8,7 @@ import {
 	prewarmOpenAICodexResponses,
 	resetOpenAICodexHistoryAfterCompaction,
 	streamOpenAICodexResponses,
-} from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+} from "@oh-my-soup/pi-ai/providers/openai-codex-responses";
 import type {
 	CodexCompactionRequestContext,
 	Context,
@@ -16,11 +16,11 @@ import type {
 	Model,
 	ModelSpec,
 	ProviderSessionState,
-} from "@oh-my-pi/pi-ai/types";
-import { __resetProxyCache } from "@oh-my-pi/pi-ai/utils/proxy";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import * as piUtils from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-ai/types";
+import { __resetProxyCache } from "@oh-my-soup/pi-ai/utils/proxy";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
+import { Effort } from "@oh-my-soup/pi-catalog/effort";
+import * as piUtils from "@oh-my-soup/pi-utils";
 import { withEnv } from "./helpers";
 
 const { getAgentDir, setAgentDir, TempDir } = piUtils;
@@ -1715,7 +1715,7 @@ describe("openai-codex streaming", () => {
 		expect(metadata.parent_turn_id).toBe("turn_parent-1");
 		expect(turnMetadata.parent_turn_id).toBe("turn_parent-1");
 		// `code_mode_tool_names` is likewise reserved (codex-rs
-		// CODE_MODE_TOOL_NAMES_KEY, #35271): OMP never emits it, and caller extras
+		// CODE_MODE_TOOL_NAMES_KEY, #35271): OMS never emits it, and caller extras
 		// cannot smuggle it into either projection.
 		expect(metadata.code_mode_tool_names).toBeUndefined();
 		expect(turnMetadata.code_mode_tool_names).toBeUndefined();

@@ -153,7 +153,7 @@ test("install rejects archive traversal", async () => {
 	}
 });
 
-const networkTest = process.env.OMP_TEST_BROWSER_INSTALL ? test : test.skip;
+const networkTest = process.env.OMS_TEST_BROWSER_INSTALL ? test : test.skip;
 networkTest(
 	"network: downloads and installs the pinned Chrome-for-Testing build",
 	async () => {

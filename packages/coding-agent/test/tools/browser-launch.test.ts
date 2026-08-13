@@ -6,8 +6,8 @@ import {
 	chromiumExecutableProbeForTest,
 	stealthIgnoreDefaultArgsForTest,
 	systemChromiumCandidatesForTest,
-} from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
-import { TempDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/tools/browser/launch";
+import { TempDir } from "@oh-my-soup/pi-utils";
 
 const EXECUTABLE_PROBE = path.resolve(import.meta.dir, "../fixtures/browser-executable-probe.ts");
 
@@ -149,7 +149,7 @@ describe("browser executable selection", () => {
 			const result = Bun.spawnSync([process.execPath, EXECUTABLE_PROBE], {
 				env: {
 					...process.env,
-					OMP_BROWSER_PROBE_PLATFORM: "win32",
+					OMS_BROWSER_PROBE_PLATFORM: "win32",
 					ProgramFiles: tempDir.path(),
 					"ProgramFiles(x86)": path.join(tempDir.path(), "missing-x86"),
 					LOCALAPPDATA: path.join(tempDir.path(), "missing-local"),

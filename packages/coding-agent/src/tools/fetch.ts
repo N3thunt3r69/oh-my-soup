@@ -2,11 +2,11 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import type { FetchImpl, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
-import { htmlToMarkdown } from "@oh-my-pi/pi-natives";
-import { type Component, Text } from "@oh-my-pi/pi-tui";
-import { $which, ptree, truncate } from "@oh-my-pi/pi-utils";
+import type { AgentToolResult } from "@oh-my-soup/pi-agent-core";
+import type { FetchImpl, ImageContent, TextContent } from "@oh-my-soup/pi-ai";
+import { htmlToMarkdown } from "@oh-my-soup/pi-natives";
+import { type Component, Text } from "@oh-my-soup/pi-tui";
+import { $which, ptree, truncate } from "@oh-my-soup/pi-utils";
 import type { Settings } from "../config/settings";
 import { readEditableNotebookText } from "../edit/notebook";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
@@ -516,7 +516,7 @@ function cleanFeedText(text: string): string {
  * Parse RSS/Atom feed to markdown
  */
 async function parseFeedToMarkdown(content: string, maxItems = 10): Promise<string> {
-	const { parseHTML } = await import("@oh-my-pi/pi-utils/dom");
+	const { parseHTML } = await import("@oh-my-soup/pi-utils/dom");
 	try {
 		const doc = parseHTML(content).document;
 
@@ -877,13 +877,13 @@ async function withTempBinaryFile<T>(
 }
 
 async function renderNotebookPayload(bytes: Uint8Array, displayUrl: string): Promise<string> {
-	return withTempBinaryFile("omp-url-notebook-", ".ipynb", bytes, tempPath =>
+	return withTempBinaryFile("oms-url-notebook-", ".ipynb", bytes, tempPath =>
 		readEditableNotebookText(tempPath, displayUrl),
 	);
 }
 
 async function renderSqlitePayload(bytes: Uint8Array): Promise<string> {
-	return withTempBinaryFile("omp-url-sqlite-", ".sqlite", bytes, async tempPath => {
+	return withTempBinaryFile("oms-url-sqlite-", ".sqlite", bytes, async tempPath => {
 		let db: Database | null = null;
 		try {
 			db = new Database(tempPath, { readonly: true, strict: true });

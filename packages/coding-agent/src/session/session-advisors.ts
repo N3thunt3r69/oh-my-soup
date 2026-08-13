@@ -9,7 +9,7 @@ import {
 	resolveTelemetry,
 	type StreamFn,
 	ThinkingLevel,
-} from "@oh-my-pi/pi-agent-core";
+} from "@oh-my-soup/pi-agent-core";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -22,7 +22,7 @@ import {
 	type SessionMessageEntry,
 	shouldCompact,
 	shouldUseProviderNativeCompaction,
-} from "@oh-my-pi/pi-agent-core/compaction";
+} from "@oh-my-soup/pi-agent-core/compaction";
 import type {
 	AssistantMessage,
 	CodexCompactionContext,
@@ -32,11 +32,11 @@ import type {
 	ProviderSessionState,
 	ServiceTier,
 	SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai";
-import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
-import * as AIError from "@oh-my-pi/pi-ai/error";
-import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { extractHttpStatusFromError, extractRetryHint, logger } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-ai";
+import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-soup/pi-ai";
+import * as AIError from "@oh-my-soup/pi-ai/error";
+import { modelsAreEqual } from "@oh-my-soup/pi-catalog/models";
+import { extractHttpStatusFromError, extractRetryHint, logger } from "@oh-my-soup/pi-utils";
 import {
 	ADVISOR_DEFAULT_TOOL_NAMES,
 	AdviseTool,

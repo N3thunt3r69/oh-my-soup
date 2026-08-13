@@ -1,12 +1,12 @@
 /**
  * Read CLI command handler.
  *
- * Handles `omp read` — invokes the `read` agent tool against a path/URL and
+ * Handles `oms read` — invokes the `read` agent tool against a path/URL and
  * prints the resulting content blocks exactly as the model would receive them
  * (including truncation/limit notices appended by the meta-notice wrapper).
  */
-import { getProjectDir } from "@oh-my-pi/pi-utils";
-import chalk from "@oh-my-pi/pi-utils/chalk";
+import { getProjectDir } from "@oh-my-soup/pi-utils";
+import chalk from "@oh-my-soup/pi-utils/chalk";
 import { Settings } from "../config/settings";
 import { extractUriScheme } from "../internal-urls/parse";
 import { InternalUrlRouter } from "../internal-urls/router";
@@ -71,7 +71,7 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 		}
 
 		const tool = wrapToolWithMetaNotice(new ReadTool(session));
-		const result = await tool.execute("omp-read", { path: cmd.path });
+		const result = await tool.execute("oms-read", { path: cmd.path });
 
 		for (const block of result.content) {
 			if (block.type === "text") {

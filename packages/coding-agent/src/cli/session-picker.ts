@@ -1,5 +1,5 @@
-import { ProcessTerminal, TUI } from "@oh-my-pi/pi-tui";
-import { logger } from "@oh-my-pi/pi-utils";
+import { ProcessTerminal, TUI } from "@oh-my-soup/pi-tui";
+import { logger } from "@oh-my-soup/pi-utils";
 import { SessionSelectorComponent } from "../modes/components/session-selector";
 import { HistoryStorage } from "../session/history-storage";
 import type { SessionInfo } from "../session/session-listing";
@@ -19,7 +19,7 @@ export interface SessionPickerOptions {
 
 /**
  * Show the TUI session selector and return the selected session, or null if
- * cancelled. The default OMP picker supports deletion, transcript-history
+ * cancelled. The default OMS picker supports deletion, transcript-history
  * search, and an all-projects scope; foreign import pickers disable those
  * source-owned capabilities.
  */

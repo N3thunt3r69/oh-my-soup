@@ -46,13 +46,13 @@ let
         rustFlags = "-C target-cpu=x86-64-v2";
       };
     }
-    .${stdenv.hostPlatform.system} or (throw "Unsupported OMP platform: ${stdenv.hostPlatform.system}");
+    .${stdenv.hostPlatform.system} or (throw "Unsupported OMS platform: ${stdenv.hostPlatform.system}");
   patchedDependencies = lib.mapAttrs (
     _: patch: source + "/${patch}"
   ) rootPackageJson.patchedDependencies;
   patchOverrides = bun2nix.patchedDependenciesToOverrides { inherit patchedDependencies; };
   bunRuntimeTemplate = stdenvNoCC.mkDerivation {
-    pname = "omp-bun-runtime-template";
+    pname = "oms-bun-runtime-template";
     inherit (bun) version;
     src = bun.src;
 
@@ -69,7 +69,7 @@ let
   };
 in
 stdenv.mkDerivation {
-  pname = "omp";
+  pname = "oms";
   inherit (packageJson) version;
   src = source;
 
@@ -155,7 +155,7 @@ stdenv.mkDerivation {
       signIfRequired "packages/natives/native/${platform.addon}"
     ''}
 
-    echo "Compiling OMP"
+    echo "Compiling OMS"
     BUN_COMPILE_EXECUTABLE_PATH="${bunRuntimeTemplate}/libexec/bun" \
       bun --cwd="$PWD/packages/coding-agent" run build
 
@@ -165,7 +165,7 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    install -Dm755 packages/coding-agent/dist/omp "$out/bin/omp"
+    install -Dm755 packages/coding-agent/dist/oms "$out/bin/oms"
 
     # The addon is gzip-compressed inside the compiled binary, so the store
     # paths it links against are invisible to the output reference scanner.
@@ -189,8 +189,8 @@ stdenv.mkDerivation {
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
-    HOME="$TMPDIR" "$out/bin/omp" --smoke-test | grep -q "smoke-test: ok"
-    BUN_BE_BUN=1 "$out/bin/omp" -e \
+    HOME="$TMPDIR" "$out/bin/oms" --smoke-test | grep -q "smoke-test: ok"
+    BUN_BE_BUN=1 "$out/bin/oms" -e \
       'if (Bun.version !== "${bun.version}" || typeof Bun.Image !== "function") process.exit(1)'
     runHook postInstallCheck
   '';
@@ -198,9 +198,9 @@ stdenv.mkDerivation {
   meta = {
     description = "Terminal-based coding agent with multi-model support";
     homepage = "https://omp.sh";
-    changelog = "https://github.com/can1357/oh-my-pi/releases/tag/v${packageJson.version}";
+    changelog = "https://github.com/pickpocket/oh-my-soup/releases/tag/v${packageJson.version}";
     license = lib.licenses.mit;
-    mainProgram = "omp";
+    mainProgram = "oms";
     platforms = [
       "aarch64-darwin"
       "aarch64-linux"

@@ -1,15 +1,15 @@
 import { describe, expect, it } from "bun:test";
-import { type as arkType } from "@oh-my-pi/omptype";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ComputerTool, computerApproval, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { type as arkType } from "@oh-my-soup/omstype";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { ComputerTool, computerApproval, type ToolSession } from "@oh-my-soup/pi-coding-agent/tools";
 import type {
 	ComputerSessionSnapshot,
 	ComputerWorkerInbound,
 	ComputerWorkerOutbound,
 	ComputerWorkerTransport,
-} from "@oh-my-pi/pi-coding-agent/tools/computer/protocol";
-import { ComputerSupervisor, type ComputerWorkerHandle } from "@oh-my-pi/pi-coding-agent/tools/computer/supervisor";
-import { ComputerWorkerCore, type NativeDesktopSession } from "@oh-my-pi/pi-coding-agent/tools/computer/worker";
+} from "@oh-my-soup/pi-coding-agent/tools/computer/protocol";
+import { ComputerSupervisor, type ComputerWorkerHandle } from "@oh-my-soup/pi-coding-agent/tools/computer/supervisor";
+import { ComputerWorkerCore, type NativeDesktopSession } from "@oh-my-soup/pi-coding-agent/tools/computer/worker";
 import type {
 	AxNode,
 	AxQuery,
@@ -19,7 +19,7 @@ import type {
 	DesktopPoint,
 	DesktopWindow,
 	PointerOptions,
-} from "@oh-my-pi/pi-natives";
+} from "@oh-my-soup/pi-natives";
 
 const capabilities: DesktopCapabilities = {
 	backend: "fake",
@@ -276,11 +276,11 @@ describe("computer worker round trips", () => {
 		const texts = result.payload.displays.filter(block => block.type === "text");
 		const images = result.payload.displays.filter(block => block.type === "image");
 		expect(texts).toHaveLength(1);
-		expect(texts[0]?.text).toMatch(/^screenshot desktop 64×32 → .*omp-computer-.*\.png$/);
+		expect(texts[0]?.text).toMatch(/^screenshot desktop 64×32 → .*oms-computer-.*\.png$/);
 		expect(images).toEqual([{ type: "image", data: "iVBORw==", mimeType: "image/png" }]);
 		expect(result.payload.screenshots).toHaveLength(1);
 		expect(result.payload.screenshots[0]).toMatchObject({ width: 64, height: 32, target: "desktop" });
-		expect(result.payload.screenshots[0]?.path).toMatch(/omp-computer-.*\.png$/);
+		expect(result.payload.screenshots[0]?.path).toMatch(/oms-computer-.*\.png$/);
 	});
 
 	it("reports source dimensions when a screenshot is scaled", async () => {
@@ -296,7 +296,7 @@ describe("computer worker round trips", () => {
 		expect(result.payload.displays[0]).toEqual(
 			expect.objectContaining({
 				type: "text",
-				text: expect.stringMatching(/^screenshot desktop 64×32 \(scaled from 128×64\) → .*omp-computer-.*\.png$/),
+				text: expect.stringMatching(/^screenshot desktop 64×32 \(scaled from 128×64\) → .*oms-computer-.*\.png$/),
 			}),
 		);
 		expect(result.payload.screenshots[0]).toMatchObject({

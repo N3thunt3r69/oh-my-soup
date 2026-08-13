@@ -16,7 +16,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
+import { logger, prompt, Snowflake } from "@oh-my-soup/pi-utils";
 import type { AsyncJob, AsyncJobManager } from "../async/job-manager";
 import { resolveAgentModelSelection } from "../config/model-resolver";
 import type { LocalProtocolOptions } from "../internal-urls";
@@ -1407,7 +1407,7 @@ export class VibeSessionRegistry {
 	): Promise<ExecutorOptions> {
 		const sessionFile = session.getSessionFile();
 		const sessionArtifactsDir = sessionFile ? sessionFile.slice(0, -6) : null;
-		const artifactsDir = sessionArtifactsDir ?? path.join(os.tmpdir(), `omp-vibe-${Snowflake.next()}`);
+		const artifactsDir = sessionArtifactsDir ?? path.join(os.tmpdir(), `oms-vibe-${Snowflake.next()}`);
 		await fs.mkdir(artifactsDir, { recursive: true });
 		if (!sessionArtifactsDir) registerArtifactsDir(artifactsDir);
 		const localProtocolOptions: LocalProtocolOptions = session.localProtocolOptions ?? {

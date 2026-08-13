@@ -1,5 +1,5 @@
-import type { Api, Model } from "@oh-my-pi/pi-ai/types";
-import { type OpenAICodexAccount, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models";
+import type { Api, Model } from "@oh-my-soup/pi-ai/types";
+import { type OpenAICodexAccount, PROVIDER_DESCRIPTORS } from "@oh-my-soup/pi-catalog/provider-models";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 
 const SPECIAL_MODEL_MANAGER_PROVIDER_IDS: readonly string[] = [

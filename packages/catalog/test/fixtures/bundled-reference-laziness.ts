@@ -9,7 +9,7 @@ Bun.gc(true);
 const retainedRssBytes = process.memoryUsage().rss - rssBefore;
 
 const result = JSON.stringify({ retainedRssBytes });
-const resultPath = process.env.OMP_CATALOG_LAZINESS_RESULT_PATH;
+const resultPath = process.env.OMS_CATALOG_LAZINESS_RESULT_PATH;
 if (resultPath) {
 	await Bun.write(resultPath, result);
 } else {

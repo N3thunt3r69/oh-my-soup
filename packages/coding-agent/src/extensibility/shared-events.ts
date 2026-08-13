@@ -12,9 +12,9 @@
  * carry subsystem-specific message types — lives in the per-subsystem
  * `types.ts` files and is documented there.
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { CompactionPreparation, CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantRetryRecovery, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import type { CompactionPreparation, CompactionResult } from "@oh-my-soup/pi-agent-core/compaction";
+import type { AssistantRetryRecovery, ImageContent, TextContent, ToolResultMessage } from "@oh-my-soup/pi-ai";
 import type { Rule } from "../capability/rule";
 import type { Goal, GoalModeState } from "../goals/state";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry } from "../session/session-entries";
@@ -394,7 +394,7 @@ export interface SessionCompactingResult {
 export interface SessionStopEventResult {
 	/** Continue the main session with additional context before settling */
 	continue?: boolean;
-	/** OMP-native model-visible context for the continuation */
+	/** OMS-native model-visible context for the continuation */
 	additionalContext?: string;
 	/** Claude/Codex-compatible block decision; maps to a continuation */
 	decision?: "block";

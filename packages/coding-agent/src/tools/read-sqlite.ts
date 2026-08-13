@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import type { AgentToolResult } from "@oh-my-soup/pi-agent-core";
 import type { ToolSession } from "../sdk";
 import { DEFAULT_MAX_LINES, truncateHead } from "../session/streaming-output";
 import { applyListLimit } from "./list-limit";

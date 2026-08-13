@@ -15,8 +15,8 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import { configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
+import { configureCredentialRedaction } from "@oh-my-soup/pi-ai/providers/transform-messages";
+import { configureProviderMaxInFlightRequests } from "@oh-my-soup/pi-ai/stream";
 import {
 	getAgentDbPath,
 	getAgentDir,
@@ -29,8 +29,8 @@ import {
 	procmgr,
 	setWorktreesDir,
 	toError,
-} from "@oh-my-pi/pi-utils";
-import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
+} from "@oh-my-soup/pi-utils";
+import { withFileLock } from "@oh-my-soup/pi-utils/file-lock";
 import { JSONC, YAML } from "bun";
 import { invalidate as invalidateCapabilityFsCache } from "../capability/fs";
 import { type Settings as SettingsCapabilityItem, settingsCapability } from "../capability/settings";
@@ -329,7 +329,7 @@ export class Settings {
 	#global: RawSettings = {};
 	/** Project settings from .claude/settings.yml etc */
 	#project: RawSettings = {};
-	/** Last successfully loaded native .omp/config.yml contents. */
+	/** Last successfully loaded native .oms/config.yml contents. */
 	#projectFileSettings: RawSettings = {};
 	/** Logical config paths whose malformed targets were moved aside. */
 	#quarantinedYamlTargets = new Map<string, string>();
@@ -1245,7 +1245,7 @@ export class Settings {
 			// Capability discovery is best-effort; the native project config below
 			// remains authoritative for its model-role layer and must not be hidden.
 		}
-		const projectConfigPath = path.join(this.#cwd, ".omp", "config.yml");
+		const projectConfigPath = path.join(this.#cwd, ".oms", "config.yml");
 		const nativeProject = await this.#loadYaml(projectConfigPath);
 		this.#projectFileSettings = structuredClone(nativeProject);
 		const nativeModelRoles = getByPath(nativeProject, ["modelRoles"]);
@@ -1605,7 +1605,7 @@ export class Settings {
 					!("bankId" in hindsightObj) &&
 					typeof agentName === "string" &&
 					agentName.trim().length > 0 &&
-					agentName !== "omp"
+					agentName !== "oms"
 				) {
 					hindsightObj.bankId = agentName;
 				}
@@ -2159,7 +2159,7 @@ export class Settings {
 	async #saveProjectNow(): Promise<void> {
 		if (this.#savesCancelled || !this.#persist || this.#modifiedProjectModelRoles.size === 0) return;
 
-		const projectConfigPath = path.join(this.#cwd, ".omp", "config.yml");
+		const projectConfigPath = path.join(this.#cwd, ".oms", "config.yml");
 		const modifiedModelRoles = [...this.#modifiedProjectModelRoles];
 		this.#modifiedProjectModelRoles.clear();
 

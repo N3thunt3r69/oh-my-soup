@@ -1,5 +1,5 @@
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import { Container, getKeybindings, Input, Spacer, Text, type TUI, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
+import { getOAuthProviders } from "@oh-my-soup/pi-ai/oauth";
+import { Container, getKeybindings, Input, Spacer, Text, type TUI, wrapTextWithAnsi } from "@oh-my-soup/pi-tui";
 import { theme } from "../../modes/theme/theme";
 import { urlHyperlinkAlways, WidthAwareText } from "../../tui";
 import { openPath } from "../../utils/open";
@@ -71,7 +71,7 @@ export class LoginDialogComponent extends Container {
 	/**
 	 * Called by the OAuth `onAuth` callback. Renders the full authorization URL
 	 * as the primary copy target — that works from any machine, including
-	 * SSH/WSL/headless sessions where the OMP-hosted `launchUrl` would resolve
+	 * SSH/WSL/headless sessions where the OMS-hosted `launchUrl` would resolve
 	 * against the user's local browser and fail. When `launchUrl` is present it
 	 * is offered as an additional local shortcut so narrow local terminals still
 	 * have a truncation-safe copy target (viewport clipping on a long authorize

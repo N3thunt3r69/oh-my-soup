@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { isEexist, isEnotempty, readImageMetadata, untilAborted } from "@oh-my-pi/pi-utils";
+import type { AgentToolResult } from "@oh-my-soup/pi-agent-core";
+import { isEexist, isEnotempty, readImageMetadata, untilAborted } from "@oh-my-soup/pi-utils";
 import type { ToolSession } from "../sdk";
 import { loadImageInput, MAX_IMAGE_INPUT_BYTES, webpExclusionForModel } from "../utils/image-loading";
 import { convertFileWithMarkit } from "../utils/markit";
@@ -62,7 +62,7 @@ function pdfImageCacheDir(session: ToolSession, absolutePdfPath: string, content
 	let root = artifactsDir ?? undefined;
 	if (root === undefined) {
 		const sessionFile = session.getSessionFile();
-		root = sessionFile?.endsWith(".jsonl") ? sessionFile.slice(0, -6) : path.join(os.tmpdir(), "omp-read-pdf-images");
+		root = sessionFile?.endsWith(".jsonl") ? sessionFile.slice(0, -6) : path.join(os.tmpdir(), "oms-read-pdf-images");
 	}
 	const basename = path
 		.basename(absolutePdfPath)
@@ -73,7 +73,7 @@ function pdfImageCacheDir(session: ToolSession, absolutePdfPath: string, content
 }
 
 async function snapshotPdfSource(absolutePdfPath: string, signal?: AbortSignal): Promise<PdfImageSnapshot> {
-	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-read-pdf-"));
+	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "oms-read-pdf-"));
 	try {
 		const bytes = await untilAborted(signal, () => Bun.file(absolutePdfPath).bytes());
 		signal?.throwIfAborted();

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
+import type { FetchImpl } from "@oh-my-soup/pi-ai";
+import { createMockModel, registerMockApi } from "@oh-my-soup/pi-ai/providers/mock";
 import {
 	CallableLlmBackend,
 	resetHostLlmBackendForTests,
 	setHostLlmBackend,
-} from "@oh-my-pi/pi-mnemopi/core/llm-backends";
+} from "@oh-my-soup/pi-mnemopi/core/llm-backends";
 import {
 	buildHostPrompt,
 	callLocalLlm,
@@ -16,9 +16,9 @@ import {
 	llmAvailable,
 	localGgufAvailable,
 	summarizeMemories,
-} from "@oh-my-pi/pi-mnemopi/core/local-llm";
-import { Mnemopi } from "@oh-my-pi/pi-mnemopi/core/memory";
-import { withMnemopiRuntimeOptions } from "@oh-my-pi/pi-mnemopi/core/runtime-options";
+} from "@oh-my-soup/pi-mnemopi/core/local-llm";
+import { Mnemopi } from "@oh-my-soup/pi-mnemopi/core/memory";
+import { withMnemopiRuntimeOptions } from "@oh-my-soup/pi-mnemopi/core/runtime-options";
 
 const OLD_ENV = { ...process.env };
 

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { BashExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/bash-execution";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { sanitizeWithOptionalSixelPassthrough } from "@oh-my-pi/pi-coding-agent/utils/sixel";
-import type { TUI } from "@oh-my-pi/pi-tui";
-import { sanitizeText } from "@oh-my-pi/pi-utils";
+import { BashExecutionComponent } from "@oh-my-soup/pi-coding-agent/modes/components/bash-execution";
+import { getThemeByName, setThemeInstance } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { sanitizeWithOptionalSixelPassthrough } from "@oh-my-soup/pi-coding-agent/utils/sixel";
+import type { TUI } from "@oh-my-soup/pi-tui";
+import { sanitizeText } from "@oh-my-soup/pi-utils";
 
 const SIXEL = "\x1bPqabc\x1b\\";
 

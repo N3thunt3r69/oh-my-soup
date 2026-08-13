@@ -10,7 +10,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { isEnoent, logger, pathIsWithin } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger, pathIsWithin } from "@oh-my-soup/pi-utils";
 import { normalizePluginRuntimeConfig } from "../runtime-config";
 import type { PluginRuntimeConfig } from "../types";
 
@@ -770,7 +770,7 @@ export class MarketplaceManager {
 	}
 
 	#runtimeLockPath(scope: "user" | "project"): string {
-		return path.join(this.#runtimeRoot(scope), "omp-plugins.lock.json");
+		return path.join(this.#runtimeRoot(scope), "oms-plugins.lock.json");
 	}
 
 	async #loadRuntimeConfig(scope: "user" | "project"): Promise<PluginRuntimeConfig> {

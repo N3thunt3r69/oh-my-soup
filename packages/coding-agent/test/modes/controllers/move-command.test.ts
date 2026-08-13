@@ -2,9 +2,9 @@ import { beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { CommandController } from "@oh-my-soup/pi-coding-agent/modes/controllers/command-controller";
+import { getThemeByName, setThemeInstance } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import type { InteractiveModeContext } from "@oh-my-soup/pi-coding-agent/modes/types";
 
 function createMoveContext(sourceDir: string, settingsFlush?: () => Promise<void>) {
 	const state = { cwd: sourceDir, movedTo: undefined as string | undefined };
@@ -46,8 +46,8 @@ describe("CommandController /move", () => {
 	});
 
 	it("relocates the active session before re-scoping cwd-derived state", async () => {
-		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
-		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-target-"));
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-move-source-"));
+		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-move-target-"));
 		try {
 			const { ctx, state, present } = createMoveContext(sourceDir);
 			const controller = new CommandController(ctx);
@@ -69,8 +69,8 @@ describe("CommandController /move", () => {
 	});
 
 	it("aborts /move when pending settings flush fails, leaving cwd untouched", async () => {
-		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
-		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-target-"));
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-move-source-"));
+		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-move-target-"));
 		try {
 			const { ctx, state } = createMoveContext(sourceDir, async () => {
 				throw new Error("disk full");

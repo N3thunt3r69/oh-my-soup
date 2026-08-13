@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 import { omitUndefinedArgs, piGrepSkip } from "../src/providers/cursor-pi-args";
 import type { Tool } from "../src/types";
 import { validateToolArguments } from "../src/utils/validation";

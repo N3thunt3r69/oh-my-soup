@@ -71,7 +71,7 @@ const HOST_PROBE_TIMEOUT_MS = 500;
  * {@link HOST_PROBE_TIMEOUT_MS}. On timeout the child is killed with SIGKILL so
  * a wedged interop pipe cannot hang startup; the killed/non-zero exit is then
  * reported as "unavailable" and discovery falls back to the Linux
- * `$HOME`/`~/.omp` candidates.
+ * `$HOME`/`~/.oms` candidates.
  */
 export function runHostProbe(cmd: string[]): string | undefined {
 	try {

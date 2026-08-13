@@ -3,13 +3,13 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "bu
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import * as mcpClient from "@oh-my-pi/pi-coding-agent/mcp/client";
-import * as oauthFlow from "@oh-my-pi/pi-coding-agent/mcp/oauth-flow";
-import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
-import { MCPCommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/mcp-command-controller";
-import { OAuthManualInputManager } from "@oh-my-pi/pi-coding-agent/modes/oauth-manual-input";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-soup/pi-ai";
+import * as mcpClient from "@oh-my-soup/pi-coding-agent/mcp/client";
+import * as oauthFlow from "@oh-my-soup/pi-coding-agent/mcp/oauth-flow";
+import type { MCPServerConfig } from "@oh-my-soup/pi-coding-agent/mcp/types";
+import { MCPCommandController } from "@oh-my-soup/pi-coding-agent/modes/controllers/mcp-command-controller";
+import { OAuthManualInputManager } from "@oh-my-soup/pi-coding-agent/modes/oauth-manual-input";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 import {
 	getConfigRootDir,
 	getMCPConfigPath,
@@ -17,7 +17,7 @@ import {
 	removeWithRetries,
 	setAgentDir,
 	setProjectDir,
-} from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-utils";
 
 const RAW_SERVER_URL = `https://\${MCP_HOST}/mcp`;
 const EXPANDED_SERVER_URL = "https://mcp.example.com/mcp";
@@ -104,8 +104,8 @@ describe("/mcp auth commands", () => {
 	});
 
 	beforeEach(async () => {
-		projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-reauth-project-"));
-		agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-reauth-agent-"));
+		projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-mcp-reauth-project-"));
+		agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-mcp-reauth-agent-"));
 		configPath = path.join(projectDir, ".mcp.json");
 		originalMcpHost = Bun.env.MCP_HOST;
 		Bun.env.MCP_HOST = "mcp.example.com";

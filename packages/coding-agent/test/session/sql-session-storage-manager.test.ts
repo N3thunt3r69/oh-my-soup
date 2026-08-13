@@ -7,9 +7,9 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import type { Usage } from "@oh-my-pi/pi-ai";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { SqlSessionStorage } from "@oh-my-pi/pi-coding-agent/session/sql-session-storage";
+import type { Usage } from "@oh-my-soup/pi-ai";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import { SqlSessionStorage } from "@oh-my-soup/pi-coding-agent/session/sql-session-storage";
 import { SQL } from "bun";
 
 function fakeUsage(input: number, output: number): Usage {
@@ -53,7 +53,7 @@ describe("SessionManager + SqlSessionStorage (SQLite)", () => {
 		await storage.drain();
 		await manager.close();
 
-		const rows = (await client.unsafe(`SELECT content FROM omp_session_files WHERE path = ?`, [
+		const rows = (await client.unsafe(`SELECT content FROM oms_session_files WHERE path = ?`, [
 			sessionFilePath,
 		])) as Array<{ content: string }>;
 		expect(rows).toHaveLength(1);

@@ -2,17 +2,17 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { InMemorySnapshotStore } from "@oh-my-pi/hashline";
-import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import { renderGalleryState, resolveFixture } from "@oh-my-pi/pi-coding-agent/cli/gallery-cli";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { editToolRenderer } from "@oh-my-pi/pi-coding-agent/edit/renderer";
-import { renderDiff } from "@oh-my-pi/pi-coding-agent/modes/components/diff";
-import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
-import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { Text, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
-import chalk from "@oh-my-pi/pi-utils/chalk";
+import { InMemorySnapshotStore } from "@oh-my-soup/hashline";
+import type { AgentTool } from "@oh-my-soup/pi-agent-core";
+import { renderGalleryState, resolveFixture } from "@oh-my-soup/pi-coding-agent/cli/gallery-cli";
+import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { editToolRenderer } from "@oh-my-soup/pi-coding-agent/edit/renderer";
+import { renderDiff } from "@oh-my-soup/pi-coding-agent/modes/components/diff";
+import { ToolExecutionComponent } from "@oh-my-soup/pi-coding-agent/modes/components/tool-execution";
+import * as themeModule from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { Text, type TUI, visibleWidth } from "@oh-my-soup/pi-tui";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
+import chalk from "@oh-my-soup/pi-utils/chalk";
 
 beforeAll(async () => {
 	resetSettingsForTest();

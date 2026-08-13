@@ -25,7 +25,7 @@
  * (packages/natives/scripts/build-bindings.ts) against the installed VS Build
  * Tools; every other target on a win32 host fails fast with guidance.
  *
- * Set `OMP_NATIVE_BUILD_BACKEND=cargo` to route the host target through the
+ * Set `OMS_NATIVE_BUILD_BACKEND=cargo` to route the host target through the
  * same local N-API build on systems where Bazel's prebuilt host tools cannot run.
  *
  * Note: musl addons intentionally reuse the plain linux-<arch> filenames, so a
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
 	const host: HostInfo = { platform: process.platform, arch: process.arch, avx2: detectHostAvx2Support() };
 	const destDir = options.dest ? path.resolve(options.dest) : path.join(repoRoot, "packages/natives/native");
 
-	if ((host.platform === "win32" || Bun.env.OMP_NATIVE_BUILD_BACKEND === "cargo") && !options.source) {
+	if ((host.platform === "win32" || Bun.env.OMS_NATIVE_BUILD_BACKEND === "cargo") && !options.source) {
 		if (options.targets.length !== 1 || options.targets[0] !== "host") {
 			if (host.platform === "win32") {
 				throw new Error(
@@ -259,7 +259,7 @@ async function main(): Promise<void> {
 						"(local napi build via VS Build Tools), or run this script from WSL/linux for cross targets.",
 				);
 			}
-			throw new Error("OMP_NATIVE_BUILD_BACKEND=cargo supports only the host target");
+			throw new Error("OMS_NATIVE_BUILD_BACKEND=cargo supports only the host target");
 		}
 		await buildLocalHostAddon(host, destDir);
 		return;
@@ -276,7 +276,7 @@ async function main(): Promise<void> {
 		const bazel = resolveBazelBinary();
 		// CI hands cache wiring (remote or disk) through a bazelrc fragment so
 		// endpoint composition stays in .github/actions/bazel-cache.
-		const rcPath = Bun.env.OMP_BAZEL_RC?.trim();
+		const rcPath = Bun.env.OMS_BAZEL_RC?.trim();
 		const startupArgs = rcPath ? [`--bazelrc=${rcPath}`] : [];
 
 		const buildArgs = [...startupArgs, "build", ...options.bazelArgs, "--", ...labels];

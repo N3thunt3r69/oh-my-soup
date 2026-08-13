@@ -9,7 +9,7 @@ import {
 	type FetchImpl,
 	withExtraCaFetch,
 	wrapFetchForExtraCa,
-} from "@oh-my-pi/pi-utils/tls-fetch";
+} from "@oh-my-soup/pi-utils/tls-fetch";
 
 const SAMPLE_PEM =
 	"-----BEGIN CERTIFICATE-----\nMIIBkTCCATegAwIBAgIUF/sample/extra/ca/for/tests/1234567=\n-----END CERTIFICATE-----\n";
@@ -34,7 +34,7 @@ describe("wrapFetchForExtraCa", () => {
 	beforeEach(async () => {
 		__resetExtraCaCache();
 		originalEnv = Bun.env.NODE_EXTRA_CA_CERTS;
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-extra-ca-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-extra-ca-"));
 	});
 
 	afterEach(async () => {
@@ -159,7 +159,7 @@ describe("withExtraCaFetch", () => {
 	beforeEach(async () => {
 		__resetExtraCaCache();
 		originalEnv = Bun.env.NODE_EXTRA_CA_CERTS;
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-extra-ca-opts-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-extra-ca-opts-"));
 	});
 
 	afterEach(async () => {

@@ -1,14 +1,14 @@
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 import {
 	type AnySchema,
 	type ObjectOpts,
-	Type as OmpType,
-	type TypeBuilder as OmpTypeBuilder,
+	Type as OmsType,
+	type TypeBuilder as OmsTypeBuilder,
 	type TUnsafe,
-} from "@oh-my-pi/omptype/typebox";
-import { upgradeJsonSchemaTo202012, validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema";
+} from "@oh-my-soup/omstype/typebox";
+import { upgradeJsonSchemaTo202012, validateJsonSchemaValue } from "@oh-my-soup/pi-ai/utils/schema";
 
-export * from "@oh-my-pi/omptype/typebox";
+export * from "@oh-my-soup/omstype/typebox";
 
 const VALIDATION_FAILURE = Symbol("pi.typebox.validationFailure");
 
@@ -109,7 +109,7 @@ const object = ((properties: Record<string, unknown>, opts?: ObjectOpts) => {
 		}
 	}
 	if (!hasRawProperty) {
-		return OmpType.Object(properties as Record<string, AnySchema>, normalizedOpts);
+		return OmsType.Object(properties as Record<string, AnySchema>, normalizedOpts);
 	}
 
 	const normalizedProperties: Record<string, AnySchema> = {};
@@ -118,21 +118,21 @@ const object = ((properties: Record<string, unknown>, opts?: ObjectOpts) => {
 		normalizedProperties[key] = isRuntimeSchema(property) ? property : unsafe(property as Record<string, unknown>);
 	}
 	if (additionalProperties !== undefined && typeof additionalProperties !== "boolean") {
-		// omptype index signatures validate every string key, including declared
+		// omstype index signatures validate every string key, including declared
 		// properties. JSON Schema `additionalProperties` validates only undeclared
 		// keys, so preserve the whole document on this legacy raw-property path.
 		const { additionalProperties: _, ...objectOpts } = opts ?? {};
-		const document = OmpType.Object(normalizedProperties, objectOpts).toJsonSchema();
+		const document = OmsType.Object(normalizedProperties, objectOpts).toJsonSchema();
 		document.additionalProperties = isRuntimeSchema(additionalProperties)
 			? additionalProperties.toJsonSchema()
 			: structuredClone(additionalProperties);
 		return unsafe(document);
 	}
-	return OmpType.Object(normalizedProperties, normalizedOpts);
-}) as typeof OmpType.Object;
+	return OmsType.Object(normalizedProperties, normalizedOpts);
+}) as typeof OmsType.Object;
 
-export const Type = { ...OmpType, Object: object, Unsafe: unsafe } as unknown as OmpTypeBuilder;
-export type TypeBuilder = OmpTypeBuilder;
+export const Type = { ...OmsType, Object: object, Unsafe: unsafe } as unknown as OmsTypeBuilder;
+export type TypeBuilder = OmsTypeBuilder;
 
-const legacyTypeBox: { Type: OmpTypeBuilder } = { Type };
+const legacyTypeBox: { Type: OmsTypeBuilder } = { Type };
 export default legacyTypeBox;

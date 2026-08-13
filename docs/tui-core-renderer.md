@@ -79,7 +79,7 @@ needs to know whether the user has scrolled away from the tail.
   freeze the seam and pinned live regions clip advancement at their final
   boundary. Height-only resizes retain the existing ledger.
 - Direct HerdR panes are not in that category. HerdR's Ghostty core implements
-  ED3, so OMP clears and replays its source-owned transcript after settlement,
+  ED3, so OMS clears and replays its source-owned transcript after settlement,
   matching direct terminals. Repainting host-reflowed rows in place would
   harden soft wraps and leave residual rows after a later width reversal.
 
@@ -253,7 +253,7 @@ cosmetic, not corrupting.
 `visibleWidth` / `truncateToWidth` / `sliceByColumn` / `wrapTextWithAnsi`
 (`utils.ts`) all agree on **one UAX#11 width model**. Slicing, truncation,
 wrapping, and segment extraction run on the native engine
-(`@oh-my-pi/pi-natives`, Rust `unicode-width`); `visibleWidth` measures with
+(`@oh-my-soup/pi-natives`, Rust `unicode-width`); `visibleWidth` measures with
 `Bun.stringWidth` **pinned to that same model** (`STRING_WIDTH_OPTS`:
 `countAnsiEscapeCodes: false`, `ambiguousIsNarrow: true`) — a JSC builtin that
 shares the native width tables without the per-call N-API box the native

@@ -9,7 +9,7 @@
  * with it via BaseKernel.
  */
 import * as path from "node:path";
-import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-soup/pi-utils";
 import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelRuntimeEnv, type KernelStartOptions } from "../kernel-base";
@@ -163,7 +163,7 @@ export class RubyKernel extends BaseKernel<KernelExecuteOptions> {
 			if (typeof value === "string") spawnEnv[key] = value;
 		}
 
-		const scriptPath = await stageRunnerScript("omp-ruby-runner", "rb", RUNNER_SCRIPT);
+		const scriptPath = await stageRunnerScript("oms-ruby-runner", "rb", RUNNER_SCRIPT);
 		const kernel = new RubyKernel(Snowflake.next());
 
 		const proc = Bun.spawn([runtime.rubyPath, scriptPath], {
@@ -204,10 +204,10 @@ function buildInitScript(cwd: string, env?: Record<string, string | undefined>):
 	// JSON string literals are valid Ruby string literals. Emit one
 	// `ENV["k"] = "v"` per key — a `{"k":"v"}` object literal would parse as a
 	// SYMBOL-keyed hash in Ruby (`:"k" => "v"`), which `ENV[]=` rejects.
-	const lines = [`__omp_init_cwd = ${JSON.stringify(cwd)}`, "Dir.chdir(__omp_init_cwd) rescue nil"];
+	const lines = [`__oms_init_cwd = ${JSON.stringify(cwd)}`, "Dir.chdir(__oms_init_cwd) rescue nil"];
 	for (const key in envPayload) {
 		lines.push(`ENV[${JSON.stringify(key)}] = ${JSON.stringify(envPayload[key])}`);
 	}
-	lines.push("$LOAD_PATH.delete(__omp_init_cwd)", "$LOAD_PATH.unshift(__omp_init_cwd)");
+	lines.push("$LOAD_PATH.delete(__oms_init_cwd)", "$LOAD_PATH.unshift(__oms_init_cwd)");
 	return lines.join("\n");
 }

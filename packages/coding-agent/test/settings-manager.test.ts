@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { Effort } from "@oh-my-pi/pi-ai";
-import { clearCustomApis } from "@oh-my-pi/pi-ai/api-registry";
-import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
-import { __providerInFlightForTesting, streamSimple } from "@oh-my-pi/pi-ai/stream";
-import type { Context } from "@oh-my-pi/pi-ai/types";
+import { Effort } from "@oh-my-soup/pi-ai";
+import { clearCustomApis } from "@oh-my-soup/pi-ai/api-registry";
+import { createMockModel, registerMockApi } from "@oh-my-soup/pi-ai/providers/mock";
+import { __providerInFlightForTesting, streamSimple } from "@oh-my-soup/pi-ai/stream";
+import type { Context } from "@oh-my-soup/pi-ai/types";
 import {
 	onAppendOnlyModeChanged,
 	onStatusLineSessionAccentChanged,
 	resetSettingsForTest,
 	type SettingPath,
 	Settings,
-} from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { AUTO_IMAGE_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/tools/image-providers";
-import { SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
-import * as fileLock from "@oh-my-pi/pi-utils/file-lock";
+} from "@oh-my-soup/pi-coding-agent/config/settings";
+import { AgentStorage } from "@oh-my-soup/pi-coding-agent/session/agent-storage";
+import { AUTO_IMAGE_PROVIDER_ORDER } from "@oh-my-soup/pi-coding-agent/tools/image-providers";
+import { SEARCH_PROVIDER_ORDER } from "@oh-my-soup/pi-coding-agent/web/search/types";
+import { getProjectAgentDir, TempDir } from "@oh-my-soup/pi-utils";
+import * as fileLock from "@oh-my-soup/pi-utils/file-lock";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
 
@@ -250,7 +250,7 @@ describe("Settings", () => {
 
 		it("backs up a corrupted project config and retains the pending project role for retry", async () => {
 			await writeSettings({});
-			const projectConfigPath = path.join(projectDir, ".omp", "config.yml");
+			const projectConfigPath = path.join(projectDir, ".oms", "config.yml");
 			await Bun.write(
 				projectConfigPath,
 				YAML.stringify({ modelRoles: { default: "keep/default" }, custom: { keep: true } }, null, 2),
@@ -343,7 +343,7 @@ describe("Settings", () => {
 
 		it("leaves an unreadable project config untouched and retains its pending role", async () => {
 			await writeSettings({});
-			const projectConfigPath = path.join(projectDir, ".omp", "config.yml");
+			const projectConfigPath = path.join(projectDir, ".oms", "config.yml");
 			const original = YAML.stringify({ modelRoles: { default: "keep/default" }, custom: { keep: true } }, null, 2);
 			await Bun.write(projectConfigPath, original);
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
@@ -369,7 +369,7 @@ describe("Settings", () => {
 			const malformed = 'modelRoles:\n  default: "unterminated\n';
 			await Promise.all([
 				Bun.write(getConfigPath(), malformed),
-				Bun.write(path.join(projectDir, ".omp", "config.yml"), malformed),
+				Bun.write(path.join(projectDir, ".oms", "config.yml"), malformed),
 			]);
 			const unhandled: unknown[] = [];
 			const onUnhandled = (reason: unknown): void => {
@@ -381,7 +381,7 @@ describe("Settings", () => {
 				expect(unhandled).toEqual([]);
 				expect(fs.readdirSync(agentDir).some(name => name.startsWith("config.yml.broken-"))).toBe(true);
 				expect(
-					fs.readdirSync(path.join(projectDir, ".omp")).some(name => name.startsWith("config.yml.broken-")),
+					fs.readdirSync(path.join(projectDir, ".oms")).some(name => name.startsWith("config.yml.broken-")),
 				).toBe(true);
 			} finally {
 				process.removeListener("unhandledRejection", onUnhandled);
@@ -659,7 +659,7 @@ describe("Settings", () => {
 			// Process loads its #global snapshot.
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			// External edit (another omp instance / manual edit): changes advisor,
+			// External edit (another oms instance / manual edit): changes advisor,
 			// adds vision. This process's #global is now stale.
 			await writeSettings({
 				modelRoles: {

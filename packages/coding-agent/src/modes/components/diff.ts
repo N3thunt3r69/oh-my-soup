@@ -1,5 +1,5 @@
-import { diffWords } from "@oh-my-pi/pi-natives";
-import { DEFAULT_TAB_WIDTH, sanitizeText } from "@oh-my-pi/pi-utils";
+import { diffWords } from "@oh-my-soup/pi-natives";
+import { DEFAULT_TAB_WIDTH, sanitizeText } from "@oh-my-soup/pi-utils";
 import { getLanguageFromPath, highlightCode, theme } from "../../modes/theme/theme";
 import { type CodeFrameMarker, formatCodeFrameLine, replaceTabs } from "../../tools/render-utils";
 

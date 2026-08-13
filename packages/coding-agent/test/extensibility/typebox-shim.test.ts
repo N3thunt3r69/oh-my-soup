@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import type { Tool } from "@oh-my-pi/pi-ai/types";
-import { isValidJsonSchema, toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
-import { type TSchema, Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import type { Tool } from "@oh-my-soup/pi-ai/types";
+import { isValidJsonSchema, toolWireSchema } from "@oh-my-soup/pi-ai/utils/schema";
+import { validateToolArguments } from "@oh-my-soup/pi-ai/utils/validation";
+import { type TSchema, Type } from "@oh-my-soup/pi-coding-agent/extensibility/legacy-typebox";
 
 /**
  * Exercise the legacy `__validator` failure-marker contract independently of
@@ -193,7 +193,7 @@ describe("pi.typebox compatibility shim", () => {
 			expect((parsed.data as { extra?: unknown }).extra).toBe(1);
 		}
 	});
-	// Callable omptype schemas intentionally have no enumerable JSON Schema
+	// Callable omstype schemas intentionally have no enumerable JSON Schema
 	// keywords. Wire serialization consumes their explicit JSON Schema emitter.
 	describe("toJsonSchema produces valid wire JSON Schema", () => {
 		it("emits clean JSON Schema for a complex object", () => {

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Agent, AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
-import { isRecord, logger, prompt, stringProperty, untilAborted } from "@oh-my-pi/pi-utils";
+import type { Agent, AgentTool } from "@oh-my-soup/pi-agent-core";
+import type { Model } from "@oh-my-soup/pi-ai";
+import { isRecord, logger, prompt, stringProperty, untilAborted } from "@oh-my-soup/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelString } from "../config/model-resolver";

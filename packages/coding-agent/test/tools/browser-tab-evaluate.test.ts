@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import { BrowserTool } from "@oh-my-pi/pi-coding-agent/tools/browser";
-import { getTabsMapForTest } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
-import * as logger from "@oh-my-pi/pi-utils/logger";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import type { ToolSession } from "@oh-my-soup/pi-coding-agent/sdk";
+import { BrowserTool } from "@oh-my-soup/pi-coding-agent/tools/browser";
+import { getTabsMapForTest } from "@oh-my-soup/pi-coding-agent/tools/browser/tab-supervisor";
+import * as logger from "@oh-my-soup/pi-utils/logger";
 import { chromiumAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();

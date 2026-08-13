@@ -1,7 +1,7 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ImageContent, Message, Usage } from "@oh-my-pi/pi-ai";
-import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
-import { type Component, Spacer, Text, TruncatedText } from "@oh-my-pi/pi-tui";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import type { AssistantMessage, ImageContent, Message, Usage } from "@oh-my-soup/pi-ai";
+import { getStreamingPartialJson } from "@oh-my-soup/pi-ai/utils/block-symbols";
+import { type Component, Spacer, Text, TruncatedText } from "@oh-my-soup/pi-tui";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "../../collab/protocol";
 import { settings } from "../../config/settings";
@@ -856,7 +856,7 @@ export class UiHelpers {
 		block.addChild(new DynamicBorder(text => theme.fg("warning", text)));
 		const title = "Update Available";
 		const prefix = `New version ${newVersion} is available. Run: `;
-		const command = "omp update";
+		const command = "oms update";
 		block.addChild(
 			new Text(`${title}\n${prefix}${command}`, 1, 0).setStyleFn(
 				() =>

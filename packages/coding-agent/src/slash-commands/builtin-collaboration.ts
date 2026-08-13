@@ -1,5 +1,5 @@
-import { Spacer } from "@oh-my-pi/pi-tui";
-import { APP_NAME } from "@oh-my-pi/pi-utils";
+import { Spacer } from "@oh-my-soup/pi-tui";
+import { APP_NAME } from "@oh-my-soup/pi-utils";
 import { CollabGuestLink } from "../collab/guest";
 import { CollabHost } from "../collab/host";
 import type { SettingPath, SettingValue } from "../config/settings";

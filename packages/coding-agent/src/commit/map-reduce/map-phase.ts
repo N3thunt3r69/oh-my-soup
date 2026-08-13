@@ -1,7 +1,7 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, ApiKey, AssistantMessage, Message, Model } from "@oh-my-pi/pi-ai";
-import { completeSimple } from "@oh-my-pi/pi-ai";
-import { prompt } from "@oh-my-pi/pi-utils";
+import type { ThinkingLevel } from "@oh-my-soup/pi-agent-core";
+import type { Api, ApiKey, AssistantMessage, Message, Model } from "@oh-my-soup/pi-ai";
+import { completeSimple } from "@oh-my-soup/pi-ai";
+import { prompt } from "@oh-my-soup/pi-utils";
 import fileObserverSystemPrompt from "../../commit/prompts/file-observer-system.md" with { type: "text" };
 import fileObserverUserPrompt from "../../commit/prompts/file-observer-user.md" with { type: "text" };
 import type { FileDiff, FileObservation } from "../../commit/types";

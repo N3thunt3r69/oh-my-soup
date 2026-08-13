@@ -5,9 +5,9 @@ import * as path from "node:path";
 import {
 	SPINNER_GLYPH_ADVANCE_MS,
 	sharedSpinnerFrame,
-} from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { getConfigRootDir, getCustomThemesDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/modes/components/tool-execution";
+import { getThemeByName } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { getConfigRootDir, getCustomThemesDir, removeWithRetries, setAgentDir } from "@oh-my-soup/pi-utils";
 
 // Path of the built-in dark theme JSON, used as a known-valid base we can
 // extend with custom `symbols.spinnerFrames` shapes.
@@ -33,7 +33,7 @@ async function writeCustomTheme(name: string, extraSymbols: Record<string, unkno
 
 describe("theme symbols.spinnerFrames", () => {
 	beforeEach(async () => {
-		tmpAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-spinner-frames-"));
+		tmpAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-spinner-frames-"));
 		setAgentDir(tmpAgentDir);
 	});
 

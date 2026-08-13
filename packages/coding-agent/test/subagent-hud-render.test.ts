@@ -7,27 +7,27 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { InteractiveMode, renderSubagentHudLines } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
+import { Agent } from "@oh-my-soup/pi-agent-core";
+import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
+import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { InteractiveMode, renderSubagentHudLines } from "@oh-my-soup/pi-coding-agent/modes/interactive-mode";
 import {
 	type ObservableSession,
 	SessionObserverRegistry,
-} from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+} from "@oh-my-soup/pi-coding-agent/modes/session-observer-registry";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 import {
 	type AgentProgress,
 	type SubagentLifecyclePayload,
 	type SubagentProgressPayload,
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
-} from "@oh-my-pi/pi-coding-agent/task";
-import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { TempDir } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/task";
+import { EventBus } from "@oh-my-soup/pi-coding-agent/utils/event-bus";
+import { TempDir } from "@oh-my-soup/pi-utils";
 
 function makeSession(overrides: Partial<ObservableSession> & { id: string }): ObservableSession {
 	return {

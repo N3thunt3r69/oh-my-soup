@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { buildSystemPrompt } from "@oh-my-pi/pi-coding-agent/system-prompt";
-import { usesCodexTaskPrompt } from "@oh-my-pi/pi-coding-agent/task/prompt-policy";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
+import { Agent } from "@oh-my-soup/pi-agent-core";
+import type { Model } from "@oh-my-soup/pi-ai";
+import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
+import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import { buildSystemPrompt } from "@oh-my-soup/pi-coding-agent/system-prompt";
+import { usesCodexTaskPrompt } from "@oh-my-soup/pi-coding-agent/task/prompt-policy";
+import { removeSyncWithRetries } from "@oh-my-soup/pi-utils";
 import { cleanupTempHome } from "./helpers/temp-home-cleanup";
 
 const EMPTY_TREE = {
@@ -37,7 +37,7 @@ async function expectPromptDateFromStartupTimezone(options: {
 import { buildSystemPrompt } from ${JSON.stringify(path.resolve(import.meta.dir, "../src/system-prompt.ts"))};
 
 it("renders the prompt date in the startup timezone", async () => {
-	setSystemTime(new Date(process.env.OMP_TEST_NOW!));
+	setSystemTime(new Date(process.env.OMS_TEST_NOW!));
 	try {
 		const { systemPrompt } = await buildSystemPrompt({
 			cwd: process.cwd(),
@@ -55,8 +55,8 @@ it("renders the prompt date in the startup timezone", async () => {
 			activeRepoContext: null,
 		});
 		const rendered = systemPrompt.join("\\n\\n");
-		expect(rendered).toContain(\`Today: \${process.env.OMP_EXPECTED_DATE}\`);
-		expect(rendered).not.toContain(\`Today: \${process.env.OMP_REJECTED_DATE}\`);
+		expect(rendered).toContain(\`Today: \${process.env.OMS_EXPECTED_DATE}\`);
+		expect(rendered).not.toContain(\`Today: \${process.env.OMS_REJECTED_DATE}\`);
 	} finally {
 		setSystemTime();
 	}
@@ -69,9 +69,9 @@ it("renders the prompt date in the startup timezone", async () => {
 			...process.env,
 			HOME: options.tempHomeDir,
 			TZ: options.timeZone,
-			OMP_TEST_NOW: options.now,
-			OMP_EXPECTED_DATE: options.expectedDate,
-			OMP_REJECTED_DATE: options.rejectedDate,
+			OMS_TEST_NOW: options.now,
+			OMS_EXPECTED_DATE: options.expectedDate,
+			OMS_REJECTED_DATE: options.rejectedDate,
 		},
 		stdout: "pipe",
 		stderr: "pipe",

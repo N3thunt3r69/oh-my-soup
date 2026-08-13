@@ -1,5 +1,5 @@
 /**
- * ACP stdout-hygiene smoke: launching `omp acp` must not leak any banner,
+ * ACP stdout-hygiene smoke: launching `oms acp` must not leak any banner,
  * progress text, or stray non-JSON bytes onto stdout — that channel is owned
  * by the JSON-RPC protocol. We spawn the CLI as a subprocess, send a single
  * `initialize` frame, and assert the first stdout line parses cleanly as a
@@ -20,7 +20,7 @@ let activeProc: AcpProc | undefined;
 
 /**
  * Tear the child down hard. SIGTERM first so the process gets a chance to
- * unwind, but force-kill quickly if it hasn't reaped — `omp acp` blocks on
+ * unwind, but force-kill quickly if it hasn't reaped — `oms acp` blocks on
  * stdin reads and won't notice SIGTERM until we close the pipes. We bound
  * the entire shutdown to ~2s so a stuck child never trips Bun's 5s hook
  * timeout (which is what produced the "afterEach hook timed out" flakes).
@@ -103,7 +103,7 @@ async function readFirstFrame(stream: ReadableStream<Uint8Array>): Promise<strin
 
 describe("ACP stdout hygiene", () => {
 	it("emits a JSON-RPC initialize response as the first bytes on stdout", async () => {
-		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-acp-stdout-"));
+		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "oms-acp-stdout-"));
 		cleanupRoots.push(root);
 		const xdg = path.join(root, "xdg");
 		const agentDir = path.join(root, "agent");

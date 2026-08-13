@@ -2,10 +2,10 @@ import {
 	type HighlightColors as NativeHighlightColors,
 	highlightCode as nativeHighlightCode,
 	supportsLanguage as nativeSupportsLanguage,
-} from "@oh-my-pi/pi-natives";
-import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme, SymbolTheme } from "@oh-my-pi/pi-tui";
-import chalk from "@oh-my-pi/pi-utils/chalk";
-import { LRUCache } from "@oh-my-pi/pi-utils/lru";
+} from "@oh-my-soup/pi-natives";
+import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme, SymbolTheme } from "@oh-my-soup/pi-tui";
+import chalk from "@oh-my-soup/pi-utils/chalk";
+import { LRUCache } from "@oh-my-soup/pi-utils/lru";
 import { resolveMermaidAscii } from "./mermaid-cache";
 import { theme } from "./theme";
 import type { Theme } from "./theme-class";

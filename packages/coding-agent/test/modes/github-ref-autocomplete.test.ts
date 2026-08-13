@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { KeybindingsManager as AppKeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
-import { getGithubRefContext, getGithubRefSuggestions } from "@oh-my-pi/pi-coding-agent/modes/github-ref-autocomplete";
-import { createPromptActionAutocompleteProvider } from "@oh-my-pi/pi-coding-agent/modes/prompt-action-autocomplete";
-import type { SlashCommand } from "@oh-my-pi/pi-tui";
+import { KeybindingsManager as AppKeybindingsManager } from "@oh-my-soup/pi-coding-agent/config/keybindings";
+import {
+	getGithubRefContext,
+	getGithubRefSuggestions,
+} from "@oh-my-soup/pi-coding-agent/modes/github-ref-autocomplete";
+import { createPromptActionAutocompleteProvider } from "@oh-my-soup/pi-coding-agent/modes/prompt-action-autocomplete";
+import type { SlashCommand } from "@oh-my-soup/pi-tui";
 
 function makeProvider(commands: SlashCommand[] = []) {
 	return createPromptActionAutocompleteProvider({
@@ -36,7 +39,7 @@ describe("github-ref autocomplete — token detection", () => {
 		expect(getGithubRefContext("owner/repo#3164")).toBeNull();
 		expect(getGithubRefContext("foo#3164")).toBeNull();
 		expect(getGithubRefContext("C#12")).toBeNull();
-		expect(getGithubRefContext("https://github.com/can1357/oh-my-pi#3164")).toBeNull();
+		expect(getGithubRefContext("https://github.com/pickpocket/oh-my-soup#3164")).toBeNull();
 		expect(getGithubRefContext("path/#3164")).toBeNull();
 	});
 

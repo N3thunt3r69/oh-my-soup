@@ -1,19 +1,19 @@
 import { beforeAll, describe, expect, it, spyOn } from "bun:test";
 import * as os from "node:os";
 import { stripVTControlCharacters } from "node:util";
-import { PluginManager } from "@oh-my-pi/pi-coding-agent/extensibility/plugins";
+import { PluginManager } from "@oh-my-soup/pi-coding-agent/extensibility/plugins";
 import {
 	type InstalledPluginSummary,
 	MarketplaceManager,
-} from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
-import type { InstalledPlugin } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/types";
+} from "@oh-my-soup/pi-coding-agent/extensibility/plugins/marketplace";
+import type { InstalledPlugin } from "@oh-my-soup/pi-coding-agent/extensibility/plugins/types";
 import {
 	MarketplacePluginDetailComponent,
 	PluginListComponent,
 	type PluginListEntry,
 	PluginSettingsComponent,
-} from "@oh-my-pi/pi-coding-agent/modes/components/plugin-settings";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+} from "@oh-my-soup/pi-coding-agent/modes/components/plugin-settings";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 
 beforeAll(async () => {
 	await initTheme();
@@ -118,8 +118,8 @@ describe("PluginListComponent", () => {
 
 		const text = stripVTControlCharacters(component.render(120).join("\n"));
 		expect(text).toContain("No plugins installed");
-		expect(text).toContain("omp plugin install <package>");
-		expect(text).toContain("omp plugin install <name>@<marketplace>");
+		expect(text).toContain("oms plugin install <package>");
+		expect(text).toContain("oms plugin install <name>@<marketplace>");
 	});
 
 	it("routes enter on a marketplace entry to onMarketplaceSelect", () => {
@@ -285,7 +285,7 @@ describe("MarketplacePluginDetailComponent", () => {
 
 	it("shortens home-relative install paths to ~ before rendering", () => {
 		const home = os.homedir();
-		const installPath = `${home}/.omp/cache/plugins/sample@mkt`;
+		const installPath = `${home}/.oms/cache/plugins/sample@mkt`;
 		const plugin = marketplace("sample@mkt", { entry: { installPath } });
 
 		const component = new MarketplacePluginDetailComponent(plugin, {
@@ -296,7 +296,7 @@ describe("MarketplacePluginDetailComponent", () => {
 		const text = stripVTControlCharacters(component.render(120).join("\n"));
 		// `shortenPath` keeps the rest of the path intact but replaces $HOME with `~`,
 		// so the user's home directory never leaks into the rendered TUI surface.
-		expect(text).toContain("~/.omp/cache/plugins/sample@mkt");
+		expect(text).toContain("~/.oms/cache/plugins/sample@mkt");
 		expect(text).not.toContain(home);
 	});
 });

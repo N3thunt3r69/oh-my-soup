@@ -1,12 +1,12 @@
 /**
  * Config CLI command handlers.
  *
- * Handles `omp config <command>` subcommands for managing settings.
+ * Handles `oms config <command>` subcommands for managing settings.
  * Uses the settings schema as the source of truth for available settings.
  */
 
-import { APP_NAME, getAgentDir } from "@oh-my-pi/pi-utils";
-import chalk from "@oh-my-pi/pi-utils/chalk";
+import { APP_NAME, getAgentDir } from "@oh-my-soup/pi-utils";
+import chalk from "@oh-my-soup/pi-utils/chalk";
 import {
 	getDefault,
 	getEnumValues,

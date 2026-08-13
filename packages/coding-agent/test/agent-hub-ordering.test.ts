@@ -6,15 +6,15 @@
  * agents that appear while the hub is open are appended at the end.
  */
 import { afterEach, beforeAll, describe, expect, it, setSystemTime, vi } from "bun:test";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { type AgentHubDeps, AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
-import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
+import { ThinkingLevel } from "@oh-my-soup/pi-agent-core";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { IrcBus } from "@oh-my-soup/pi-coding-agent/irc/bus";
+import { type AgentHubDeps, AgentHubOverlayComponent } from "@oh-my-soup/pi-coding-agent/modes/components/agent-hub";
+import { SessionObserverRegistry } from "@oh-my-soup/pi-coding-agent/modes/session-observer-registry";
+import { initTheme, theme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import { AgentRegistry } from "@oh-my-soup/pi-coding-agent/registry/agent-registry";
+import type { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import { visibleWidth } from "@oh-my-soup/pi-tui/utils";
 
 interface GeometryStub {
 	setRows(n: number): void;
@@ -150,7 +150,7 @@ describe("Agent hub row ordering", () => {
 			const rendered = Bun.stripANSI(hub.render(120).join("\n"));
 			expect(rendered).toContain("No agents in this session");
 			expect(rendered).toContain("Finished, parked, and killed subagents remain with the session");
-			expect(rendered).toContain("Resume that session with omp-dev --continue, or spawn a task here.");
+			expect(rendered).toContain("Resume that session with oms-dev --continue, or spawn a task here.");
 		} finally {
 			hub.dispose();
 		}
@@ -587,7 +587,7 @@ describe("Agent hub row ordering", () => {
 			history: {
 				outputPath: "/tmp/Reviewer.md",
 				patchPath: "/tmp/Reviewer.patch",
-				branchName: "omp/task/Reviewer",
+				branchName: "oms/task/Reviewer",
 			},
 			createdAt,
 		});
@@ -654,7 +654,7 @@ describe("Agent hub row ordering", () => {
 			expect(rendered).toContain("Output /tmp/Reviewer.md");
 			expect(rendered).toContain("Patch /tmp/Reviewer.patch");
 			hub.handleInput("\x1b[6~");
-			expect(Bun.stripANSI(hub.render(140).join("\n"))).toContain("Worktree branch omp/task/Reviewer");
+			expect(Bun.stripANSI(hub.render(140).join("\n"))).toContain("Worktree branch oms/task/Reviewer");
 		} finally {
 			hub.dispose();
 		}

@@ -2,11 +2,11 @@
  * Text normalization utilities for the edit tool.
  *
  * Whitespace, Unicode, and indentation helpers. Line-ending and BOM
- * primitives live in `@oh-my-pi/hashline` and are re-exported here so
+ * primitives live in `@oh-my-soup/hashline` and are re-exported here so
  * existing consumers see one stable surface.
  */
 
-import { padding } from "@oh-my-pi/pi-tui";
+import { padding } from "@oh-my-soup/pi-tui";
 
 export {
 	type BomResult,
@@ -15,7 +15,7 @@ export {
 	normalizeToLF,
 	restoreLineEndings,
 	stripBom,
-} from "@oh-my-pi/hashline";
+} from "@oh-my-soup/hashline";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Whitespace Utilities

@@ -5,9 +5,9 @@
  * They can provide custom rendering for tool calls and results in the TUI.
  */
 
-import type { type as ArkType } from "@oh-my-pi/omptype";
-import type * as TypeBox from "@oh-my-pi/omptype/typebox";
-import type * as zod from "@oh-my-pi/omptype/zod";
+import type { type as ArkType } from "@oh-my-soup/omstype";
+import type * as TypeBox from "@oh-my-soup/omstype/typebox";
+import type * as zod from "@oh-my-soup/omstype/zod";
 import type {
 	AgentToolResult,
 	AgentToolUpdateCallback,
@@ -15,11 +15,11 @@ import type {
 	ToolApprovalDecision,
 	ToolLoadMode,
 	ToolTier,
-} from "@oh-my-pi/pi-agent-core";
-import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type { FetchImpl, Model, Static, TSchema } from "@oh-my-pi/pi-ai";
-import type { Component } from "@oh-my-pi/pi-tui";
-import type { logger as PiLogger } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-agent-core";
+import type { CompactionResult } from "@oh-my-soup/pi-agent-core/compaction";
+import type { FetchImpl, Model, Static, TSchema } from "@oh-my-soup/pi-ai";
+import type { Component } from "@oh-my-soup/pi-tui";
+import type { logger as PiLogger } from "@oh-my-soup/pi-utils";
 import type { Rule } from "../../capability/rule";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { Settings } from "../../config/settings";
@@ -70,7 +70,7 @@ export interface CustomToolAPI {
 	typebox: typeof TypeBox;
 	/** Injected arktype module for arktype-authored custom tools. */
 	arktype: typeof ArkType;
-	/** Injected Zod-compatible omptype builder for custom tools. */
+	/** Injected Zod-compatible omstype builder for custom tools. */
 	zod: typeof zod;
 	/** Injected pi-coding-agent exports */
 	pi: typeof PiCodingAgent;
@@ -99,7 +99,7 @@ export interface CustomToolContext {
 	settings?: Settings;
 	/** Fetch implementation for outbound HTTP; defaults to global fetch when omitted. */
 	fetch?: FetchImpl;
-	/** Calling session's `local://` root mapping for tools that bridge out of the OMP process. */
+	/** Calling session's `local://` root mapping for tools that bridge out of the OMS process. */
 	localProtocolOptions?: LocalProtocolOptions;
 	/** Whether to auto-approve all destructive tool operations (--auto-approve CLI flag) */
 	autoApprove?: boolean;

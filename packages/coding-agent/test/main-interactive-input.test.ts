@@ -6,11 +6,11 @@ import {
 	applyResolvedSystemPromptInputs,
 	readPipedInput,
 	submitInteractiveInput,
-} from "@oh-my-pi/pi-coding-agent/main";
-import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { CreateAgentSessionOptions } from "@oh-my-pi/pi-coding-agent/sdk";
-import { discoverTitleSystemPromptFile } from "@oh-my-pi/pi-coding-agent/system-prompt";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-coding-agent/main";
+import type { SubmittedUserInput } from "@oh-my-soup/pi-coding-agent/modes/types";
+import type { CreateAgentSessionOptions } from "@oh-my-soup/pi-coding-agent/sdk";
+import { discoverTitleSystemPromptFile } from "@oh-my-soup/pi-coding-agent/system-prompt";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 const cleanupDirs: string[] = [];
 
@@ -30,10 +30,10 @@ function createInput(overrides: Partial<SubmittedUserInput> = {}): SubmittedUser
 }
 
 describe("discoverTitleSystemPromptFile", () => {
-	it("discovers TITLE_SYSTEM.md from the project omp config directory", async () => {
-		const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-title-system-"));
+	it("discovers TITLE_SYSTEM.md from the project oms config directory", async () => {
+		const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-title-system-"));
 		cleanupDirs.push(projectDir);
-		const configDir = path.join(projectDir, ".omp");
+		const configDir = path.join(projectDir, ".oms");
 		await fs.mkdir(configDir, { recursive: true });
 		const promptPath = path.join(configDir, "TITLE_SYSTEM.md");
 		await fs.writeFile(promptPath, "custom title prompt");

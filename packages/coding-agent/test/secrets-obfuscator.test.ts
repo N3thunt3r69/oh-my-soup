@@ -7,32 +7,32 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type } from "@oh-my-pi/omptype";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Context, Message, TextContent } from "@oh-my-pi/pi-ai";
+import { type } from "@oh-my-soup/omstype";
+import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
+import type { AssistantMessage, Context, Message, TextContent } from "@oh-my-soup/pi-ai";
 import {
 	builtinCredentialSecretEntries,
 	getExistingSecretPlaceholderKey,
 	getSecretPlaceholderKey,
 	getSecretPlaceholderKeySync,
 	loadSecrets,
-} from "@oh-my-pi/pi-coding-agent/secrets";
+} from "@oh-my-soup/pi-coding-agent/secrets";
 import {
 	deobfuscateAgentMessages,
 	deobfuscateToolArguments,
 	obfuscateMessages,
 	obfuscateProviderContext,
 	obfuscateToolArguments,
-} from "@oh-my-pi/pi-coding-agent/secrets/message-transform";
-import { type SecretEntry, SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
+} from "@oh-my-soup/pi-coding-agent/secrets/message-transform";
+import { type SecretEntry, SecretObfuscator } from "@oh-my-soup/pi-coding-agent/secrets/obfuscator";
 import {
 	sanitizeSecretFriendlyName,
 	secretEntriesNeedPlaceholderKey,
 	secretEntryNeedsPlaceholderKey,
 	stripPendingSecretPlaceholderSuffix,
-} from "@oh-my-pi/pi-coding-agent/secrets/placeholder";
-import { compileSecretRegex } from "@oh-my-pi/pi-coding-agent/secrets/regex";
-import { getActiveProfile, getAgentDir, setProfile } from "@oh-my-pi/pi-utils/dirs";
+} from "@oh-my-soup/pi-coding-agent/secrets/placeholder";
+import { compileSecretRegex } from "@oh-my-soup/pi-coding-agent/secrets/regex";
+import { getActiveProfile, getAgentDir, setProfile } from "@oh-my-soup/pi-utils/dirs";
 
 describe("compileSecretRegex", () => {
 	it("adds global flag when not provided", () => {
@@ -116,7 +116,7 @@ describe("lazy placeholder key", () => {
 	});
 
 	it("getSecretPlaceholderKeySync creates the key file on demand and shares it with the async readers", async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-lazy-placeholder-key-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-lazy-placeholder-key-"));
 		try {
 			expect(await getExistingSecretPlaceholderKey(dir)).toBeUndefined();
 			const key = getSecretPlaceholderKeySync(dir);
@@ -308,7 +308,7 @@ describe("getSecretPlaceholderKey", () => {
 	async function withTempAgentHome(run: () => Promise<void>): Promise<void> {
 		const originalProfile = getActiveProfile();
 		const originalHome = process.env.HOME;
-		const tempHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-key-"));
+		const tempHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-secret-key-"));
 		process.env.HOME = tempHomeDir;
 		const homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHomeDir);
 		try {
@@ -2951,14 +2951,14 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 	});
 
 	it("omits invalid friendlyName metadata without dropping the secret", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-friendly-"));
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "oms-secret-friendly-"));
 		try {
 			const project = path.join(root, "project");
 			const agentDir = path.join(root, "agent");
-			await fs.mkdir(path.join(project, ".omp"), { recursive: true });
+			await fs.mkdir(path.join(project, ".oms"), { recursive: true });
 			await fs.mkdir(agentDir, { recursive: true });
 			await fs.writeFile(
-				path.join(project, ".omp", "secrets.yml"),
+				path.join(project, ".oms", "secrets.yml"),
 				"- type: plain\n  content: invalid-friendly-secret\n  friendlyName: '***'\n",
 			);
 
@@ -2977,14 +2977,14 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 	});
 
 	it("omits non-string friendlyName metadata without dropping the secret", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-friendly-"));
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "oms-secret-friendly-"));
 		try {
 			const project = path.join(root, "project");
 			const agentDir = path.join(root, "agent");
-			await fs.mkdir(path.join(project, ".omp"), { recursive: true });
+			await fs.mkdir(path.join(project, ".oms"), { recursive: true });
 			await fs.mkdir(agentDir, { recursive: true });
 			await fs.writeFile(
-				path.join(project, ".omp", "secrets.yml"),
+				path.join(project, ".oms", "secrets.yml"),
 				"- type: plain\n  content: non-string-friendly-secret\n  friendlyName: 123\n",
 			);
 
@@ -3003,14 +3003,14 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 	});
 
 	it("rejects a secrets.yml replace regex entry that can never redact a 1-2 char match distinctly from itself", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-friendly-"));
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "oms-secret-friendly-"));
 		try {
 			const project = path.join(root, "project");
 			const agentDir = path.join(root, "agent");
-			await fs.mkdir(path.join(project, ".omp"), { recursive: true });
+			await fs.mkdir(path.join(project, ".oms"), { recursive: true });
 			await fs.mkdir(agentDir, { recursive: true });
 			await fs.writeFile(
-				path.join(project, ".omp", "secrets.yml"),
+				path.join(project, ".oms", "secrets.yml"),
 				'- type: regex\n  mode: replace\n  content: "."\n',
 			);
 
@@ -3032,14 +3032,14 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		// case-sensitive/punctuated pattern like `tok_[a-z0-9]+` can never match
 		// an already-uppercased, separator-stripped rendering of itself. The fix
 		// still validates the friendlyName but returns it unsanitized.
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-friendly-"));
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "oms-secret-friendly-"));
 		try {
 			const project = path.join(root, "project");
 			const agentDir = path.join(root, "agent");
-			await fs.mkdir(path.join(project, ".omp"), { recursive: true });
+			await fs.mkdir(path.join(project, ".oms"), { recursive: true });
 			await fs.mkdir(agentDir, { recursive: true });
 			await fs.writeFile(
-				path.join(project, ".omp", "secrets.yml"),
+				path.join(project, ".oms", "secrets.yml"),
 				'- type: regex\n  content: "tok_[a-z0-9]+"\n  friendlyName: "tok_abc123"\n',
 			);
 

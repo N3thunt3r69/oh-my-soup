@@ -5,10 +5,10 @@
  */
 
 import path from "node:path";
-import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
-import { recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import type { Api, Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
-import { logger, popLoopPhase, prompt, pushLoopPhase, untilAborted } from "@oh-my-pi/pi-utils";
+import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-soup/pi-agent-core";
+import { recordHandoff, resolveTelemetry } from "@oh-my-soup/pi-agent-core";
+import type { Api, Model, ServiceTierByFamily, Usage } from "@oh-my-soup/pi-ai";
+import { logger, popLoopPhase, prompt, pushLoopPhase, untilAborted } from "@oh-my-soup/pi-utils";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobManager } from "../async";
 import type { Rule } from "../capability/rule";
 import { ModelRegistry } from "../config/model-registry";
@@ -441,7 +441,7 @@ export interface ExecutorOptions {
 	preloadedExtensionPaths?: string[];
 	/**
 	 * Parent's discovered custom-tool source paths. Forwarded to skip the
-	 * `.omp/tools/` FS scan in the subagent; the subagent then re-binds each
+	 * `.oms/tools/` FS scan in the subagent; the subagent then re-binds each
 	 * tool against its own `CustomToolAPI` (cwd, exec, pushPendingAction, UI).
 	 */
 	preloadedCustomToolPaths?: ToolPathWithSource[];

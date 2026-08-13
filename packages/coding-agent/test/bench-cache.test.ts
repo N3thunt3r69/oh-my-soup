@@ -11,8 +11,8 @@ import type {
 	Context,
 	Model,
 	SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai";
-import { type BenchModelRegistry, runBenchCommand } from "@oh-my-pi/pi-coding-agent/cli/bench-cli";
+} from "@oh-my-soup/pi-ai";
+import { type BenchModelRegistry, runBenchCommand } from "@oh-my-soup/pi-coding-agent/cli/bench-cli";
 
 const model = {
 	provider: "openai",
@@ -76,7 +76,7 @@ function successfulMessage(cacheRead: number, cacheWrite: number): AssistantMess
 }
 
 describe("bench cache mode", () => {
-	it("splits the cache breakpoint prefix from each variable suffix with native OMP messages", async () => {
+	it("splits the cache breakpoint prefix from each variable suffix with native OMS messages", async () => {
 		const calls: Array<{ context: Context; options: SimpleStreamOptions }> = [];
 		let coldCompleted = false;
 		let stdout = "";
@@ -458,7 +458,7 @@ describe("bench cache mode", () => {
 	});
 
 	it("truncates the default prefix-file reader at a UTF-8 boundary before decoding", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-bench-cache-prefix-"));
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-bench-cache-prefix-"));
 		const prefixPath = path.join(tempDir, "prefix.txt");
 		const stablePrefixes: string[] = [];
 		await Bun.write(prefixPath, "ab😀cd");
@@ -496,7 +496,7 @@ describe("bench cache mode", () => {
 	});
 
 	it("preserves significant whitespace and replacement patterns from the default prefix-file reader", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-bench-cache-prefix-whitespace-"));
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-bench-cache-prefix-whitespace-"));
 		const prefixPath = path.join(tempDir, "prefix.txt");
 		const exactPrefix = "line one  \n\n\n$& $' $` $$ line two\t\n";
 		const stablePrefixes: string[] = [];

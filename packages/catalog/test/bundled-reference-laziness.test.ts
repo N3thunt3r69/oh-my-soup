@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { TempDir } from "@oh-my-soup/pi-utils";
 import { createReferenceResolver } from "../src/provider-models/bundled-references";
 import type { ModelSpec } from "../src/types";
 
@@ -11,7 +11,7 @@ async function runFixture(fixture: string): Promise<string> {
 	try {
 		const result = Bun.spawnSync({
 			cmd: [process.execPath, fixture],
-			env: { ...process.env, OMP_CATALOG_LAZINESS_RESULT_PATH: resultPath },
+			env: { ...process.env, OMS_CATALOG_LAZINESS_RESULT_PATH: resultPath },
 			stdout: "pipe",
 			stderr: "pipe",
 		});

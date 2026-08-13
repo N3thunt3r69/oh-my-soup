@@ -8,7 +8,7 @@
  * the final shipped behavior belongs in release notes.
  *
  * For every non-empty `[Unreleased]` section this script hands the whole section
- * to a small model (default `google-vertex/gemini-3.5-flash` via `@oh-my-pi/pi-ai`)
+ * to a small model (default `google-vertex/gemini-3.5-flash` via `@oh-my-soup/pi-ai`)
  * and asks for a complete replacement grouped by changelog category. The model
  * returns structured sections/items; markdown is rendered locally so only the
  * Unreleased section changes and formatting stays deterministic.
@@ -25,13 +25,13 @@
  *   bun scripts/rewrite-changelog.ts --package coding-agent
  *   bun scripts/rewrite-changelog.ts --model google/gemini-3.5-flash
  *
- * Auth: resolves the provider API key through omp's auth storage
- * (~/.omp/agent/agent.db: stored key, OAuth, or env var fallback).
+ * Auth: resolves the provider API key through oms's auth storage
+ * (~/.oms/agent/agent.db: stored key, OAuth, or env var fallback).
  */
 
 import * as path from "node:path";
 import { parseArgs } from "node:util";
-import { type } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-soup/omstype";
 import {
 	type Api,
 	AuthStorage,
@@ -41,9 +41,9 @@ import {
 	SqliteAuthCredentialStore,
 	type Tool,
 	type ToolCall,
-} from "@oh-my-pi/pi-ai";
-import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { getAgentDbPath } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-ai";
+import { type GeneratedProvider, getBundledModel } from "@oh-my-soup/pi-catalog/models";
+import { getAgentDbPath } from "@oh-my-soup/pi-utils";
 import {
 	type ChangelogDocument,
 	changelogPaths,
@@ -114,7 +114,7 @@ async function openModel(modelSpec: string): Promise<RewriteModel> {
 	await storage.reload();
 	const apiKey = await storage.getApiKey(provider);
 	if (!apiKey) {
-		throw new Error(`no credentials for provider "${provider}" (run \`omp login\` or set the provider env var)`);
+		throw new Error(`no credentials for provider "${provider}" (run \`oms login\` or set the provider env var)`);
 	}
 	return { model, apiKey, spec: modelSpec };
 }

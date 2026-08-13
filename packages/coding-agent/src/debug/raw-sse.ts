@@ -1,5 +1,12 @@
-import { type Component, matchesKey, parseSgrMouse, replaceTabs, ScrollView, truncateToWidth } from "@oh-my-pi/pi-tui";
-import { sanitizeText } from "@oh-my-pi/pi-utils";
+import {
+	type Component,
+	matchesKey,
+	parseSgrMouse,
+	replaceTabs,
+	ScrollView,
+	truncateToWidth,
+} from "@oh-my-soup/pi-tui";
+import { sanitizeText } from "@oh-my-soup/pi-utils";
 import { bottomBorder, divider, row, topBorder } from "../modes/components/overlay-box";
 import { theme } from "../modes/theme/theme";
 import { copyToClipboard } from "../utils/clipboard";
@@ -222,7 +229,7 @@ export class RawSseViewerComponent implements Component {
 			lines.push(
 				theme.fg(
 					"warning",
-					`: omp-debug-dropped records=${snapshot.droppedRecords} chars=${snapshot.droppedChars}`,
+					`: oms-debug-dropped records=${snapshot.droppedRecords} chars=${snapshot.droppedChars}`,
 				),
 			);
 			lines.push("");
@@ -233,7 +240,7 @@ export class RawSseViewerComponent implements Component {
 				lines.push(sanitizeFrameLine(line, innerWidth));
 			}
 			if (record.kind === "event" && record.truncated) {
-				lines.push(theme.fg("warning", `: omp-debug-event-truncated originalChars=${record.originalChars}`));
+				lines.push(theme.fg("warning", `: oms-debug-event-truncated originalChars=${record.originalChars}`));
 			}
 			lines.push("");
 		}

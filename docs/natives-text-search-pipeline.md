@@ -1,6 +1,6 @@
 # Natives Text/Search Pipeline
 
-This document maps the `@oh-my-pi/pi-natives` text/search/code surface from generated JS/TS exports to Rust N-API modules and back to JS result objects.
+This document maps the `@oh-my-soup/pi-natives` text/search/code surface from generated JS/TS exports to Rust N-API modules and back to JS result objects.
 
 Terminology follows `docs/natives-architecture.md`:
 
@@ -72,7 +72,7 @@ Terminology follows `docs/natives-architecture.md`:
 
 ### Search/collection semantics
 
-- Matcher selection: the Rust regex engine is tried first, then PCRE2 for features such as lookaround/backreferences. `OMP_PCRE2_JIT=0`/`false` disables PCRE2 JIT and `1` enables it; when unset, JIT is enabled except on macOS.
+- Matcher selection: the Rust regex engine is tried first, then PCRE2 for features such as lookaround/backreferences. `OMS_PCRE2_JIT=0`/`false` disables PCRE2 JIT and `1` enables it; when unset, JIT is enabled except on macOS.
 - Context resolution:
   - `contextBefore/contextAfter` override legacy `context`.
   - Non-content modes do not collect context.

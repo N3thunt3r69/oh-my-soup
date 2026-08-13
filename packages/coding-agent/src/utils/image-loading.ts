@@ -6,9 +6,9 @@ import type {
 	Model,
 	OpenAIResponsesHistoryPayload,
 	TextContent,
-} from "@oh-my-pi/pi-ai";
-import { formatBytes, isRecord, logger, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
-import { LRUCache } from "@oh-my-pi/pi-utils/lru";
+} from "@oh-my-soup/pi-ai";
+import { formatBytes, isRecord, logger, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-soup/pi-utils";
+import { LRUCache } from "@oh-my-soup/pi-utils/lru";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, type ImageResizeOptions, resizeImage } from "./image-resize";
 
@@ -141,7 +141,7 @@ async function normalizeNativeResponsesHistoryPayload(
  * Ollama and its local-backend family decode image input through llama.cpp /
  * `stb_image`, which is compiled without WebP support, so a WebP upload fails
  * with an opaque HTTP 400. Detect those models so the resize pipeline encodes
- * to PNG/JPEG instead — the automatic equivalent of `OMP_NO_WEBP=1`.
+ * to PNG/JPEG instead — the automatic equivalent of `OMS_NO_WEBP=1`.
  */
 export function modelLacksWebpSupport(
 	model: Pick<Model, "provider" | "api" | "imageInputDecoder"> | undefined,
@@ -160,7 +160,7 @@ export function modelLacksWebpSupport(
 
 /**
  * `true` when `model` cannot decode WebP, otherwise `undefined` so the
- * `OMP_NO_WEBP` env fallback in {@link resizeImage} still applies. Feed straight
+ * `OMS_NO_WEBP` env fallback in {@link resizeImage} still applies. Feed straight
  * into {@link ImageResizeOptions.excludeWebP}.
  */
 export function webpExclusionForModel(model: Pick<Model, "provider" | "api"> | undefined): true | undefined {
@@ -174,7 +174,7 @@ export interface LoadImageInputOptions {
 	maxBytes?: number;
 	resolvedPath?: string;
 	detectedMimeType?: string;
-	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMP_NO_WEBP`. */
+	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMS_NO_WEBP`. */
 	excludeWebP?: boolean;
 }
 
@@ -185,7 +185,7 @@ export interface LoadImageAttachmentInputOptions {
 	uri: string;
 	autoResize: boolean;
 	maxBytes?: number;
-	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMP_NO_WEBP`. */
+	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMS_NO_WEBP`. */
 	excludeWebP?: boolean;
 }
 

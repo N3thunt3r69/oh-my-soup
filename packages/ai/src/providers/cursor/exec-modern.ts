@@ -64,7 +64,7 @@ import {
 	StopRequestResponseSchema,
 	SubagentStartRequestResponseSchema,
 	SubagentStopRequestResponseSchema,
-} from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+} from "@oh-my-soup/pi-catalog/discovery/cursor-gen/agent_pb";
 import type { ToolResultMessage } from "../../types";
 
 /**

@@ -52,7 +52,7 @@ type BunTlsOptions = {
 
 type BunTlsRequestInit = RequestInit & { tls?: BunTlsOptions };
 
-const EXTRA_CA_FETCH_MARKER = Symbol("omp.extraCaFetch");
+const EXTRA_CA_FETCH_MARKER = Symbol("oms.extraCaFetch");
 type ExtraCaFetch = FetchImpl & { [EXTRA_CA_FETCH_MARKER]?: true };
 
 /**
@@ -165,7 +165,7 @@ export function wrapFetchForExtraCa(fetchImpl: FetchImpl): FetchImpl {
 
 /**
  * Convenience for options-bag composition (e.g. the stream-entry path in
- * `@oh-my-pi/pi-ai`'s `stream.ts`, which mirrors `withRequestDebugFetch` so
+ * `@oh-my-soup/pi-ai`'s `stream.ts`, which mirrors `withRequestDebugFetch` so
  * the proxy/debug/extra-CA wrappers compose uniformly). No-op when the env
  * var is unset.
  */

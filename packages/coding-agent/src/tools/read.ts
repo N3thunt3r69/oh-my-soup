@@ -1,16 +1,16 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { splitAddressableFileLines } from "@oh-my-pi/hashline";
-import { type } from "@oh-my-pi/omptype";
+import { splitAddressableFileLines } from "@oh-my-soup/hashline";
+import { type } from "@oh-my-soup/omstype";
 import type {
 	AgentTool,
 	AgentToolContext,
 	AgentToolResult,
 	AgentToolUpdateCallback,
 	ToolTier,
-} from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
-import { type ImageMetadata, isProbablyBinary, logger, prompt, readImageMetadata } from "@oh-my-pi/pi-utils";
+} from "@oh-my-soup/pi-agent-core";
+import type { ImageContent, TextContent } from "@oh-my-soup/pi-ai";
+import { type ImageMetadata, isProbablyBinary, logger, prompt, readImageMetadata } from "@oh-my-soup/pi-utils";
 import {
 	canonicalSnapshotKey,
 	getFileSnapshotStore,
@@ -846,7 +846,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			return executeReadUrl(this.session, { path: parsedUrlTarget.path, raw: urlRaw }, signal);
 		}
 
-		// Handle native OMP URLs and custom-scheme resources advertised by MCP servers.
+		// Handle native OMS URLs and custom-scheme resources advertised by MCP servers.
 		const internalRouter = InternalUrlRouter.instance();
 		const delimitedInternalResult = internalRouter.canResolve(readPath)
 			? await this.#tryReadDelimitedPaths(readPath, signal, entry => internalRouter.canResolve(entry))

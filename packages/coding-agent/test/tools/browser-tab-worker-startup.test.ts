@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { ReadyInfo, WorkerInbound, WorkerOutbound } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-protocol";
-import { initializeTabWorkerForTest } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import type { ReadyInfo, WorkerInbound, WorkerOutbound } from "@oh-my-soup/pi-coding-agent/tools/browser/tab-protocol";
+import { initializeTabWorkerForTest } from "@oh-my-soup/pi-coding-agent/tools/browser/tab-supervisor";
 
 class FakeStartupWorker {
 	#errorHandlers = new Set<(error: Error) => void>();
@@ -36,7 +36,7 @@ class FakeStartupWorker {
 const initPayload = {
 	mode: "headless" as const,
 	browserWSEndpoint: "ws://127.0.0.1/devtools/browser/test",
-	safeDir: "/tmp/omp-puppeteer",
+	safeDir: "/tmp/oms-puppeteer",
 	timeoutMs: 1_000,
 };
 

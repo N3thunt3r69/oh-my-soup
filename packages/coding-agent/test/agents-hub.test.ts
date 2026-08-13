@@ -8,15 +8,15 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Effort } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentsHubComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agents-hub";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import * as discovery from "@oh-my-pi/pi-coding-agent/task/discovery";
-import type { TUI } from "@oh-my-pi/pi-tui";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { Effort } from "@oh-my-soup/pi-ai";
+import { buildModel } from "@oh-my-soup/pi-catalog/build";
+import type { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
+import { AgentsHubComponent } from "@oh-my-soup/pi-coding-agent/modes/components/agents-hub";
+import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
+import * as discovery from "@oh-my-soup/pi-coding-agent/task/discovery";
+import type { TUI } from "@oh-my-soup/pi-tui";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const tempDirs: string[] = [];
@@ -42,7 +42,7 @@ const sonnet = buildModel({
 const registryStub = { getAvailable: () => [sonnet] } as unknown as ModelRegistry;
 
 async function makeTempCwd(): Promise<string> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agents-hub-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-agents-hub-"));
 	tempDirs.push(dir);
 	return dir;
 }

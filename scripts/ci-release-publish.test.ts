@@ -2,9 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { packages, rewriteManifest } from "./ci-release-publish";
 
 describe("published manifest topology", () => {
-	it("repoints omptype runtime entries to dist/js with a bun source condition", async () => {
-		const pkg = packages.find(entry => entry.dir === "packages/omptype");
-		if (!pkg) throw new Error("omptype missing from publish set");
+	it("repoints omstype runtime entries to dist/js with a bun source condition", async () => {
+		const pkg = packages.find(entry => entry.dir === "packages/omstype");
+		if (!pkg) throw new Error("omstype missing from publish set");
 		expect(pkg.publishJs).toBe(true);
 
 		const manifest = await rewriteManifest(pkg, false);

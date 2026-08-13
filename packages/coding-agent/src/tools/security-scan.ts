@@ -1,5 +1,5 @@
-import { type } from "@oh-my-pi/omptype";
-import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
+import { type } from "@oh-my-soup/omstype";
+import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-soup/pi-agent-core";
 import securityScanDescription from "../prompts/tools/security-scan.md" with { type: "text" };
 import { selectSecurityAccount } from "../security/auth";
 import {
@@ -107,7 +107,7 @@ export class SecurityScanTool implements AgentTool<typeof securityScanSchema, Se
 	readonly approval: ToolTier = "exec";
 	readonly label = "Security Scan";
 	readonly loadMode = "discoverable";
-	readonly summary = "Run OMP-native scans and explicit Codex Security cloud operations";
+	readonly summary = "Run OMS-native scans and explicit Codex Security cloud operations";
 	readonly description = securityScanDescription.trim();
 	readonly parameters = securityScanSchema;
 	readonly strict = true;
