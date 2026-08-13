@@ -6,6 +6,7 @@
 
 - Added a managed headless Binary Ninja backend to `disasm`: open raw binaries or `.bndb` databases through the installed Python API, discover the canonical schema and required bounds through SQL catalogs, query disassembly, IL, references, symbols, types, variables, comments, and search, mutate writable properties with atomic same-table DML and canonical `RETURNING` readback, run stateless or session-scoped Binary Ninja Python against the live `BinaryView`, and independently reset, save, or close each target.
 - Added `/rotateaccount <provider>` to move the current session to the next stored OAuth account for a provider; `openai` is accepted as shorthand for `openai-codex`.
+- Added a first-class `beads` tool wrapping the [bd](https://github.com/gastownhall/beads) graph issue tracker: ready-work detection (`ready`/`blocked`), dependency-aware issue CRUD (`create`/`update --claim`/`close`/`dep_add`/`dep_tree`), persistent project memory (`remember`/`prime`), `stats`, and Dolt remote `sync`. Activates automatically when the `bd` binary is installed and the workspace has a `.beads/` database; readonly ops approve as `read`, mutations as `write`, `sync` as `exec`. Configure with `beads.enabled` and `beads.binary`.
 
 ### Fixed
 

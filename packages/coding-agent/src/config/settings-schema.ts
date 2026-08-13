@@ -4167,6 +4167,29 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"beads.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			group: "Available Tools",
+			label: "Beads",
+			description:
+				"Enable the beads tool (bd graph issue tracker: ready-work detection, dependency-aware issues, persistent agent memory). Activates only when the bd binary is installed and the workspace has a .beads database.",
+		},
+	},
+
+	"beads.binary": {
+		type: "string",
+		default: "",
+		ui: {
+			tab: "tools",
+			group: "Available Tools",
+			label: "Beads Binary",
+			description: "Optional path to an exact bd executable. When empty, bd is resolved from PATH.",
+		},
+	},
+
 	"github.enabled": {
 		type: "boolean",
 		default: false,

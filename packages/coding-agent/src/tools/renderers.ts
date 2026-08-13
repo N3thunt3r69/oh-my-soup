@@ -15,6 +15,7 @@ import { askToolRenderer } from "./ask";
 import { astEditToolRenderer } from "./ast-edit";
 import { astGrepToolRenderer } from "./ast-grep";
 import { bashToolRenderer } from "./bash";
+import { beadsToolRenderer } from "./beads";
 import { browserToolRenderer } from "./browser/render";
 import { computerToolRenderer } from "./computer-renderer";
 import { debugToolRenderer } from "./debug";
@@ -83,6 +84,7 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	ast_grep: astGrepToolRenderer as ToolRenderer,
 	ast_edit: astEditToolRenderer as ToolRenderer,
 	bash: bashToolRenderer as ToolRenderer,
+	beads: beadsToolRenderer as ToolRenderer,
 	browser: browserToolRenderer as ToolRenderer,
 	computer: computerToolRenderer as ToolRenderer,
 	debug: debugToolRenderer as ToolRenderer,
