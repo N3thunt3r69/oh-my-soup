@@ -15,6 +15,7 @@ import { ModelRegistry } from "../config/model-registry";
 import {
 	formatModelSelectorValue,
 	formatModelStringWithRouting,
+	resolveAgentAdvisorSelection,
 	resolveAgentPrewalkPattern,
 	resolveConfiguredModelPatterns,
 	resolveExplicitModelRole,
@@ -189,19 +190,24 @@ function resolveSubagentRetryFallbackCandidates(
  * Chain a single-model subagent inherits when its own model patterns supply no
  * fallbacks of their own. The child is pinned to a `subagent:<id>` role whose
  * chain shadows every configured role chain (see
- * {@link installSubagentRetryFallbackChain}), so a role-alias request (`@smol`)
- * MUST inherit that role's chain — otherwise the pin silently re-routes the
- * child onto the `default` role's chain. Explicit model selectors keep
- * inheriting `default`: they carry no role identity, and a role that happens to
- * be assigned the same model must not capture the child's fallback routing.
+ * {@link installSubagentRetryFallbackChain}), so a role-alias request (`@smol`,
+ * the bundled `task` agent's `@task`) MUST inherit that role's chain —
+ * otherwise the pin silently re-routes the child onto the `default` role's
+ * chain. Explicit model selectors keep inheriting `default`: they carry no role
+ * identity, and a role that happens to be assigned the same model must not
+ * capture the child's fallback routing.
+ *
+ * Spawn paths preserve the pre-expansion alias as `modelRole` because their
+ * model patterns are already expanded. Direct callers may still supply an
+ * unexpanded alias through `modelOverride` or `agent.model`; retain that
+ * existing path by deriving the role only when no preserved role was supplied.
  */
 function resolveSubagentInheritedRetryFallbackChain(
 	settings: Settings,
 	modelRegistry: ModelRegistry,
-	modelPatterns: string[],
+	role: string | undefined,
 ): string[] | undefined {
 	const configuredChains = settings.get("retry.fallbackChains");
-	const role = resolveExplicitModelRole(modelPatterns, settings);
 	// An explicitly emptied role chain means "no fallbacks", not "inherit
 	// default" — mirrors expandDefaultRetryFallbackChains.
 	const fallbackChain = (role !== undefined ? configuredChains?.[role] : undefined) ?? configuredChains?.default;
@@ -889,6 +895,9 @@ export function createSubagentSettings(
 			// the parent task approval is the authorization boundary. Use yolo mode
 			// to preserve unattended subagent execution. User `tools.approval` policies still apply.
 			"tools.approvalMode": "yolo",
+			// Subagents run unadvised by default; runSubprocess opts a spawn back in
+			// per agent (frontmatter `advisor` / `task.agentAdvisor`) via overrides.
+			"advisor.enabled": false,
 			...overrides,
 		},
 		{ storage: baseSettings.getStorage() },
@@ -1686,22 +1695,28 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	};
 
 	const attach = (session: AgentSession): (() => void) => {
-		// Model display strings are recomputed only when the model object is
-		// swapped (model change / retry fallback): formatting on every event put
-		// an allocation on the per-text-delta hot path across all subagents.
-		let lastModel = session.model;
-		let activeModel = lastModel ? formatModelStringWithRouting(lastModel) : undefined;
+		// The session owns attribution: it knows which model produced its output
+		// and withholds an armed-but-unproven fallback. Re-deriving that here from
+		// the event stream got it wrong twice over — the stream also carries
+		// advisor turns running on a different model, and a routing switch was
+		// read as evidence the target had served.
+		const publishServingModel = (): void => {
+			const serving = session.servingModel;
+			if (!serving) return;
+			const isFallback = serving.isFallback;
+			if (
+				serving.selector === progress.resolvedModel &&
+				(progress.resolvedModelIsFallback ?? false) === isFallback
+			) {
+				return;
+			}
+			progress.resolvedModel = serving.selector;
+			progress.resolvedModelIsFallback = isFallback;
+			scheduleProgress(true);
+		};
 		return session.subscribe(event => {
 			emitSubagentEvent(event);
-			if (session.model !== lastModel) {
-				lastModel = session.model;
-				const nextModel = lastModel ? formatModelStringWithRouting(lastModel) : undefined;
-				if (nextModel && nextModel !== activeModel) {
-					activeModel = nextModel;
-					progress.resolvedModel = nextModel;
-					scheduleProgress(true);
-				}
-			}
+			publishServingModel();
 			if (event.type === "auto_retry_start") {
 				progress.retryState = {
 					attempt: event.attempt,
@@ -1740,18 +1755,6 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 				} finally {
 					popLoopPhase();
 				}
-			}
-			if (event.type === "retry_fallback_applied") {
-				progress.resolvedModel = event.to;
-				progress.resolvedModelIsFallback = true;
-				scheduleProgress(true);
-				return;
-			}
-			if (event.type === "retry_fallback_succeeded") {
-				progress.resolvedModel = event.model;
-				progress.resolvedModelIsFallback = true;
-				scheduleProgress(true);
-				return;
 			}
 		});
 	};
@@ -2709,12 +2712,26 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	}
 
 	const settings = options.settings ?? Settings.isolated();
+	// Per-agent advisor: the agent definition's `advisor` frontmatter or the
+	// `task.agentAdvisor` settings override (agent name → "on"/"off"/model
+	// pattern) pairs the spawned session with an advisor. Subagents default to
+	// no advisor (createSubagentSettings forces `advisor.enabled` off); an
+	// explicit model pattern lands on the child's `modelRoles.advisor` so role
+	// aliases and `:level` suffixes resolve inside the spawned session.
+	const advisorSelection = resolveAgentAdvisorSelection({
+		settingsOverride: settings.get("task.agentAdvisor")[agent.name],
+		agentAdvisor: agent.advisor,
+	});
 	const subagentSettings = createSubagentSettings(
 		settings,
 		{
 			...(agent.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
 			// Isolated runs must not expose roots outside the worktree.
 			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
+			...(advisorSelection ? { "advisor.enabled": true } : undefined),
+			...(advisorSelection?.model
+				? { modelRoles: { ...settings.getModelRoles(), advisor: advisorSelection.model } }
+				: undefined),
 		},
 		options.parentServiceTier,
 	);
@@ -2900,7 +2917,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const configuredModelPatterns = resolveConfiguredModelPatterns(modelPatterns, settings);
 			const inheritedRetryFallbackChain =
 				configuredModelPatterns.length === 1
-					? resolveSubagentInheritedRetryFallbackChain(subagentSettings, modelRegistry, modelPatterns)
+					? resolveSubagentInheritedRetryFallbackChain(
+							subagentSettings,
+							modelRegistry,
+							modelRole ?? resolveExplicitModelRole(modelPatterns, subagentSettings),
+						)
 					: undefined;
 			const {
 				model,
@@ -3212,6 +3233,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				readOnly: isReadOnlyAgent(agent),
 				spawns: spawnsEnv,
 				readSummarize: agent.readSummarize,
+				advisor: advisorSelection ? (advisorSelection.model ?? "on") : undefined,
 				outputSchema,
 				outputSchemaMode: options.outputSchemaMode,
 				restrictToolNames: restrictToolNames || undefined,

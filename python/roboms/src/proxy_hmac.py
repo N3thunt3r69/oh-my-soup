@@ -1,6 +1,6 @@
 """Shared HMAC signing/verification for the robooms ↔ gh-proxy channel.
 
-Roboomp signs every request to gh-proxy with an HMAC-SHA256 over
+Robooms signs every request to gh-proxy with an HMAC-SHA256 over
 `(method, path, timestamp, sha256(body))`. The shared secret never leaves
 either container's memory, and the ±skew window bounds the replay surface.
 """

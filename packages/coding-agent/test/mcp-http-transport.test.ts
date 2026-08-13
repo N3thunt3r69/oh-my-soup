@@ -213,4 +213,102 @@ describe("MCP Streamable HTTP POST response resumption", () => {
 		expect(observed.protocolVersion).toBe("2025-11-25");
 		expect(observed.resumedAt - observed.postClosedAt).toBeGreaterThanOrEqual(15);
 	});
+	it("refreshes auth on a 401 resume GET without replaying the POST", async () => {
+		const observed = { posts: 0, gets: 0, auth: [] as (string | null)[], lastEventId: null as string | null };
+		server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				if (req.method === "POST") {
+					observed.posts++;
+					return new Response("id: stream-1\nretry: 10\ndata:\n\n", {
+						headers: { "Content-Type": "text/event-stream" },
+					});
+				}
+				observed.gets++;
+				observed.auth.push(req.headers.get("Authorization"));
+				observed.lastEventId = req.headers.get("Last-Event-ID");
+				if (req.headers.get("Authorization") !== "Bearer fresh") {
+					return new Response("expired", { status: 401 });
+				}
+				return new Response(
+					'id: stream-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"resumed","inputSchema":{"type":"object"}}]}}\n\n',
+					{ headers: { "Content-Type": "text/event-stream" } },
+				);
+			},
+		});
+		if (!server) throw new Error("Test server was not started");
+		const transport = new HttpTransport({
+			type: "http",
+			url: `http://127.0.0.1:${server.port}/mcp`,
+			timeout: GUARD_TIMEOUT_MS,
+			headers: { Authorization: "Bearer stale" },
+		});
+		transport.onAuthError = async () => ({ Authorization: "Bearer fresh" });
+		await transport.connect();
+
+		await expect(withPendingGuard(transport.request<ToolList>("tools/list"), "request")).resolves.toEqual({
+			tools: [{ name: "resumed", inputSchema: { type: "object" } }],
+		});
+		// One POST only: replaying it after the server accepted the request
+		// could double-execute a state-changing tool.
+		expect(observed.posts).toBe(1);
+		expect(observed.gets).toBe(2);
+		expect(observed.auth).toEqual(["Bearer stale", "Bearer fresh"]);
+		expect(observed.lastEventId).toBe("stream-1");
+	});
+});
+
+describe("MCP Streamable HTTP GET listener resumption", () => {
+	it("resumes the long-lived GET stream with Last-Event-ID instead of reconnecting", async () => {
+		const observed = { gets: 0, lastEventIds: [] as (string | null)[] };
+		server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				if (req.method !== "GET") {
+					return Response.json({ jsonrpc: "2.0", id: 1, result: {} });
+				}
+				observed.gets++;
+				observed.lastEventIds.push(req.headers.get("Last-Event-ID"));
+				if (observed.gets === 1) {
+					// Polling-style server: deliver one notification with an
+					// event ID, then close the physical connection.
+					return new Response(
+						'id: poll-1\nretry: 10\ndata: {"jsonrpc":"2.0","method":"notifications/first"}\n\n',
+						{ headers: { "Content-Type": "text/event-stream" } },
+					);
+				}
+				return new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(
+								encoder.encode('id: poll-2\ndata: {"jsonrpc":"2.0","method":"notifications/second"}\n\n'),
+							);
+							// Held open: the logical stream continues.
+						},
+					}),
+					{ headers: { "Content-Type": "text/event-stream" } },
+				);
+			},
+		});
+		const transport = await connectedTransport();
+		const notifications: string[] = [];
+		let closed = false;
+		const secondNotification = Promise.withResolvers<void>();
+		transport.onNotification = method => {
+			notifications.push(method);
+			if (notifications.length === 2) secondNotification.resolve();
+		};
+		transport.onClose = () => {
+			closed = true;
+		};
+
+		await transport.startSSEListener();
+		await withPendingGuard(secondNotification.promise, "resumed notification");
+
+		expect(notifications).toEqual(["notifications/first", "notifications/second"]);
+		expect(observed.lastEventIds).toEqual([null, "poll-1"]);
+		// The resume replaced the manager-level reconnect: no close fired.
+		expect(closed).toBe(false);
+		await transport.close();
+	});
 });

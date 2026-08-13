@@ -321,10 +321,10 @@ function selectWithinCap<T extends { status: TodoStatus }>(
  *
  * Applied to `tasks` in todo order: the open tasks run through
  * {@link selectWithinCap}, led by the last {@link COLLAPSED_CLOSED_CONTEXT}
- * closed tasks that sit above them so a checked row walks down the list as work
- * lands. The lead is additive — it never costs an open row — and a phase with no
- * open work left falls back to its closed tasks so the sticky HUD's closed-todo
- * persistence still has something to render.
+ * closed tasks in todo order so a checked row remains visible even when callers
+ * complete work out of sequence. The lead is additive — it never costs an open
+ * row — and a phase with no open work left falls back to its closed tasks so the
+ * sticky HUD's closed-todo persistence still has something to render.
  *
  * `summary` counts the open tasks that did not fit; the closed lead is context,
  * not part of the budget.
@@ -337,9 +337,8 @@ export function selectCollapsedTodos<T extends { status: TodoStatus }>(
 	const open = tasks.filter(task => !isClosedTodo(task));
 	// Closed tasks are never active, so a settled phase selects over itself.
 	if (open.length === 0) return selectWithinCap(tasks, isMatched, cap);
-	// Everything before the first open task is closed by construction.
-	const firstOpenIdx = tasks.indexOf(open[0]);
-	const lead = tasks.slice(Math.max(firstOpenIdx - COLLAPSED_CLOSED_CONTEXT, 0), firstOpenIdx);
+	// `done` accepts any named task, so closed tasks are not necessarily a prefix.
+	const lead = tasks.filter(isClosedTodo).slice(-COLLAPSED_CLOSED_CONTEXT);
 	const selected = selectWithinCap(open, isMatched, cap);
 	return { items: [...lead, ...selected.items], summary: selected.summary };
 }

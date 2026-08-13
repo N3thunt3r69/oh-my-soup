@@ -20,9 +20,9 @@ use std::{
 	time::Duration,
 };
 
-use brush_core::{
-	ExecutionContext, ExecutionExitCode, ExecutionResult, openfiles::OpenFiles,
-};
+use brush_core::{ExecutionContext, ExecutionExitCode, ExecutionResult};
+#[cfg(unix)]
+use brush_core::openfiles::OpenFiles;
 use tokio_util::sync::CancellationToken;
 
 use crate::{kill::signal_number, proc_snapshot};
@@ -887,11 +887,11 @@ fn parse_states(value: &str, target: &mut HashSet<char>) -> std::result::Result<
 }
 
 fn resolve_shell_path(cwd: &Path, value: &str) -> PathBuf {
-	let path = Path::new(value);
-	if path.is_absolute() {
-		path.to_path_buf()
+	let normalized = brush_core::sys::fs::normalize_shell_path(Path::new(value));
+	if normalized.is_absolute() {
+		normalized.into_owned()
 	} else {
-		cwd.join(path)
+		cwd.join(normalized)
 	}
 }
 
@@ -957,3 +957,15 @@ fn write_proc_match_help(
 	Ok(())
 }
 
+#[cfg(all(test, windows))]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn resolves_msys_drive_alias_pidfiles() {
+		assert_eq!(
+			resolve_shell_path(Path::new(r"C:\workspace"), "/c/Users/Adam/app.pid"),
+			PathBuf::from(r"C:\Users\Adam\app.pid"),
+		);
+	}
+}

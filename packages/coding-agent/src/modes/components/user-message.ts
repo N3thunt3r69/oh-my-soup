@@ -12,7 +12,7 @@ import { highlightMagicKeywords } from "../magic-keywords";
 // `cursorIsAtPrompt()` permanently true and tags every subsequently painted
 // cell as `.input`. Combined with `cursor-click-to-move = true` (Ghostty's
 // default) that turns every left-click inside the pane into a burst of
-// synthesized arrow keys on omp's pty, slamming the editor caret to column 0
+// synthesized arrow keys on oms's pty, slamming the editor caret to column 0
 // (#8030, #6115).
 //
 // `133;C` is therefore emitted immediately followed by `133;D;0` at the end of

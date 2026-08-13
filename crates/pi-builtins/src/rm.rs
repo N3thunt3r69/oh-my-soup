@@ -1126,7 +1126,7 @@ fn is_readable_metadata(metadata: &Metadata) -> bool {
 
 /// Whether the given file or directory is readable.
 #[cfg(any(not(unix), target_os = "redox"))]
-fn is_readable(host: &mut Host, _path: &Path) -> bool {
+fn is_readable(_host: &mut Host, _path: &Path) -> bool {
 	true
 }
 

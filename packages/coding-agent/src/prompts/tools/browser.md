@@ -1,4 +1,4 @@
-Drives a Camoufox (stealth Firefox) tab; full puppeteer access via JS.
+Drives real Chromium tab; full puppeteer access via JS.
 
 <instruction>
 - Static content? `read` the URL. Browser only for JS execution, auth, interactive actions.
@@ -19,7 +19,7 @@ Drives a Camoufox (stealth Firefox) tab; full puppeteer access via JS.
   - Stalled actions fail fast with named error, never whole-cell timeout.
   - Raw request interception is run-scoped: run end removes `request` handlers, disables interception, releases held requests.
 
-- `app.path` → NEVER tamper with a real desktop app.
+- `app.path` → NEVER tamper with a real desktop app (no stealth patches).
 - `app.relay: true` → drive the user's own Chrome tabs via the oms browser relay (auto-started; needs the OMS Browser Relay extension installed). `app.target` picks a tab by URL/title substring; without it the visible tab is adopted without stealing focus.
 - Selectors: CSS + puppeteer `aria/…`, `text/…`, `xpath/…`, `pierce/…`. Playwright-only pseudos (`:has-text()`, `:visible`) are REJECTED.
 </instruction>

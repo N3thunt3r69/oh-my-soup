@@ -56,6 +56,7 @@ function createHost(
 		modelRegistry,
 		configWarnings: [],
 		model: () => model,
+		contextFitsModel: () => true,
 		textOutputCommitted: () => options.textOutputCommitted !== false,
 		thinkingLevel: () => undefined,
 		configuredThinkingLevel: () => undefined,
@@ -113,6 +114,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		host.model = () => activeModel;
 		host.sessionManager = {
 			appendModelChange: (selector: string) => modelChanges.push(selector),
+			getSessionId: () => "replay-unsafe-session",
 		} as never;
 		host.setModelWithProviderSessionReset = async nextModel => {
 			activeModel = nextModel;
@@ -163,6 +165,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		host.model = () => activeModel;
 		host.sessionManager = {
 			appendModelChange: (selector: string) => modelChanges.push(selector),
+			getSessionId: () => "replay-unsafe-session",
 		} as never;
 		host.setThinkingLevel = level => thinkingChanges.push(level);
 		host.setModelWithProviderSessionReset = async nextModel => {
@@ -210,6 +213,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		host.model = () => activeModel;
 		host.sessionManager = {
 			appendModelChange: (selector: string) => modelChanges.push(selector),
+			getSessionId: () => "replay-unsafe-session",
 		} as never;
 		host.setModelWithProviderSessionReset = async nextModel => {
 			activeModel = nextModel;
@@ -420,7 +424,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 	});
 
 	// Anthropic's request classifier can refuse AFTER the model streamed a tool
-	// call. Production shape (omp.2026-08-07 log): `stopDetails.type === "refusal"`,
+	// call. Production shape (oms.2026-08-07 log): `stopDetails.type === "refusal"`,
 	// `errorId: 0` (no AIError flag, so `AIError.retriable` cannot rescue it), and
 	// the agent loop appends a synthetic `executed: false` result AFTER the refused
 	// assistant message, so state ends with `lastRole: "toolResult"`.

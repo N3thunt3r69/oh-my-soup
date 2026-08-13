@@ -11,6 +11,22 @@
 
 - Fixed Rust lifetimes blinding the delimiter-balance scanner. `'` entered string state to end-of-line, so `&'static str {` hid its opening brace; a replacement range swallowing such a signature line looked balance-neutral and the mid-block advisory never fired, silently deleting the signature. Single-quote lexing is now language-aware: on `.rs` targets, `'` opens a literal only when it lexes as a real char literal (`'a'`, `'\n'`, `'\u{7FFF}'`), and lifetimes stay ordinary characters — apostrophes are never paired across lifetimes, which would swallow the delimiters between them (`<'a>(x: &'a str)`).
 - Fixed hashline reads exposing a terminal newline as an editable blank row. `splitAddressableFileLines` now removes that sentinel before consumers build line anchors while retaining genuine blank lines.
+## [17.3.0] - 2026-08-13
+
+### Fixed
+
+- Repaired mis-set replacement ranges using exact outside-row matches, indentation, tree-sitter structure, and a narrow pure-closer shape: opening comment fences and other syntax-essential edges are retained only when a parse-valid candidate satisfies those constraints; ambiguous placements are rejected.
+
+## [17.2.15] - 2026-08-12
+
+### Added
+
+- Added a post-apply parse advisory warning that alerts users when an applied edit fails to parse (despite the pre-edit content parsing successfully), helping catch balance-neutral misplacements that previously failed silently.
+
+### Fixed
+
+- Fixed a bug where Rust lifetimes (e.g., `'static`) were incorrectly parsed as starting a string literal, which blinded the delimiter-balance scanner and could lead to silent signature deletions. Single-quote lexing on `.rs` files is now language-aware and correctly distinguishes lifetimes from character literals.
+- Fixed an issue where terminal newlines in files were incorrectly exposed as editable blank rows.
 
 ## [17.2.12] - 2026-08-08
 

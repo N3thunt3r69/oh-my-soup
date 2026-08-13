@@ -69,7 +69,6 @@ const PRELUDE_GLOBAL_KEYS = [
 	"log",
 	"phase",
 	"budget",
-	"compact",
 	"__pool",
 	"read",
 	"write",
@@ -147,8 +146,6 @@ function describeDataType(data: unknown): string {
  */
 export class JsRuntime {
 	#globalOwner = Symbol("JsRuntime globals");
-	/** globalThis keys present right after prelude install — infrastructure, not user state. */
-	#baselineGlobalKeys: ReadonlySet<string> | undefined;
 	#ownedGlobalKeys = new Set<string>();
 	#disposed = false;
 	#runHookResolver = () => this.#als.getStore()?.hooks;
@@ -384,17 +381,6 @@ export class JsRuntime {
 				hooks.onText(buffer.endsWith("\n") ? buffer : `${buffer}\n`);
 			},
 			__oms_display__: (value: unknown) => this.displayValue(value),
-			// Post-compaction namespace probe: user-defined top-level names added
-			// since the prelude baseline (bounded, dunder-prefixed names excluded).
-			__oms_list_new_globals__: (limit: number) => {
-				const names: string[] = [];
-				for (const key of Object.keys(globalThis)) {
-					if (key.startsWith("__") || this.#baselineGlobalKeys?.has(key)) continue;
-					names.push(key);
-					if (names.length >= limit) break;
-				}
-				return names;
-			},
 			__oms_set_final_expr__: (value: unknown) => {
 				const context = this.#als.getStore();
 				if (!context) {
@@ -427,7 +413,6 @@ export class JsRuntime {
 		// Prelude assigns console bridge + short aliases (`read`, `write`, `tool`, `display`, ...)
 		// onto globalThis. Must run after helpers are in place.
 		indirectEval(JAVASCRIPT_PRELUDE_SOURCE);
-		this.#baselineGlobalKeys = new Set(Object.keys(globalThis));
 		for (const key of allGlobalKeys) recordGlobalValue(key, this.#globalOwner);
 		RUN_HOOK_RESOLVERS.add(this.#runHookResolver);
 		patchStdioOnce();

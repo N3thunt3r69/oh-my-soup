@@ -732,6 +732,16 @@ describe("selectCollapsedTodos walking viewport (#5873)", () => {
 		expect(sel.summary).toBe("");
 	});
 
+	it("keeps an out-of-order completion as the closed lead row", () => {
+		const tasks: TodoItem[] = [
+			{ content: "current", status: "in_progress" },
+			{ content: "next", status: "pending" },
+			{ content: "finished early", status: "completed" },
+		];
+		const sel = selectCollapsedTodos(tasks, never, 5);
+		expect(contents(sel)).toEqual(["finished early", "current", "next"]);
+	});
+
 	it("keeps the closed lead row additive to the open-task cap", () => {
 		const tasks: TodoItem[] = [{ content: "closed", status: "completed" }, ...mk(5, [1])];
 		const sel = selectCollapsedTodos(tasks, never, 5);

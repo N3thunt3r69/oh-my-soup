@@ -53,6 +53,20 @@ export function unzip(bytes: Uint8Array): Unzipped {
  */
 const MAX_TAR_ARCHIVE_BYTES = 256 * 1024 * 1024;
 /**
+ * Reject a tar input before materializing it. Tar parsing always retains the
+ * complete decoded stream, unlike ZIP's ranged central-directory reader.
+ */
+function assertTarArchiveSize(size: number): void {
+	if (!Number.isSafeInteger(size) || size < 0) {
+		throw new ToolError("Archive is too large to read safely");
+	}
+	if (size > MAX_TAR_ARCHIVE_BYTES) {
+		throw new ToolError(
+			`Archive is too large to read in memory (${formatBytes(size)} > ${formatBytes(MAX_TAR_ARCHIVE_BYTES)} limit)`,
+		);
+	}
+}
+/**
  * Cap on a single archive member's declared (uncompressed) size. The declared
  * size is attacker-controlled metadata — a crafted ZIP entry can claim
  * multi-GB sizes that would be allocated up front before any data inflates.
@@ -67,11 +81,14 @@ function inflateRaw(bytes: Uint8Array, declaredSize: number): Uint8Array {
 export type ArchiveFormat = "zip" | "tar" | "tar.gz";
 
 /**
- * Where to read an archive from: a filesystem path (format inferred from the
- * extension; ZIP is read lazily via ranged central-directory access) or
- * in-memory bytes with an explicit format.
+ * Where to read an archive from: an extension-inferred filesystem path, a
+ * format-tagged filesystem path, or in-memory bytes with an explicit format.
+ * ZIP paths are read lazily via ranged central-directory access.
  */
-export type ArchiveSource = string | { bytes: Uint8Array; format: ArchiveFormat };
+export type ArchiveSource =
+	| string
+	| { bytes: Uint8Array; format: ArchiveFormat }
+	| { path: string; format: ArchiveFormat };
 
 /** Content for a member when packing or extracting an archive. */
 export type ArchiveMemberContent = string | Uint8Array | Blob;
@@ -203,28 +220,35 @@ function isArchiveDirectoryName(rawPath: string): boolean {
 	return rawPath.endsWith("/") || rawPath.endsWith("\\");
 }
 
-function upsertArchiveEntry(map: Map<string, ArchiveIndexEntry>, entry: ArchiveIndexEntry): void {
+function upsertArchiveEntry(
+	map: Map<string, ArchiveIndexEntry>,
+	entry: ArchiveIndexEntry,
+): ArchiveIndexEntry | undefined {
 	const existing = map.get(entry.path);
 	if (!existing) {
 		map.set(entry.path, entry);
-		return;
+		return entry;
 	}
 
 	if (existing.isDirectory && !entry.isDirectory) {
 		map.set(entry.path, entry);
-		return;
+		return entry;
 	}
 
 	if (!existing.isDirectory && entry.isDirectory) {
-		return;
+		return undefined;
 	}
 
-	map.set(entry.path, {
-		...existing,
-		size: existing.size || entry.size,
-		mtimeMs: existing.mtimeMs ?? entry.mtimeMs,
-		storage: existing.storage ?? entry.storage,
-	});
+	// Same-kind duplicate: the later record wins (tar append/update semantics,
+	// matching system tar extraction and whole-archive materialization), while
+	// earlier metadata fills any gaps the newer record leaves.
+	const merged = {
+		...entry,
+		mtimeMs: entry.mtimeMs ?? existing.mtimeMs,
+		storage: entry.storage ?? existing.storage,
+	};
+	map.set(entry.path, merged);
+	return merged;
 }
 
 function ensureParentDirectories(map: Map<string, ArchiveIndexEntry>): void {
@@ -626,8 +650,22 @@ const TAR_CHECKSUM_LENGTH = 8;
 const TAR_TYPEFLAG_OFFSET = 156;
 const TAR_LINKNAME_OFFSET = 157;
 const TAR_LINKNAME_LENGTH = 100;
+const TAR_MAGIC_OFFSET = 257;
+const TAR_MAGIC = "ustar\0";
+const TAR_VERSION_OFFSET = 263;
+const TAR_VERSION = "00";
 const TAR_PREFIX_OFFSET = 345;
 const TAR_PREFIX_LENGTH = 155;
+// Old-GNU sparse header: `isextended` flag inside the main header and inside
+// each 512-byte sparse-map continuation block that follows it.
+const TAR_GNU_SPARSE_ISEXTENDED_OFFSET = 482;
+const TAR_GNU_SPARSE_CONT_ISEXTENDED_OFFSET = 504;
+// PATH_MAX-style bound on member paths and link targets. Real archives never
+// exceed it (system tar cannot extract them), and it caps every prefix walk
+// below so crafted multi-hundred-KiB PAX paths cannot pin the CPU.
+const TAR_MAX_PATH_BYTES = 4096;
+const TAR_MAX_PAX_NUMERIC_BYTES = 32;
+const TAR_ERROR_PATH_PREVIEW_BYTES = 256;
 const GZIP_MAGIC_0 = 0x1f;
 const GZIP_MAGIC_1 = 0x8b;
 const TAR_TEXT_DECODER = new TextDecoder();
@@ -651,24 +689,109 @@ function readTarString(buffer: Uint8Array, offset: number, length: number): stri
 	return TAR_TEXT_DECODER.decode(buffer.subarray(offset, end));
 }
 
+function tarBytesEqualAscii(bytes: Uint8Array, value: string): boolean {
+	return bytes.byteLength === value.length && bytesMatchAscii(bytes, 0, value);
+}
+
+function isUstarHeader(buffer: Uint8Array, offset: number): boolean {
+	const magicOffset = offset + TAR_MAGIC_OFFSET;
+	const versionOffset = offset + TAR_VERSION_OFFSET;
+	return bytesMatchAscii(buffer, magicOffset, TAR_MAGIC) && bytesMatchAscii(buffer, versionOffset, TAR_VERSION);
+}
+
+function assertTarPathBytes(size: number, field: string): void {
+	if (size > TAR_MAX_PATH_BYTES) {
+		throw new ToolError(`Archive ${field} exceeds ${TAR_MAX_PATH_BYTES} bytes`);
+	}
+}
+
+function assertTarPathString(value: string, field: string): void {
+	assertTarPathBytes(Buffer.byteLength(value, "utf-8"), field);
+}
+
+function formatTarPathForError(value: string): string {
+	if (Buffer.byteLength(value, "utf-8") <= TAR_ERROR_PATH_PREVIEW_BYTES) return value;
+
+	let end = 0;
+	let size = 0;
+	for (const char of value) {
+		const charSize = Buffer.byteLength(char, "utf-8");
+		if (size + charSize > TAR_ERROR_PATH_PREVIEW_BYTES - 3) break;
+		end += char.length;
+		size += charSize;
+	}
+	return `${value.slice(0, end)}...`;
+}
+
+function readTarMetadataPath(data: Uint8Array, field: string): string {
+	const nul = data.indexOf(0);
+	const value = data.subarray(0, nul === -1 ? data.byteLength : nul);
+	assertTarPathBytes(value.byteLength, field);
+	return TAR_TEXT_DECODER.decode(value);
+}
+
+function readPaxPath(data: Uint8Array, field: string): string {
+	assertTarPathBytes(data.byteLength, field);
+	return TAR_TEXT_DECODER.decode(data);
+}
+
 /**
  * Read a tar numeric header field: GNU base-256 (high bit set) or the usual
- * NUL/space-padded octal. Non-octal bytes are ignored so trailing padding does
- * not corrupt the value.
+ * NUL/space-padded octal. GNU's binary form reserves its high bit as a marker
+ * and stores a signed two's-complement value in the remaining bits.
  */
 function readTarNumeric(buffer: Uint8Array, offset: number, length: number): number {
-	if (offset >= buffer.length) return 0;
-	if ((buffer[offset]! & 0x80) !== 0) {
-		let value = buffer[offset]! & 0x7f;
-		for (let i = 1; i < length; i++) value = value * 256 + (buffer[offset + i] ?? 0);
-		return value;
+	if (offset < 0 || length <= 0 || offset + length > buffer.length) {
+		throw new ToolError("Invalid tar numeric field");
 	}
-	let value = 0;
-	for (let i = 0; i < length; i++) {
-		const c = buffer[offset + i];
-		if (c !== undefined && c >= 0x30 && c <= 0x37) value = value * 8 + (c - 0x30);
+
+	const first = buffer[offset]!;
+	let value = 0n;
+	if ((first & 0x80) !== 0) {
+		value = BigInt(first & 0x7f);
+		for (let index = 1; index < length; index++) {
+			value = (value << 8n) | BigInt(buffer[offset + index]!);
+		}
+		if ((first & 0x40) !== 0) {
+			value -= 1n << BigInt(length * 8 - 1);
+		}
+	} else {
+		for (let index = 0; index < length; index++) {
+			const byte = buffer[offset + index]!;
+			if (byte >= 0x30 && byte <= 0x37) {
+				value = value * 8n + BigInt(byte - 0x30);
+			}
+		}
 	}
-	return value;
+	return Number(value);
+}
+
+function readTarSize(buffer: Uint8Array, offset: number): number {
+	const size = readTarNumeric(buffer, offset, TAR_SIZE_LENGTH);
+	if (!Number.isSafeInteger(size) || size < 0) {
+		throw new ToolError("Invalid tar member size");
+	}
+	return size;
+}
+
+function tarPaddedSize(size: number): number {
+	const remainder = size % TAR_BLOCK_SIZE;
+	const padded = size + (remainder === 0 ? 0 : TAR_BLOCK_SIZE - remainder);
+	if (!Number.isSafeInteger(padded)) {
+		throw new ToolError("Invalid tar member size");
+	}
+	return padded;
+}
+
+function parsePaxSize(value: string, field: string): number {
+	if (!/^\d+$/.test(value)) {
+		throw new ToolError(`Invalid tar ${field}`);
+	}
+	const size = Number(value);
+	if (!Number.isSafeInteger(size) || size < 0) {
+		throw new ToolError(`Invalid tar ${field}`);
+	}
+	return size;
 }
 
 function isTarZeroBlock(buffer: Uint8Array, offset: number): boolean {
@@ -692,42 +815,183 @@ function tarChecksumMatches(buffer: Uint8Array, offset: number): boolean {
 	return stored === unsigned || stored === signed;
 }
 
-/** Parse a PAX extended-header payload into its `key → value` records. */
+/**
+ * Sentinel key marking that any `GNU.sparse.*` record appeared in a PAX
+ * header. A real record cannot shadow it: PAX sparse keys always carry a
+ * suffix after the trailing dot.
+ */
+const PAX_SPARSE_MARKER = "GNU.sparse.";
+
+/**
+ * Parse a PAX extended-header payload into its `key → value` records. Only
+ * exactly consumed keys are retained (plus the sparse marker), so a crafted
+ * header packed with millions of unique records — including `GNU.sparse.*`
+ * junk — cannot amplify into heap.
+ */
 function parsePaxRecords(data: Uint8Array): Map<string, string> {
 	const attrs = new Map<string, string>();
 	let pos = 0;
 	while (pos < data.length) {
 		let space = pos;
 		while (space < data.length && data[space] !== 0x20) space++;
-		if (space >= data.length) break;
-		let length = 0;
-		let valid = false;
-		for (let i = pos; i < space; i++) {
-			const c = data[i]!;
-			if (c < 0x30 || c > 0x39) {
-				valid = false;
-				break;
-			}
-			length = length * 10 + (c - 0x30);
-			valid = true;
+		if (space === pos || space >= data.length || space - pos > 16) {
+			throw new ToolError("Invalid tar PAX record");
 		}
-		if (!valid || length <= 0 || pos + length > data.length) break;
+
+		let length = 0;
+		for (let index = pos; index < space; index++) {
+			const byte = data[index]!;
+			if (byte < 0x30 || byte > 0x39) {
+				throw new ToolError("Invalid tar PAX record");
+			}
+			length = length * 10 + (byte - 0x30);
+			if (length > data.length - pos) {
+				throw new ToolError("Invalid tar PAX record");
+			}
+		}
+		if (length <= 0 || pos + length > data.length || data[pos + length - 1] !== 0x0a) {
+			throw new ToolError("Invalid tar PAX record");
+		}
+
 		const record = data.subarray(space + 1, pos + length - 1);
 		const eq = record.indexOf(0x3d);
 		if (eq >= 0) {
-			attrs.set(TAR_TEXT_DECODER.decode(record.subarray(0, eq)), TAR_TEXT_DECODER.decode(record.subarray(eq + 1)));
+			const key = record.subarray(0, eq);
+			const value = record.subarray(eq + 1);
+			if (bytesMatchAscii(key, 0, PAX_SPARSE_MARKER)) {
+				attrs.set(PAX_SPARSE_MARKER, value.byteLength === 0 ? "" : "1");
+				if (tarBytesEqualAscii(key, "GNU.sparse.name")) {
+					attrs.set("GNU.sparse.name", readPaxPath(value, "PAX sparse path"));
+				} else if (tarBytesEqualAscii(key, "GNU.sparse.realsize")) {
+					if (value.byteLength > TAR_MAX_PAX_NUMERIC_BYTES) {
+						throw new ToolError("Invalid tar sparse real size");
+					}
+					attrs.set("GNU.sparse.realsize", TAR_TEXT_DECODER.decode(value));
+				}
+			} else if (tarBytesEqualAscii(key, "path") || tarBytesEqualAscii(key, "linkpath")) {
+				const field = tarBytesEqualAscii(key, "path") ? "PAX path" : "PAX link target";
+				attrs.set(field === "PAX path" ? "path" : "linkpath", readPaxPath(value, field));
+			} else if (tarBytesEqualAscii(key, "size")) {
+				if (value.byteLength > TAR_MAX_PAX_NUMERIC_BYTES) {
+					throw new ToolError("Invalid tar member size");
+				}
+				attrs.set("size", TAR_TEXT_DECODER.decode(value));
+			}
 		}
 		pos += length;
 	}
 	return attrs;
 }
 
-function paxDeclaresSparse(pax: Map<string, string> | undefined): boolean {
-	if (!pax) return false;
-	for (const key of pax.keys()) {
-		if (key.startsWith("GNU.sparse.")) return true;
+function applyGlobalPax(globalPax: Map<string, string>, update: ReadonlyMap<string, string>): void {
+	for (const [key, value] of update) {
+		if (value === "") {
+			globalPax.delete(key);
+		} else {
+			globalPax.set(key, value);
+		}
 	}
-	return false;
+}
+
+function paxAttribute(
+	globalPax: ReadonlyMap<string, string>,
+	localPax: ReadonlyMap<string, string> | undefined,
+	key: string,
+): string | undefined {
+	if (localPax?.has(key)) return localPax.get(key);
+	return globalPax.get(key);
+}
+
+function paxDeclaresSparse(
+	globalPax: ReadonlyMap<string, string>,
+	localPax: ReadonlyMap<string, string> | undefined,
+): boolean {
+	return paxAttribute(globalPax, localPax, PAX_SPARSE_MARKER) === "1";
+}
+
+interface PendingTarLink {
+	kind: "hard link" | "symlink";
+	targetPath: string;
+}
+
+function indexOfAscii(bytes: Uint8Array, value: string, start: number): number {
+	for (let offset = start; offset <= bytes.byteLength - value.length; offset++) {
+		if (bytesMatchAscii(bytes, offset, value)) return offset;
+	}
+	return -1;
+}
+
+function normalizeOldGnuName(value: string, field: string): string {
+	const portable = value.replace(/\\/g, "/");
+	if (path.posix.isAbsolute(portable)) {
+		throw new ToolError(`Invalid old-GNU ${field}`);
+	}
+	const normalized = normalizeArchiveEntryPath(portable);
+	if (!normalized) {
+		throw new ToolError(`Invalid old-GNU ${field}`);
+	}
+	assertTarPathString(normalized, field);
+	return normalized;
+}
+
+function renameOldGnuEntries(
+	entries: Map<string, ArchiveIndexEntry>,
+	pendingLinks: Map<ArchiveIndexEntry, PendingTarLink>,
+	fromPath: string,
+	toPath: string,
+): void {
+	const moved = [...entries.entries()].filter(
+		([entryPath]) => entryPath === fromPath || entryPath.startsWith(`${fromPath}/`),
+	);
+	if (moved.length === 0) return;
+
+	for (const [entryPath] of moved) entries.delete(entryPath);
+	for (const [entryPath, entry] of moved) {
+		const suffix = entryPath.slice(fromPath.length);
+		const nextPath = `${toPath}${suffix}`;
+		assertTarPathString(nextPath, "member path");
+		entry.path = nextPath;
+		const replaced = entries.get(nextPath);
+		if (replaced) pendingLinks.delete(replaced);
+		entries.set(nextPath, entry);
+	}
+	for (const pending of pendingLinks.values()) {
+		if (pending.kind !== "hard link") continue;
+		if (pending.targetPath === fromPath || pending.targetPath.startsWith(`${fromPath}/`)) {
+			pending.targetPath = `${toPath}${pending.targetPath.slice(fromPath.length)}`;
+		}
+	}
+}
+
+function applyOldGnuNameRecords(
+	data: Uint8Array,
+	entries: Map<string, ArchiveIndexEntry>,
+	pendingLinks: Map<ArchiveIndexEntry, PendingTarLink>,
+): void {
+	const terminator = data.indexOf(0);
+	const end = terminator === -1 ? data.byteLength : terminator;
+	let start = 0;
+	while (start < end) {
+		const newline = data.indexOf(0x0a, start);
+		const lineEnd = newline === -1 || newline > end ? end : newline;
+		const line = data.subarray(start, lineEnd);
+		if (bytesMatchAscii(line, 0, "Rename ")) {
+			const separator = indexOfAscii(line, " to ", "Rename ".length);
+			if (separator === -1) {
+				throw new ToolError("Invalid old-GNU name record");
+			}
+			const source = readTarMetadataPath(line.subarray("Rename ".length, separator), "old-GNU source path");
+			const targetEnd = line[line.byteLength - 1] === 0x2f ? line.byteLength - 1 : line.byteLength;
+			const target = readTarMetadataPath(line.subarray(separator + " to ".length, targetEnd), "old-GNU target path");
+			renameOldGnuEntries(
+				entries,
+				pendingLinks,
+				normalizeOldGnuName(source, "source path"),
+				normalizeOldGnuName(target, "target path"),
+			);
+		}
+		start = lineEnd + 1;
+	}
 }
 
 /**
@@ -741,19 +1005,30 @@ function paxDeclaresSparse(pax: Map<string, string> | undefined): boolean {
  * rather than returning a misassembled payload.
  */
 function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
+	assertTarArchiveSize(rawBytes.byteLength);
+
 	let buffer: Uint8Array;
 	try {
 		buffer = gunzipIfNeeded(rawBytes);
 	} catch (error) {
 		throw new ToolError(error instanceof Error ? error.message : String(error));
 	}
+	assertTarArchiveSize(buffer.byteLength);
 
-	const entries: ArchiveIndexEntry[] = [];
+	const entries = new Map<string, ArchiveIndexEntry>();
+	const pendingLinks = new Map<ArchiveIndexEntry, PendingTarLink>();
+	const addEntry = (entry: ArchiveIndexEntry, pendingLink?: PendingTarLink): void => {
+		const existing = entries.get(entry.path);
+		const indexed = upsertArchiveEntry(entries, entry);
+		if (!indexed) return;
+		if (existing) pendingLinks.delete(existing);
+		if (pendingLink) pendingLinks.set(indexed, pendingLink);
+	};
 	let offset = 0;
 	let longName: string | undefined;
 	let longLink: string | undefined;
-	let pax: Map<string, string> | undefined;
-	const pendingLinks = new Map<ArchiveIndexEntry, { kind: "hard link" | "symlink"; targetPath: string }>();
+	let localPax: Map<string, string> | undefined;
+	const globalPax = new Map<string, string>();
 	// A valid tar ends with a zero block. Track whether the fully buffered input
 	// reaches one so truncated archives never expose a partial index.
 	let sawTerminator = false;
@@ -767,84 +1042,111 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			throw new ToolError("Invalid or corrupt tar archive header");
 		}
 
-		const typeFlag = String.fromCharCode(buffer[offset + TAR_TYPEFLAG_OFFSET] || 0x30);
-		let size = readTarNumeric(buffer, offset + TAR_SIZE_OFFSET, TAR_SIZE_LENGTH);
-		let name = readTarString(buffer, offset + TAR_NAME_OFFSET, TAR_NAME_LENGTH);
-		const prefix = readTarString(buffer, offset + TAR_PREFIX_OFFSET, TAR_PREFIX_LENGTH);
-		if (prefix) name = `${prefix}/${name}`;
-		let linkName = readTarString(buffer, offset + TAR_LINKNAME_OFFSET, TAR_LINKNAME_LENGTH);
-		const mtime = readTarNumeric(buffer, offset + TAR_MTIME_OFFSET, TAR_MTIME_LENGTH);
+		const headerOffset = offset;
+		const typeFlag = String.fromCharCode(buffer[headerOffset + TAR_TYPEFLAG_OFFSET] || 0x30);
+		let size = readTarSize(buffer, headerOffset + TAR_SIZE_OFFSET);
+		let name = readTarString(buffer, headerOffset + TAR_NAME_OFFSET, TAR_NAME_LENGTH);
+		if (isUstarHeader(buffer, headerOffset)) {
+			const prefix = readTarString(buffer, headerOffset + TAR_PREFIX_OFFSET, TAR_PREFIX_LENGTH);
+			if (prefix) name = `${prefix}/${name}`;
+		}
+		let linkName = readTarString(buffer, headerOffset + TAR_LINKNAME_OFFSET, TAR_LINKNAME_LENGTH);
+		const mtime = readTarNumeric(buffer, headerOffset + TAR_MTIME_OFFSET, TAR_MTIME_LENGTH);
 
 		offset += TAR_BLOCK_SIZE;
-		const dataBlocks = Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+		const dataBlocks = tarPaddedSize(size);
+		if (dataBlocks > buffer.length - offset) {
+			throw new ToolError("Archive member data is truncated");
+		}
+		const data = buffer.subarray(offset, offset + size);
 
 		// Metadata-only headers: consume their payload, remember it for the next
 		// file header, then continue.
 		if (typeFlag === "L") {
-			longName = readTarString(buffer, offset, size);
+			longName = readTarMetadataPath(data, "GNU long path");
 			offset += dataBlocks;
 			continue;
 		}
 		if (typeFlag === "K") {
-			longLink = readTarString(buffer, offset, size);
+			longLink = readTarMetadataPath(data, "GNU long link target");
+			offset += dataBlocks;
+			continue;
+		}
+		if (typeFlag === "N") {
+			applyOldGnuNameRecords(data, entries, pendingLinks);
 			offset += dataBlocks;
 			continue;
 		}
 		if (typeFlag === "x" || typeFlag === "X") {
-			pax = parsePaxRecords(buffer.subarray(offset, Math.min(offset + size, buffer.length)));
+			localPax = parsePaxRecords(data);
 			offset += dataBlocks;
 			continue;
 		}
 		if (typeFlag === "g") {
+			applyGlobalPax(globalPax, parsePaxRecords(data));
 			offset += dataBlocks;
 			continue;
 		}
 
 		if (longName !== undefined) name = longName;
 		if (longLink !== undefined) linkName = longLink;
-		const paxPath = pax?.get("path");
+		const paxPath = paxAttribute(globalPax, localPax, "path");
 		if (paxPath !== undefined) name = paxPath;
-		const paxLinkPath = pax?.get("linkpath");
+		const paxLinkPath = paxAttribute(globalPax, localPax, "linkpath");
 		if (paxLinkPath !== undefined) linkName = paxLinkPath;
-		const paxSize = pax?.get("size");
-		if (paxSize !== undefined) {
-			const parsed = Number.parseInt(paxSize, 10);
-			if (Number.isFinite(parsed) && parsed >= 0) size = parsed;
-		}
+		const paxSize = paxAttribute(globalPax, localPax, "size");
+		if (paxSize !== undefined) size = parsePaxSize(paxSize, "member size");
 		// GNU 1.0 sparse PAX stores the user-visible path in a dedicated record
 		// while the file header carries an internal `GNUSparseFile.NNN` name.
 		// Surface the real name so listings and `read <archive>:<name>` resolve
 		// the member (its bytes are still rejected as sparse below). The header
 		// `size` remains the on-disk stored length that drives offset advance
 		// and truncation; `GNU.sparse.realsize` is display-only.
-		const paxSparseName = pax?.get("GNU.sparse.name");
+		const paxSparseName = paxAttribute(globalPax, localPax, "GNU.sparse.name");
 		if (paxSparseName !== undefined) name = paxSparseName;
 		let displaySize = size;
-		const paxSparseRealSize = pax?.get("GNU.sparse.realsize");
-		if (paxSparseRealSize !== undefined) {
-			const parsed = Number.parseInt(paxSparseRealSize, 10);
-			if (Number.isFinite(parsed) && parsed >= 0) displaySize = parsed;
+		const paxSparseRealSize = paxAttribute(globalPax, localPax, "GNU.sparse.realsize");
+		if (paxSparseRealSize !== undefined) displaySize = parsePaxSize(paxSparseRealSize, "sparse real size");
+		const sparse = typeFlag === "S" || paxDeclaresSparse(globalPax, localPax);
+		// Old-GNU sparse members chain extra 512-byte sparse-map blocks between
+		// the main header and the stored data; they are not counted in `size`.
+		// Consume the chain so the data offset and the next header line up.
+		if (typeFlag === "S" && buffer[headerOffset + TAR_GNU_SPARSE_ISEXTENDED_OFFSET] === 1) {
+			let extended = true;
+			while (extended) {
+				if (offset + TAR_BLOCK_SIZE > buffer.length) {
+					throw new ToolError("Archive sparse metadata is truncated");
+				}
+				extended = buffer[offset + TAR_GNU_SPARSE_CONT_ISEXTENDED_OFFSET] === 1;
+				offset += TAR_BLOCK_SIZE;
+			}
 		}
-		const sparse = typeFlag === "S" || paxDeclaresSparse(pax);
 		const dataOffset = offset;
-		const memberDataBlocks = Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+		const memberDataBlocks = tarPaddedSize(size);
+		if (memberDataBlocks > buffer.length - dataOffset) {
+			throw new ToolError(`Archive member '${formatTarPathForError(name)}' is truncated`);
+		}
 		offset += memberDataBlocks;
 		longName = undefined;
 		longLink = undefined;
-		pax = undefined;
+		localPax = undefined;
 
 		const isDirectory = typeFlag === "5" || name.endsWith("/");
 		const normalizedPath = normalizeArchiveEntryPath(name);
 		if (!normalizedPath) continue;
-		const mtimeMs = mtime > 0 ? mtime * 1000 : undefined;
+		assertTarPathString(normalizedPath, "member path");
+		const scaledMtime = mtime * 1000;
+		const mtimeMs =
+			mtime !== 0 && Number.isSafeInteger(mtime) && Number.isSafeInteger(scaledMtime) ? scaledMtime : undefined;
 
 		if (isDirectory) {
-			entries.push({ path: normalizedPath, isDirectory: true, size: 0, mtimeMs });
+			addEntry({ path: normalizedPath, isDirectory: true, size: 0, mtimeMs });
 			continue;
 		}
 		if (typeFlag === "1" || typeFlag === "2") {
 			const kind = typeFlag === "1" ? "hard link" : "symlink";
 			const portableLinkName = linkName.replace(/\\/g, "/");
+			assertTarPathString(portableLinkName, "link target");
 			// Symlinks resolve relative to their own directory; a target that
 			// stays inside the archive normalizes to a member path or "" (the
 			// archive root, e.g. `current -> .`). `undefined` means the target
@@ -861,28 +1163,22 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 				size: 0,
 				mtimeMs,
 			};
-			if (targetPath === undefined) {
+			if (targetPath === undefined || Buffer.byteLength(targetPath, "utf-8") > TAR_MAX_PATH_BYTES) {
 				if (kind === "hard link") {
-					throw new ToolError(`Archive hard link '${normalizedPath}' has an invalid target`);
+					throw new ToolError(
+						`Archive hard link '${formatTarPathForError(normalizedPath)}' has an invalid target`,
+					);
 				}
 				entry.storage = { type: "tar-link", targetPath: portableLinkName };
-				entries.push(entry);
+				addEntry(entry);
 				continue;
 			}
-			entries.push(entry);
-			pendingLinks.set(entry, { kind, targetPath });
+			addEntry(entry, { kind, targetPath });
 			continue;
 		}
 		// Only regular-file typeflags carry inline data we can slice.
 		if (typeFlag !== "0" && typeFlag !== "\0" && typeFlag !== "7" && typeFlag !== "S") continue;
-		// A declared payload that runs past the buffer means the archive was
-		// truncated mid-member (e.g. a partial download). Reject it while
-		// indexing so a root listing does not present a truncated archive as a
-		// valid directory, with the failure only surfacing on a later member read.
-		if (dataOffset + memberDataBlocks > buffer.length) {
-			throw new ToolError(`Archive member '${normalizedPath}' is truncated`);
-		}
-		entries.push({
+		addEntry({
 			path: normalizedPath,
 			isDirectory: false,
 			size: displaySize,
@@ -902,82 +1198,119 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 	// Link records carry no data. Resolve file targets after all headers are
 	// indexed; directory symlinks remain one alias node and are traversed lazily
 	// by ArchiveReader so N files behind M aliases never inflate the index to
-	// N×M entries during a root listing.
+	// N×M entries during a root listing. Resolution is a work queue keyed on
+	// blocking links (not a rescan-all fixpoint) so crafted archives with huge
+	// link chains stay linear in dependency edges.
 	if (pendingLinks.size > 0) {
-		const entriesByPath = new Map<string, ArchiveIndexEntry>();
-		for (const entry of entries) entriesByPath.set(entry.path, entry);
-		const unresolved = new Set(pendingLinks.keys());
-
-		// True while the target itself or any directory on its path is a link
-		// that has not been classified yet; such targets must wait a pass so a
-		// file symlink routed through a directory alias is not misjudged
-		// dangling before the alias resolves.
-		const dependsOnUnresolvedLink = (targetPath: string): boolean => {
-			const parts = targetPath.split("/");
-			for (let end = parts.length; end > 0; end--) {
-				const prefixEntry = entriesByPath.get(parts.slice(0, end).join("/"));
-				if (prefixEntry && unresolved.has(prefixEntry)) return true;
+		const entriesByPath = entries;
+		// Every proper ancestor of a member path: O(1) directory-target checks
+		// instead of scanning all entries per unresolved link.
+		const directoryPrefixes = new Set<string>();
+		for (const entry of entriesByPath.values()) {
+			const memberPath = entry.path;
+			for (let cut = memberPath.lastIndexOf("/"); cut > 0; cut = memberPath.lastIndexOf("/", cut - 1)) {
+				const prefix = memberPath.slice(0, cut);
+				if (directoryPrefixes.has(prefix)) break;
+				directoryPrefixes.add(prefix);
 			}
-			return false;
+		}
+		const unresolved = new Set(pendingLinks.keys());
+		// Links deferred behind a still-unclassified link, re-queued when it
+		// settles, so a file symlink routed through a directory alias is not
+		// misjudged dangling before the alias resolves.
+		const dependents = new Map<ArchiveIndexEntry, ArchiveIndexEntry[]>();
+
+		// The first still-unresolved link on `targetPath` (the target itself or
+		// any directory on its path), or null when the target is settled.
+		const findUnresolvedBlocker = (targetPath: string): ArchiveIndexEntry | null => {
+			for (let end = targetPath.length; end > 0; end = targetPath.lastIndexOf("/", end - 1)) {
+				const prefixEntry = entriesByPath.get(targetPath.slice(0, end));
+				if (prefixEntry && unresolved.has(prefixEntry)) return prefixEntry;
+			}
+			return null;
 		};
 
-		while (unresolved.size > 0) {
-			let resolved = 0;
-			for (const entry of unresolved) {
-				const pending = pendingLinks.get(entry)!;
-				if (dependsOnUnresolvedLink(pending.targetPath)) continue;
+		const queue = [...unresolved];
+		while (queue.length > 0) {
+			const entry = queue.pop()!;
+			if (!unresolved.has(entry)) continue;
+			const pending = pendingLinks.get(entry)!;
 
-				// Targets may route through directory aliases classified in an
-				// earlier pass; rewrite before the exact-path lookup.
-				let targetPath = pending.targetPath;
+			// Targets may route through directory aliases classified earlier;
+			// rewrite before the exact-path lookup. A cyclic alias chain falls
+			// through to the dangling-symlink path.
+			let blocker = findUnresolvedBlocker(pending.targetPath);
+			let targetPath = pending.targetPath;
+			if (blocker === null) {
 				try {
 					targetPath = resolveDirectoryAliasPath(entriesByPath, targetPath);
-				} catch {
-					// Cyclic alias chain: fall through to the dangling-symlink path.
+				} catch {}
+				if (targetPath !== pending.targetPath) blocker = findUnresolvedBlocker(targetPath);
+			}
+			if (blocker !== null && blocker !== entry) {
+				const waiting = dependents.get(blocker);
+				if (waiting) {
+					waiting.push(entry);
+				} else {
+					dependents.set(blocker, [entry]);
 				}
-				if (targetPath !== pending.targetPath && dependsOnUnresolvedLink(targetPath)) continue;
+				continue;
+			}
+			unresolved.delete(entry);
+			const settled = dependents.get(entry);
+			if (settled) {
+				dependents.delete(entry);
+				queue.push(...settled);
+			}
+			if (blocker === entry) {
+				// The target passes through the link itself (`a -> a/b`):
+				// inherently cyclic, so it can never become a usable alias even
+				// when real members exist beneath the target prefix.
+				if (pending.kind === "hard link") {
+					throw new ToolError(
+						`Archive hard link '${formatTarPathForError(entry.path)}' has a cyclic target '${formatTarPathForError(pending.targetPath)}'`,
+					);
+				}
+				entry.storage = { type: "tar-link", targetPath: pending.targetPath };
+				continue;
+			}
 
-				const target = entriesByPath.get(targetPath);
-				if (target?.storage && !target.isDirectory) {
-					entry.size = target.size;
-					entry.storage = target.storage;
-					unresolved.delete(entry);
-					resolved++;
+			const target = entriesByPath.get(targetPath);
+			if (target?.storage && !target.isDirectory && !unresolved.has(target)) {
+				entry.size = target.size;
+				entry.storage = target.storage;
+				continue;
+			}
+
+			// An empty target is the archive root, which is always a directory.
+			const targetIsDirectory =
+				targetPath === "" || target?.isDirectory === true || directoryPrefixes.has(targetPath);
+			if (!targetIsDirectory) {
+				if (pending.kind === "symlink") {
+					entry.storage = { type: "tar-link", targetPath: pending.targetPath };
 					continue;
 				}
-
-				// An empty target is the archive root, which is always a directory.
-				const targetPrefix = `${targetPath}/`;
-				const targetIsDirectory =
-					targetPath === "" ||
-					target?.isDirectory === true ||
-					entries.some(candidate => candidate.path.startsWith(targetPrefix));
-				if (!targetIsDirectory) {
-					if (pending.kind === "symlink") {
-						entry.storage = { type: "tar-link", targetPath: pending.targetPath };
-						unresolved.delete(entry);
-						resolved++;
-						continue;
-					}
-					const reason = target ? "unreadable member" : "missing member";
-					throw new ToolError(`Archive hard link '${entry.path}' targets ${reason} '${pending.targetPath}'`);
-				}
-				if (pending.kind === "hard link") {
-					throw new ToolError(`Archive hard link '${entry.path}' targets directory '${pending.targetPath}'`);
-				}
-
-				entry.isDirectory = true;
-				entry.storage = { type: "tar-link", targetPath: pending.targetPath };
-				unresolved.delete(entry);
-				resolved++;
+				const reason = target ? "unreadable member" : "missing member";
+				throw new ToolError(
+					`Archive hard link '${formatTarPathForError(entry.path)}' targets ${reason} '${formatTarPathForError(pending.targetPath)}'`,
+				);
 			}
-			if (resolved === 0) {
-				throw new ToolError("Archive contains cyclic or unsupported links");
+			if (pending.kind === "hard link") {
+				throw new ToolError(
+					`Archive hard link '${formatTarPathForError(entry.path)}' targets directory '${formatTarPathForError(pending.targetPath)}'`,
+				);
 			}
+
+			entry.isDirectory = true;
+			entry.storage = { type: "tar-link", targetPath: pending.targetPath };
+		}
+		// Links never dequeued sit in a dependency cycle (a -> b/x, b -> a/y).
+		if (unresolved.size > 0) {
+			throw new ToolError("Archive contains cyclic or unsupported links");
 		}
 	}
 
-	return entries;
+	return [...entries.values()];
 }
 
 /**
@@ -985,19 +1318,32 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
  * members cannot be reassembled from a contiguous slice, so reading them throws
  * a catchable error instead of returning corrupt data.
  */
+function assertArchiveMemberSize(size: number, memberPath: string): void {
+	if (!Number.isSafeInteger(size) || size < 0) {
+		throw new ToolError(`Archive member '${formatTarPathForError(memberPath)}' has an invalid size`);
+	}
+	if (size > MAX_ARCHIVE_MEMBER_BYTES) {
+		throw new ToolError(
+			`Archive member '${formatTarPathForError(memberPath)}' is too large to extract in memory (${formatBytes(size)} > ${formatBytes(MAX_ARCHIVE_MEMBER_BYTES)} limit)`,
+		);
+	}
+}
+
 function extractTarMember(storage: TarStorage, size: number, memberPath: string): Uint8Array {
+	assertArchiveMemberSize(size, memberPath);
 	if (storage.sparse) {
-		throw new ToolError(`Archive member '${memberPath}' is a sparse file and cannot be read`);
+		throw new ToolError(`Archive member '${formatTarPathForError(memberPath)}' is a sparse file and cannot be read`);
 	}
-	const end = storage.dataOffset + size;
-	if (end > storage.buffer.length) {
-		throw new ToolError(`Archive member '${memberPath}' is truncated`);
+	if (size > storage.buffer.length - storage.dataOffset) {
+		throw new ToolError(`Archive member '${formatTarPathForError(memberPath)}' is truncated`);
 	}
-	return storage.buffer.subarray(storage.dataOffset, end);
+	return storage.buffer.subarray(storage.dataOffset, storage.dataOffset + size);
 }
 
 function throwUnreadableTarLink(storage: TarLinkStorage, memberPath: string): never {
-	throw new ToolError(`Archive symlink '${memberPath}' cannot be materialized from target '${storage.targetPath}'`);
+	throw new ToolError(
+		`Archive symlink '${formatTarPathForError(memberPath)}' cannot be materialized from target '${formatTarPathForError(storage.targetPath)}'`,
+	);
 }
 
 /** ELOOP-style bound on directory-alias rewrites during a single path lookup. */
@@ -1012,15 +1358,13 @@ const MAX_LINK_RESOLUTION_DEPTH = 40;
 function resolveDirectoryAliasPath(entries: ReadonlyMap<string, ArchiveIndexEntry>, archivePath: string): string {
 	let resolvedPath = archivePath;
 	const seen = new Set<string>();
-	for (let depth = 0; depth < MAX_LINK_RESOLUTION_DEPTH && !seen.has(resolvedPath); depth++) {
+	for (let rewrites = 0; !seen.has(resolvedPath); ) {
 		seen.add(resolvedPath);
-		const parts = resolvedPath.split("/");
 		let replacement: string | undefined;
-		for (let end = parts.length; end > 0; end--) {
-			const prefix = parts.slice(0, end).join("/");
-			const entry = entries.get(prefix);
+		for (let end = resolvedPath.length; end > 0; end = resolvedPath.lastIndexOf("/", end - 1)) {
+			const entry = entries.get(resolvedPath.slice(0, end));
 			if (!entry?.isDirectory || entry.storage?.type !== "tar-link") continue;
-			const suffix = parts.slice(end).join("/");
+			const suffix = resolvedPath.slice(end + 1);
 			replacement = suffix
 				? entry.storage.targetPath
 					? `${entry.storage.targetPath}/${suffix}`
@@ -1029,6 +1373,10 @@ function resolveDirectoryAliasPath(entries: ReadonlyMap<string, ArchiveIndexEntr
 			break;
 		}
 		if (replacement === undefined) return resolvedPath;
+		// The bound counts performed rewrites, so a chain of exactly
+		// MAX_LINK_RESOLUTION_DEPTH aliases still resolves; only needing one
+		// more trips it.
+		if (++rewrites > MAX_LINK_RESOLUTION_DEPTH) break;
 		resolvedPath = replacement;
 	}
 	throw new ToolError(`Archive path '${archivePath}' crosses a cyclic symlink`);
@@ -1178,11 +1526,7 @@ export class ArchiveReader {
 		if (!entry.storage) {
 			throw new ToolError(`Archive file '${normalizedPath}' has no readable storage`);
 		}
-		if (entry.size > MAX_ARCHIVE_MEMBER_BYTES) {
-			throw new ToolError(
-				`Archive member '${normalizedPath}' is too large to extract in memory (${formatBytes(entry.size)} > ${formatBytes(MAX_ARCHIVE_MEMBER_BYTES)} limit)`,
-			);
-		}
+		assertArchiveMemberSize(entry.size, normalizedPath);
 
 		let bytes: Uint8Array;
 		if (entry.storage.type === "tar") {
@@ -1208,35 +1552,25 @@ export class ArchiveReader {
  * archives and in-memory ZIPs are read from a single buffer.
  */
 export async function openArchive(source: ArchiveSource): Promise<ArchiveReader> {
-	if (typeof source === "string") {
-		const format = archiveFormatFromPath(source);
-		if (!format) {
-			throw new ToolError(`Unsupported archive format: ${source}`);
+	if (typeof source !== "string" && "bytes" in source) {
+		if (source.format === "zip") {
+			return new ArchiveReader(source.format, await readZipEntries(memoryByteSource(source.bytes)));
 		}
-		if (format === "zip") {
-			return new ArchiveReader(format, await readZipEntries(fileByteSource(source)));
-		}
-
-		const file = Bun.file(source);
-		const archiveSize = file.size;
-		if (archiveSize > MAX_TAR_ARCHIVE_BYTES) {
-			throw new ToolError(
-				`Archive is too large to read in memory (${formatBytes(archiveSize)} > ${formatBytes(MAX_TAR_ARCHIVE_BYTES)} limit)`,
-			);
-		}
-		return new ArchiveReader(format, readTarEntries(await file.bytes()));
+		return new ArchiveReader(source.format, readTarEntries(source.bytes));
 	}
 
-	const { bytes, format } = source;
+	const filePath = typeof source === "string" ? source : source.path;
+	const format = typeof source === "string" ? archiveFormatFromPath(filePath) : source.format;
+	if (!format) {
+		throw new ToolError(`Unsupported archive format: ${filePath}`);
+	}
 	if (format === "zip") {
-		return new ArchiveReader(format, await readZipEntries(memoryByteSource(bytes)));
+		return new ArchiveReader(format, await readZipEntries(fileByteSource(filePath)));
 	}
-	if (bytes.byteLength > MAX_TAR_ARCHIVE_BYTES) {
-		throw new ToolError(
-			`Archive is too large to read in memory (${formatBytes(bytes.byteLength)} > ${formatBytes(MAX_TAR_ARCHIVE_BYTES)} limit)`,
-		);
-	}
-	return new ArchiveReader(format, readTarEntries(bytes));
+
+	const file = Bun.file(filePath);
+	assertTarArchiveSize(file.size);
+	return new ArchiveReader(format, readTarEntries(await file.bytes()));
 }
 
 /** Render the top-level entries of an in-memory archive as one line each. */
@@ -1253,12 +1587,16 @@ export async function listArchiveRoot(
 }
 
 async function resolveArchiveBytes(source: ArchiveSource): Promise<{ bytes: Uint8Array; format: ArchiveFormat }> {
-	if (typeof source !== "string") return source;
-	const format = archiveFormatFromPath(source);
+	if (typeof source !== "string" && "bytes" in source) return source;
+
+	const filePath = typeof source === "string" ? source : source.path;
+	const format = typeof source === "string" ? archiveFormatFromPath(filePath) : source.format;
 	if (!format) {
-		throw new ToolError(`Unsupported archive format: ${source}`);
+		throw new ToolError(`Unsupported archive format: ${filePath}`);
 	}
-	return { bytes: await Bun.file(source).bytes(), format };
+	const file = Bun.file(filePath);
+	if (format !== "zip") assertTarArchiveSize(file.size);
+	return { bytes: await file.bytes(), format };
 }
 
 async function memberToBytes(content: ArchiveMemberContent): Promise<Uint8Array> {

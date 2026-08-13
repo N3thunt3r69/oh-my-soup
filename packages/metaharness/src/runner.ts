@@ -924,7 +924,7 @@ function writeReport(st: RenderState, benchDir: string, exitCode: number): strin
 	const tot = aggregate(trials, readJobResult(st.jobDir), st.expected);
 	const successPct = tot.done > 0 ? (tot.pass / tot.done) * 100 : 0;
 	const lines: string[] = [];
-	const isOms = st.cfg.agent === "oms";
+	const isOmp = st.cfg.agent === "oms";
 	const argsLabel = agentArgsLabel(st.cfg);
 	const baseModelLine = st.cfg.models.join(", ");
 	const modelLine = argsLabel ? `${baseModelLine} (${argsLabel})` : baseModelLine;
@@ -932,7 +932,7 @@ function writeReport(st: RenderState, benchDir: string, exitCode: number): strin
 	lines.push("");
 	lines.push(`- dataset: \`${st.cfg.dataset}\``);
 	lines.push(`- tasks: ${st.cfg.tasks} · attempts: ${st.cfg.attempts} · concurrency: ${st.cfg.concurrency}`);
-	if (isOms) {
+	if (isOmp) {
 		lines.push(
 			`- install: ${st.cfg.install} · auth: ${st.cfg.gateway ? "host gateway (no keys in container)" : "direct provider keys"}`,
 		);

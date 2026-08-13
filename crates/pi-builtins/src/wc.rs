@@ -16,6 +16,8 @@ mod count_fast {
 	use super::WordCountable;
 	use super::{wc_simd_allowed, word_count::WordCount};
 	#[cfg(windows)]
+	use std::os::windows::fs::MetadataExt;
+	#[cfg(windows)]
 	const FILE_ATTRIBUTE_ARCHIVE: u32 = 32;
 	#[cfg(windows)]
 	const FILE_ATTRIBUTE_NORMAL: u32 = 128;

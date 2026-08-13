@@ -364,7 +364,9 @@ const MODEL_VARIANTS: readonly (readonly [RegExp, IdealShape])[] = [
 
 /** Eval-ideal format for a model id, or undefined when unmeasured. */
 export function idealShapeVariant(modelId: string): IdealShape | undefined {
-	const anthropic = parseAnthropicModel(modelId);
+	// The catalog parser is case-sensitive; the regex rules below are not.
+	// Normalize so mixed-case gateway ids keep matching the Anthropic tier.
+	const anthropic = parseAnthropicModel(modelId.toLowerCase());
 	if (
 		anthropic &&
 		(isFableOrMythos(anthropic.kind) || (anthropic.kind === "opus" && semverGte(anthropic.version, "4.7")))

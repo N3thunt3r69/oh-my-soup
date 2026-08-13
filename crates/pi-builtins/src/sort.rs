@@ -4164,7 +4164,8 @@ fn default_merge_batch_size() -> usize {
 
 #[cfg(not(unix))]
 fn locale_failed_to_set() -> bool {
-	std::env::var_os("LC_ALL").as_deref() == Some(OsStr::new("missing"))
+	use std::env;
+	env::var_os("LC_ALL").as_deref() == Some(OsStr::new("missing"))
 }
 
 #[cfg(unix)]

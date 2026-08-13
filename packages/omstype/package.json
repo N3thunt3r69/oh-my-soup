@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@oh-my-soup/omstype",
-  "version": "17.2.13",
+  "version": "17.3.0",
   "description": "ArkType-compatible runtime schema validation with lazy JIT compilation",
   "homepage": "https://github.com/pickpocket/oh-my-soup",
   "author": "Can Boluk",
@@ -12,7 +12,7 @@
     "directory": "packages/omstype"
   },
   "bugs": {
-    "url": "https://github.com/pickpocket/oh-my-soup/issues"
+    "url": "https://github.com/can1357/oh-my-pi/issues"
   },
   "keywords": [
     "schema",

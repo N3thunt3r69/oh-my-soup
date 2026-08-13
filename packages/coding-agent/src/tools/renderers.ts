@@ -29,6 +29,7 @@ import { inspectImageToolRenderer } from "./inspect-image-renderer";
 import { recallToolRenderer, reflectToolRenderer, retainToolRenderer } from "./memory-render";
 import { readToolRenderer } from "./read";
 import { resolveRenderer } from "./resolve";
+import { thinkToolRenderer } from "./think";
 import { todoToolRenderer } from "./todo";
 import { createVibeToolRenderer } from "./vibe";
 import { writeToolRenderer } from "./write";
@@ -119,6 +120,7 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	get task(): ToolRenderer {
 		return taskToolRenderer as ToolRenderer;
 	},
+	think: thinkToolRenderer as ToolRenderer,
 	todo: todoToolRenderer as ToolRenderer,
 	github: githubToolRenderer as ToolRenderer,
 	goal: goalToolRenderer as ToolRenderer,

@@ -18,13 +18,17 @@ import { buildModel } from "@oh-my-soup/pi-catalog/build";
  * until `afterAll` runs, which is the full-suite hazard `AGENTS.md` rules out.
  */
 async function withSkippedAuth<T>(body: () => Promise<T>): Promise<T> {
-	const original = process.env.AWS_BEDROCK_SKIP_AUTH;
+	const originalSkipAuth = process.env.AWS_BEDROCK_SKIP_AUTH;
+	const originalBearerToken = process.env.AWS_BEARER_TOKEN_BEDROCK;
 	process.env.AWS_BEDROCK_SKIP_AUTH = "1";
+	delete process.env.AWS_BEARER_TOKEN_BEDROCK;
 	try {
 		return await body();
 	} finally {
-		if (original === undefined) delete process.env.AWS_BEDROCK_SKIP_AUTH;
-		else process.env.AWS_BEDROCK_SKIP_AUTH = original;
+		if (originalSkipAuth === undefined) delete process.env.AWS_BEDROCK_SKIP_AUTH;
+		else process.env.AWS_BEDROCK_SKIP_AUTH = originalSkipAuth;
+		if (originalBearerToken === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+		else process.env.AWS_BEARER_TOKEN_BEDROCK = originalBearerToken;
 	}
 }
 

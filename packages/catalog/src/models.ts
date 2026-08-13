@@ -42,18 +42,23 @@ export function getBundledModels(provider: GeneratedProvider): Model<Api>[] {
 	const models = getProviderModels(provider);
 	return models ? (Array.from(models.values()) as Model<Api>[]) : [];
 }
-function resolveTokenCost(cost: Model["cost"], usage: Usage): TokenCost {
+function resolveTokenCost(cost: Model["cost"], promptInputTokens: number): TokenCost {
 	const longContext = cost.longContext;
 	if (!longContext) return cost;
-	const orchestration = usage.orchestration;
-	const promptInputTokens =
-		usage.input + usage.cacheRead + usage.cacheWrite + (orchestration?.input ?? 0) + (orchestration?.cacheRead ?? 0);
 	return promptInputTokens > longContext.inputThreshold ? longContext : cost;
 }
 
+/** Price a prompt as fully uncached input under its active context-length tier. */
+export function calculateUncachedInputCost(cost: Model["cost"], promptInputTokens: number): number {
+	const rates = resolveTokenCost(cost, promptInputTokens);
+	return (rates.input / 1_000_000) * promptInputTokens;
+}
+
 export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {
-	const rates = resolveTokenCost(model.cost, usage);
 	const orchestration = usage.orchestration;
+	const promptInputTokens =
+		usage.input + usage.cacheRead + usage.cacheWrite + (orchestration?.input ?? 0) + (orchestration?.cacheRead ?? 0);
+	const rates = resolveTokenCost(model.cost, promptInputTokens);
 	usage.cost.input = (rates.input / 1000000) * (usage.input + (orchestration?.input ?? 0));
 	usage.cost.output = (rates.output / 1000000) * (usage.output + (orchestration?.output ?? 0));
 	usage.cost.cacheRead = (rates.cacheRead / 1000000) * (usage.cacheRead + (orchestration?.cacheRead ?? 0));
@@ -66,11 +71,11 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
  * Price cache-write tokens, honoring the TTL breakdown when the provider reports one.
  *
  * `rates.cacheWrite` is the 5-minute write rate (Anthropic bills 5m writes at
- * 1.25x base input). When `usage.cttl` is present the write mixes 5m and 1h
- * breakpoints — oms defaults to 1h retention on first-party Anthropic, and 1h writes
- * bill at 2x base input — so each component is priced at its own rate instead of the
- * flat 5m rate. Deriving 1h from `input * 2` (Anthropic's published multiplier) is
- * model-independent and stays correct even for legacy entries whose stored
+ * 1.25x base input). When `usage.cttl` is present the write can mix 5m and 1h
+ * breakpoints, and 1h writes bill at 2x base input, so each component is
+ * priced at its own rate instead of the flat 5m rate. Deriving 1h from
+ * `input * 2` (Anthropic's published multiplier) is model-independent and
+ * stays correct even for legacy entries whose stored
  * `cacheWrite` scalar drifts from 1.25x input. Providers that omit `cttl`
  * (everyone but Anthropic) keep the flat-rate calculation.
  *

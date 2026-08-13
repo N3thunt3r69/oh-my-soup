@@ -1,11 +1,15 @@
 //! The `ps` process-status builtin, moved from `pi-shell`.
 
+#[cfg(unix)]
+use std::collections::HashSet;
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 use std::{
-	collections::{HashMap, HashSet},
+	collections::HashMap,
 	fmt::Write as _,
-	fs,
 	io::{self, Write},
-	path::{Path, PathBuf},
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 

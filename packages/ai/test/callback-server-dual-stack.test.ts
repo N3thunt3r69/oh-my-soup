@@ -32,10 +32,9 @@ const ipv6Loopback = (() => {
 })();
 
 /**
- * Bind a squatter on `hostname` and return the port it took. `::` reproduces a
- * dev server (`next dev` binds the IPv6 wildcard); `::1` reproduces a process
- * holding that exact loopback address. The squatter answers 500 so a response
- * from it is unmistakable in an assertion.
+ * Bind a squatter on `hostname` and return the port it took. `::1` reproduces a
+ * process holding that exact loopback address. The squatter answers 500 so a
+ * response from it is unmistakable in an assertion.
  */
 function occupy(hostname: string): { port: number; release: () => void } {
 	const server = Bun.serve({ hostname, port: 0, fetch: () => new Response("squatter", { status: 500 }) });
@@ -63,45 +62,6 @@ afterEach(() => {
 });
 
 describe("OAuthCallbackFlow loopback address families", () => {
-	it.skipIf(!ipv6Loopback || process.platform === "win32")(
-		"takes localhost traffic back from a process on the IPv6 wildcard",
-		async () => {
-			// A dev server on `*:<port>`: the flow's IPv4 bind coexists with it, so
-			// nothing looks wrong, yet `localhost` resolves to `::1` and the browser
-			// would hand the authorization code to that dev server.
-			const devServer = occupy("::");
-			const advertised = Promise.withResolvers<void>();
-			const cancel = new AbortController();
-			const flow = new TestCallbackFlow(
-				{ onAuth: () => advertised.resolve(), signal: cancel.signal },
-				{ preferredPort: devServer.port },
-			);
-
-			const login = flow.login();
-			void login.catch(() => undefined);
-			try {
-				await advertised.promise;
-				// A coexisting wildcard bind is not a conflict, so the preferred port is
-				// kept rather than abandoned.
-				expect(flow.lastRedirectUri).toBe(`http://localhost:${devServer.port}/callback`);
-
-				// The kernel prefers the most specific bind, so our `::1` listener now
-				// answers `localhost` traffic. A 500 body of "squatter" here would mean
-				// the dev server received the authorization code instead.
-				const stray = await fetch(`http://[::1]:${devServer.port}/not-a-callback`);
-				expect(stray.status).toBe(404);
-				expect(await stray.text()).toBe("Not Found");
-
-				const response = await fetch(`http://[::1]:${devServer.port}/callback?code=v6code&state=${flow.lastState}`);
-				expect(response.status).toBe(200);
-				await expect(login).resolves.toMatchObject({ access: "access-v6code" });
-			} finally {
-				cancel.abort("test cleanup");
-				devServer.release();
-			}
-		},
-	);
-
 	it.skipIf(!ipv6Loopback)("falls back when the IPv6 loopback address itself is taken", async () => {
 		const squatter = occupy("::1");
 		const progress: string[] = [];

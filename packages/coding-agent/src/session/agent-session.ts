@@ -108,7 +108,6 @@ import type { Settings, SkillsSettings } from "../config/settings";
 import { onAppendOnlyModeChanged, onModelRolesChanged } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
-import { collectPostCompactionKernelState, KERNEL_PERSISTED_MESSAGE_TYPE } from "../eval/kernel-state";
 import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
 import type { TtsrManager } from "../export/ttsr";
@@ -149,7 +148,7 @@ import type { IrcMessage } from "../irc/bus";
 import type { DaemonCompletionNotification } from "../launch/protocol";
 import { shutdownMnemopiEmbedClient } from "../mnemopi/embed-client";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
-import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
+import { containsOrchestrate, renderOrchestrateNotice } from "../modes/orchestrate";
 import { theme } from "../modes/theme/theme";
 import { parseTurnBudget } from "../modes/turn-budget";
 import { containsUltrathink, ULTRATHINK_NOTICE } from "../modes/ultrathink";
@@ -160,7 +159,6 @@ import { listPlanFiles, readPlanFile } from "../plan-mode/plan-files";
 import type { PlanModeState } from "../plan-mode/state";
 import goalModeContextPrompt from "../prompts/goals/goal-mode-context.md" with { type: "text" };
 import goalTodoContextPrompt from "../prompts/goals/goal-todo-context.md" with { type: "text" };
-import kernelPersistedTemplate from "../prompts/session/kernel-persisted.md" with { type: "text" };
 import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type: "text" };
 import interruptedThinkingTemplate from "../prompts/system/interrupted-thinking.md" with { type: "text" };
 import planModeActivePrompt from "../prompts/system/plan-mode-active.md" with { type: "text" };
@@ -201,6 +199,7 @@ import {
 	PROPOSE_DEVICE_NAME,
 	writeDeviceDispatch,
 } from "../tools/resolve";
+import { supportsExternalThinking } from "../tools/think";
 import type { TodoPhase } from "../tools/todo";
 import { ToolError } from "../tools/tool-errors";
 import { parseCommandArgs } from "../utils/command-args";
@@ -315,13 +314,7 @@ import {
 	queueChipText,
 	toRestoredQueuedMessage,
 } from "./queued-messages";
-import {
-	DEFAULT_MAX_SCHEDULED_PROMPT_JOBS,
-	SCHEDULED_PROMPTS_FILENAME,
-	ScheduledPromptScheduler,
-	type ScheduledPromptSchedulerHost,
-	ScheduledPromptStore,
-} from "./scheduled-prompts";
+import type { ServingModel } from "./retry-fallback-chains";
 import { type AdvisorStats, SessionAdvisors, type SessionAdvisorsHost } from "./session-advisors";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
 import { getRestorableSessionModels } from "./session-context";
@@ -430,6 +423,37 @@ type SetSessionNameWithTrigger = (
 const kPersistedSessionEntryId = Symbol("persistedSessionEntryId");
 type PersistedAssistantMessage = AssistantMessage & { [kPersistedSessionEntryId]?: string };
 
+/**
+ * Clone one top-level notification field without ever returning an object owned
+ * by the live session. Most values take the lossless structured-clone path. If
+ * a third-party metadata object contains functions or other unsupported values,
+ * JSON sanitization drops those values; a cyclic/non-JSON value finally degrades
+ * to a descriptive string rather than retaining a shared mutable reference.
+ */
+function cloneMessageEndNotificationField(value: unknown): unknown {
+	try {
+		return structuredClone(value);
+	} catch {}
+	try {
+		const json = JSON.stringify(value);
+		if (json !== undefined) return JSON.parse(json) as unknown;
+	} catch {}
+	return String(value);
+}
+
+/** Build a detached, notification-only snapshot of an AgentMessage. */
+function cloneMessageEndNotification(message: AgentMessage): AgentMessage {
+	const snapshot: Record<PropertyKey, unknown> = {};
+	for (const key of Reflect.ownKeys(message)) {
+		const descriptor = Object.getOwnPropertyDescriptor(message, key);
+		if (!descriptor?.enumerable) continue;
+		snapshot[key] = cloneMessageEndNotificationField(Reflect.get(message, key));
+	}
+	return snapshot as unknown as AgentMessage;
+}
+
+const INTERRUPTED_THINKING_MIN_CHARS = 60;
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -534,7 +558,6 @@ export class AgentSession {
 	#asyncDeliveryEpoch = 0;
 
 	readonly #irc: IrcBridge;
-	readonly #scheduledPrompts: ScheduledPromptScheduler;
 	#ircWakeTurnObserver:
 		| ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined)
 		| undefined;
@@ -968,34 +991,6 @@ export class AgentSession {
 			runEphemeralTurn: args => this.runEphemeralTurn(args),
 		};
 		this.#irc = new IrcBridge(ircHost);
-		const scheduledPromptsHost: ScheduledPromptSchedulerHost = {
-			sessionId: () => this.sessionId,
-			isDisposed: () => this.#isDisposed,
-			enabled: () => this.settings.get("scheduledPrompts.enabled") !== false,
-			maxJobs: () => this.settings.get("scheduledPrompts.maxJobs") ?? DEFAULT_MAX_SCHEDULED_PROMPT_JOBS,
-			deliver: async (_job, promptText, mode) => {
-				// Idle: starts a turn directly. Streaming: queues onto the existing
-				// steering / follow-up queues per the job's delivery mode.
-				await this.prompt(promptText, {
-					expandPromptTemplates: false,
-					synthetic: true,
-					streamingBehavior: mode === "steer" ? "steer" : "followUp",
-				});
-			},
-			onError: (job, error) => {
-				const message = error instanceof Error ? error.message : String(error);
-				this.emitNotice("warning", `Scheduled prompt ${job.id} failed: ${message}`, "scheduled-prompts");
-			},
-		};
-		this.#scheduledPrompts = new ScheduledPromptScheduler(
-			new ScheduledPromptStore(
-				this.sessionManager.getSessionFile()
-					? path.join(this.sessionManager.getSessionDir(), SCHEDULED_PROMPTS_FILENAME)
-					: undefined,
-			),
-			scheduledPromptsHost,
-		);
-		this.#scheduledPrompts.start();
 		const prewalkHost: PrewalkCoordinatorHost = {
 			agent: this.agent,
 			sessionManager: this.sessionManager,
@@ -1073,6 +1068,7 @@ export class AgentSession {
 			modelRegistry: this.#modelRegistry,
 			configWarnings: this.configWarnings,
 			model: () => this.model,
+			contextFitsModel: (model, excludedMessage) => this.#maintenance.contextFitsModel(model, excludedMessage),
 			textOutputCommitted: () => this.#textOutputCommitted,
 			thinkingLevel: () => this.thinkingLevel,
 			configuredThinkingLevel: () => this.configuredThinkingLevel(),
@@ -1278,8 +1274,10 @@ export class AgentSession {
 			toolRegistry: config.toolRegistry,
 			createVibeTools: config.createVibeTools,
 			createComputerTool: config.createComputerTool,
+			createThinkTool: config.createThinkTool,
 			createInspectImageTool: config.createInspectImageTool,
 			builtInToolNames: config.builtInToolNames,
+			mcpManagerToolNames: config.mcpManagerToolNames,
 			presentationPinnedToolNames: config.presentationPinnedToolNames,
 			ensureWriteRegistered: config.ensureWriteRegistered,
 			rebuildSystemPrompt: config.rebuildSystemPrompt,
@@ -1413,10 +1411,6 @@ export class AgentSession {
 					{ deliverAs: message.deliverAs },
 				);
 			},
-			gateContext: () => ({
-				cwd: this.sessionManager.getCwd(),
-				maxRetries: this.settings.get("goal.maxGateRetries"),
-			}),
 		});
 		this.#cancelExitRecorder = postmortem.register(`agent-session:${this.sessionManager.getSessionId()}`, reason => {
 			this.#recordSessionExit(reason);
@@ -1442,7 +1436,6 @@ export class AgentSession {
 			onPayload: this.#onPayload,
 			onResponse: this.#onResponse,
 			onSseEvent: this.#onSseEvent,
-			agentKind: () => this.#agentKind,
 			isDisposed: () => this.#isDisposed,
 			abortInProgress: () => this.#abortInProgress,
 			allowAgentInitiatedTurns: () => this.#allowAcpAgentInitiatedTurns,
@@ -1463,7 +1456,8 @@ export class AgentSession {
 				this.#maintenance.resolveContextPromotionTarget(model, contextWindow, signal),
 			resolveCompactionModelCandidates: (model, availableModels) =>
 				this.#maintenance.resolveCompactionModelCandidates(model, availableModels),
-			resolveRetryFallbackRole: (selector, model) => this.#recovery.resolveRetryFallbackRole(selector, model),
+			resolveRetryFallbackRole: (selector, model, roleHint) =>
+				this.#recovery.resolveRetryFallbackRole(selector, model, roleHint),
 			findRetryFallbackCandidates: (role, selector, model) =>
 				this.#recovery.findRetryFallbackCandidates(role, selector, model),
 			isRetryFallbackSelectorSuppressed: selector => this.#recovery.isRetryFallbackSelectorSuppressed(selector),
@@ -1530,12 +1524,11 @@ export class AgentSession {
 				this.#planReferenceSent = false;
 			},
 			syncTodoPhasesFromBranch: () => this.#todo.syncFromBranch(),
-			resetAdvisorRuntimes: () => this.#advisors.resetAllRuntimes(),
+			resetAdvisorRuntimes: (reason?: string) => this.#advisors.resetAllRuntimes(reason),
 			rebaseAfterCompaction: () => this.#stats.rebaseAfterCompaction(),
 			recordAnchoredHistoryRewrite: tokensRemoved => this.#stats.recordAnchoredHistoryRewrite(tokensRemoved),
 			getContextBreakdown: options => this.getContextBreakdown(options),
 			getContextUsage: options => this.getContextUsage(options),
-			notifyKernelPersistedAfterCompaction: () => this.#notifyKernelStateAfterCompaction(),
 			shake: (mode, options) => this.shake(mode, options),
 			dropImages: () => this.dropImages(),
 			runHandoff: (customInstructions, options) => this.handoff(customInstructions, options),
@@ -2334,20 +2327,41 @@ export class AgentSession {
 		}
 	}
 
+	#persistMessageEnd(message: AgentMessage): void {
+		if (message.role === "hookMessage" || message.role === "custom") {
+			// Prewalk's plan nudge is a one-run steering instruction. Persisting it would
+			// resurrect the consumed prompt on resume, fork, or any context rebuild.
+			if (!isPrewalkPlanNudge(message)) {
+				this.sessionManager.appendCustomMessageEntry(
+					message.customType,
+					message.content,
+					message.display,
+					message.details,
+					message.attribution ?? "agent",
+				);
+			}
+			if (message.role === "custom" && message.customType === "ttsr-injection") {
+				this.#ttsr.markInjectedFromDetails(message.details);
+			}
+			return;
+		}
+		this.#persistSessionMessageIfMissing(message);
+	}
+
 	/**
-	 * On a user-interrupted (`Esc`) abort, copy the trailing thinking run into a
-	 * hidden `display: false` continuity message for the next turn WITHOUT
-	 * mutating the assistant message. The original thinking stays on the message
-	 * so live render, reload, and display-reset rebuilds keep showing it; `convertToLlm`
-	 * strips the run from the provider request (incomplete/unsigned thinking is
-	 * rejected on resend) when this continuity message follows the assistant turn.
+	 * On a user-interrupted (`Esc`) abort, copy a meaningful trailing thinking
+	 * run into hidden continuity context for the next turn. Short fragments are
+	 * omitted; `convertToLlm` still strips their incomplete thinking from replay.
+	 *
+	 * The original thinking stays on the assistant message so live render, reload,
+	 * and display-reset rebuilds keep showing it.
 	 */
 	#demoteInterruptedThinkingOnUserInterrupt(
 		message: AssistantMessage,
 	): CustomMessage<InterruptedThinkingDetails> | undefined {
 		if (message.stopReason !== "aborted" || !isUserInterruptAbort(message)) return undefined;
 		const demoted = demoteInterruptedThinking(message);
-		if (!demoted) return undefined;
+		if (!demoted || demoted.reasoning.length < INTERRUPTED_THINKING_MIN_CHARS) return undefined;
 		const interruptedAt = Date.now();
 		return {
 			role: "custom",
@@ -2506,7 +2520,17 @@ export class AgentSession {
 			try {
 				await this.#emitSessionEvent(displayEvent);
 			} catch (error) {
-				messageEndPersistence?.release();
+				if (event.type === "message_end") {
+					const persistMessageEnd = () => this.#persistMessageEnd(event.message);
+					try {
+						if (messageEndPersistence) await messageEndPersistence.persist(persistMessageEnd);
+						else persistMessageEnd();
+					} catch (persistenceError) {
+						logger.warn("Failed to persist message after session event emission failed", {
+							error: String(persistenceError),
+						});
+					}
+				}
 				throw error;
 			}
 		}
@@ -2564,27 +2588,7 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
-			const persistMessageEnd = () => {
-				// Check if this is a hook/custom message
-				if (event.message.role === "hookMessage" || event.message.role === "custom") {
-					// Prewalk's plan nudge is a one-run steering instruction. Persisting it would
-					// resurrect the consumed prompt on resume, fork, or any context rebuild.
-					if (!isPrewalkPlanNudge(event.message)) {
-						this.sessionManager.appendCustomMessageEntry(
-							event.message.customType,
-							event.message.content,
-							event.message.display,
-							event.message.details,
-							event.message.attribution ?? "agent",
-						);
-					}
-					if (event.message.role === "custom" && event.message.customType === "ttsr-injection") {
-						this.#ttsr.markInjectedFromDetails(event.message.details);
-					}
-				} else {
-					this.#persistSessionMessageIfMissing(event.message);
-				}
-			};
+			const persistMessageEnd = () => this.#persistMessageEnd(event.message);
 			if (messageEndPersistence) {
 				await messageEndPersistence.persist(persistMessageEnd);
 			} else {
@@ -2629,13 +2633,6 @@ export class AgentSession {
 					this.#maintenance.skipPostTurnMaintenanceAssistantTimestamp = assistantMsg.timestamp;
 				}
 				await this.#recovery.onAssistantSettledSuccessfully(assistantMsg);
-				if (assistantMsg.provider === "opencode-go") {
-					this.#modelRegistry.authStorage.recordUsageCost(assistantMsg.provider, assistantMsg.usage.cost.total, {
-						sessionId: this.#activeProviderSessionId(),
-						recordedAt: assistantMsg.timestamp,
-						baseUrl: this.#modelRegistry.getProviderBaseUrl?.(assistantMsg.provider),
-					});
-				}
 				// Broker deployments: report this request's burn so the broker can
 				// attribute token usage per install. No-op with a local auth store.
 				this.#modelRegistry.authStorage.recordObservedUsage({
@@ -2901,8 +2898,6 @@ export class AgentSession {
 			// continuations — except TTSR self-repair, which already scheduled a
 			// hidden retry while #ttsrAbortPending is still true.
 			if (msg.stopReason === "aborted") {
-				// A deliberate abort drops any pending agent-requested compaction.
-				this.#maintenance.clearPendingRequestedCompaction();
 				this.#recovery.resolveRetry();
 				this.#resetSessionStopContinuationState();
 				await emitAgentEndNotification(ttsrAbortPendingAtAgentEnd ? { willContinue: true } : undefined);
@@ -3472,9 +3467,16 @@ export class AgentSession {
 			};
 			await this.#extensionRunner.emit(extensionEvent);
 		} else if (event.type === "message_end") {
+			// `message_end` is a notification, not a context-rewrite hook. Detach its
+			// payload from agent-owned history so an async observer that mutates the
+			// event after an `await` cannot race mid-run maintenance and enlarge (or
+			// otherwise rewrite) the next provider request after its threshold check.
+			// Explicit `tool_result` / `context` hooks remain the supported mutation
+			// surfaces. Third-party metadata that is not structured-cloneable is
+			// sanitized field-by-field without retaining nested live references.
 			const extensionEvent: MessageEndEvent = {
 				type: "message_end",
-				message: event.message,
+				message: cloneMessageEndNotification(event.message),
 			};
 			await this.#extensionRunner.emit(extensionEvent);
 		} else if (event.type === "tool_execution_start") {
@@ -3536,6 +3538,19 @@ export class AgentSession {
 				attempt: event.attempt,
 				finalError: event.finalError,
 				retryErrors: event.retryErrors,
+			});
+		} else if (event.type === "retry_fallback_applied") {
+			await this.#extensionRunner.emit({
+				type: "retry_fallback_applied",
+				from: event.from,
+				to: event.to,
+				role: event.role,
+			});
+		} else if (event.type === "retry_fallback_succeeded") {
+			await this.#extensionRunner.emit({
+				type: "retry_fallback_succeeded",
+				model: event.model,
+				role: event.role,
 			});
 		} else if (event.type === "ttsr_triggered") {
 			await this.#extensionRunner.emit({ type: "ttsr_triggered", rules: event.rules });
@@ -3759,7 +3774,6 @@ export class AgentSession {
 		this.#memory.cancelLocalMemoryStartup();
 		this.#titleGenerationAbortController.abort();
 		this.#abortAutolearnCapture();
-		this.#scheduledPrompts.stop();
 		this.#irc.flushPending();
 		this.yieldQueue.clear();
 		this.agent.setAsideMessageProvider(undefined);
@@ -4149,9 +4163,13 @@ export class AgentSession {
 		return this.agent.state.model;
 	}
 
-	/** Resolved selector while retry routing is using a fallback model. */
-	get retryFallbackModel(): string | undefined {
-		return this.#recovery.retryFallbackModel;
+	/**
+	 * Model this session's produced work is attributed to. Holds the last model
+	 * that actually served while a fallback is armed but unproven, so observers
+	 * never credit a run to a candidate that produced nothing.
+	 */
+	get servingModel(): ServingModel | undefined {
+		return this.#recovery.servingModel;
 	}
 
 	/** Install the interactive decision surface for reserve-triggered model changes. */
@@ -4348,6 +4366,41 @@ export class AgentSession {
 		return this.#tools.hasBuiltInTool(name);
 	}
 
+	/** Updates source provenance when a live registry entry is replaced or restored. */
+	setToolBuiltIn(name: string, builtIn: boolean): void {
+		this.#tools.setToolBuiltIn(name, builtIn);
+	}
+
+	/** Whether the live registry entry is owned by the RPC host. */
+	hasRpcHostTool(name: string): boolean {
+		return this.#tools.hasRpcHostTool(name);
+	}
+
+	/** Whether the current MCP entry came from the manager snapshot. */
+	hasMCPManagerTool(name: string): boolean {
+		return this.#tools.hasMCPManagerTool(name);
+	}
+
+	/** Restores manager ownership after a lifecycle registration rollback. */
+	setMCPManagerTool(name: string, managerOwned: boolean): void {
+		this.#tools.setMCPManagerTool(name, managerOwned);
+	}
+
+	/** Current extension-owned MCP entry retained across manager refreshes. */
+	getExtensionMCPTool(name: string): AgentTool | undefined {
+		return this.#tools.getExtensionMCPTool(name);
+	}
+
+	/** Updates extension MCP ownership after a lifecycle registration commit or rollback. */
+	setExtensionMCPTool(name: string, tool: AgentTool | undefined): void {
+		this.#tools.setExtensionMCPTool(name, tool);
+	}
+
+	/** Runs a registry/presentation mutation in this session's shared queue. */
+	runToolRegistryMutation<T>(mutation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		return this.#tools.runToolRegistryMutation(mutation, signal);
+	}
+
 	/** Names of every registered tool. */
 	getAllToolNames(): string[] {
 		return this.#tools.getAllToolNames();
@@ -4401,8 +4454,13 @@ export class AgentSession {
 	}
 
 	/** Restores an exact top-level versus `xd://` tool partition. */
-	setActiveToolPresentation(toolNames: string[], mountedToolNames: string[]): Promise<void> {
-		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames);
+	setActiveToolPresentation(
+		toolNames: string[],
+		mountedToolNames: string[],
+		forcePromptRefresh = false,
+		signal?: AbortSignal,
+	): Promise<void> {
+		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames, forcePromptRefresh, signal);
 	}
 
 	/**
@@ -4417,6 +4475,11 @@ export class AgentSession {
 	 */
 	setComputerToolEnabled(enabled: boolean): Promise<boolean> {
 		return this.#tools.setComputerToolEnabled(enabled);
+	}
+
+	/** Applies the external-thinking setting to the private scratchpad tool immediately. */
+	setThinkToolEnabled(enabled: boolean): Promise<boolean> {
+		return this.#tools.setThinkToolEnabled(enabled);
 	}
 
 	/**
@@ -4940,12 +5003,15 @@ export class AgentSession {
 				: sessionPlanUrl;
 
 		const planExists = fs.existsSync(resolvedPlanPath);
+		const activeToolNames = this.getActiveToolNames();
 		const content = prompt.render(planModeActivePrompt, {
 			planFilePath: displayPlanPath,
 			planExists,
 			askToolName: "ask",
 			writeToolName: "write",
 			editToolName: "edit",
+			askAvailable: activeToolNames.includes("ask"),
+			taskAvailable: activeToolNames.includes("task"),
 			isHashlineEditMode: this.#resolveActiveEditMode() === "hashline",
 			reentry: state.reentry ?? false,
 			iterative: state.workflow === "iterative",
@@ -5066,14 +5132,19 @@ export class AgentSession {
 			});
 		}
 		if (this.#magicKeywordEnabled("orchestrate") && containsOrchestrate(text)) {
-			keywordNotices.push({
-				role: "custom",
-				customType: "orchestrate-notice",
-				content: ORCHESTRATE_NOTICE,
-				display: false,
-				attribution: "user",
-				timestamp,
-			});
+			const activeToolNames = this.getActiveToolNames();
+			// The contract is entirely about `task` subagent dispatch; without the
+			// task tool the notice would demand an unavailable capability.
+			if (activeToolNames.includes("task")) {
+				keywordNotices.push({
+					role: "custom",
+					customType: "orchestrate-notice",
+					content: renderOrchestrateNotice({ tools: activeToolNames }),
+					display: false,
+					attribution: "user",
+					timestamp,
+				});
+			}
 		}
 		if (this.#magicKeywordEnabled("workflow") && containsWorkflow(text)) {
 			const activeToolNames = this.getActiveToolNames();
@@ -5176,6 +5247,15 @@ export class AgentSession {
 
 		// Skip eager preludes when the user has already queued a directive
 		const hasPendingUserDirective = this.#toolChoiceQueue.inspect().includes("user-force");
+		const activeModel = this.agent.state.model;
+		const externalThinkingToolChoice =
+			!options?.synthetic &&
+			!hasPendingUserDirective &&
+			this.settings.get("externalThinking") &&
+			this.getEnabledToolNames().includes("think") &&
+			supportsExternalThinking(activeModel)
+				? buildNamedToolChoice("think", activeModel)
+				: undefined;
 		const eagerTodoPrelude =
 			!options?.synthetic && !hasPendingUserDirective ? this.#todo.createEagerTodoPrelude(expandedText) : undefined;
 		const eagerTaskPrelude =
@@ -5193,6 +5273,12 @@ export class AgentSession {
 			: undefined;
 
 		const promptAttribution = options?.attribution ?? (options?.synthetic ? "agent" : "user");
+		if (externalThinkingToolChoice) {
+			this.#toolChoiceQueue.pushOnce(externalThinkingToolChoice, {
+				label: "external-thinking",
+				now: true,
+			});
+		}
 		const message = options?.synthetic
 			? { role: "developer" as const, content: userContent, attribution: promptAttribution, timestamp: Date.now() }
 			: { role: "user" as const, content: userContent, attribution: promptAttribution, timestamp: Date.now() };
@@ -5223,6 +5309,7 @@ export class AgentSession {
 			// Clean up residual eager-todo directive if the prompt never consumed it
 			// (e.g., compaction aborted, validation failed).
 			this.#toolChoiceQueue.removeByLabel("eager-todo");
+			this.#toolChoiceQueue.removeByLabel("external-thinking");
 		}
 		return true;
 	}
@@ -6549,6 +6636,7 @@ export class AgentSession {
 	async fork(): Promise<boolean> {
 		this.#assertVibeSessionTransitionAllowed("fork the session");
 		const previousSessionFile = this.sessionFile;
+		const previousSessionId = this.sessionManager.getSessionId();
 
 		// Emit session_before_switch event with reason "fork" (can be cancelled)
 		if (this.#extensionRunner?.hasHandlers("session_before_switch")) {
@@ -6587,6 +6675,9 @@ export class AgentSession {
 			}
 			this.#bash.markSessionTransition(bashTransition);
 			this.#bash.finishSessionTransition(bashTransition, true);
+			// The fork clones the transcript and keeps this recovery state running
+			// under a fresh id, so the work already produced is still this session's.
+			this.#recovery.reanchorServedAttribution(previousSessionId);
 
 			// Copy artifacts directory if it exists
 			const oldArtifactDir = forkResult.oldSessionFile.slice(0, -6);
@@ -7039,6 +7130,11 @@ export class AgentSession {
 		} catch (error) {
 			logger.warn("inspect_image reconcile after model change failed", { error: String(error) });
 		}
+		try {
+			await this.#tools.reconcileThinkTool();
+		} catch (error) {
+			logger.warn("think tool reconcile after model change failed", { error: String(error) });
+		}
 	}
 
 	#closeCodexProviderSessionsForHistoryRewrite(): void {
@@ -7291,11 +7387,6 @@ export class AgentSession {
 	/** Delivers an IRC message into this recipient session. */
 	deliverIrcMessage(msg: IrcMessage, opts?: { expectsReply?: boolean }): Promise<"injected" | "woken"> {
 		return this.#irc.deliver(msg, opts);
-	}
-
-	/** Session-local scheduled prompts (heartbeats). */
-	get scheduledPrompts(): ScheduledPromptScheduler {
-		return this.#scheduledPrompts;
 	}
 
 	/** Installs task-executor monitoring around autonomous IRC wake turns. */
@@ -8497,56 +8588,6 @@ export class AgentSession {
 		return this.#stats.getContextUsage(options);
 	}
 
-	/** Whether an agent-requested compaction (eval compact.run) awaits the next turn boundary. */
-	get hasPendingRequestedCompaction(): boolean {
-		return this.#maintenance.hasPendingRequestedCompaction;
-	}
-
-	/** Schedule a compaction at the next turn boundary on behalf of the agent (eval compact.run). */
-	requestCompactionFromAgent(instructions?: string): { scheduled: boolean; reason?: string; note?: string } {
-		return this.#maintenance.requestCompactionFromAgent(instructions);
-	}
-
-	/**
-	 * Post-compaction, LLM-visible reminder that live eval kernel state survived
-	 * the history rewrite, with up to ~50 surviving top-level names. Skips
-	 * silently when no kernel is live or the bounded probe fails/times out.
-	 */
-	async #notifyKernelStateAfterCompaction(): Promise<void> {
-		try {
-			const evalSessionId = this.getEvalSessionId();
-			if (!evalSessionId) return;
-			const snapshots = await collectPostCompactionKernelState(evalSessionId);
-			for (const snapshot of snapshots) {
-				const content = prompt.render(kernelPersistedTemplate, {
-					language: snapshot.language,
-					hasNames: snapshot.names.length > 0,
-					names: snapshot.names.join(", "),
-				});
-				const message: CustomMessage = {
-					role: "custom",
-					customType: KERNEL_PERSISTED_MESSAGE_TYPE,
-					content,
-					display: false,
-					attribution: "agent",
-					timestamp: Date.now(),
-				};
-				this.agent.appendMessage(message);
-				this.sessionManager.appendCustomMessageEntry(
-					message.customType,
-					message.content,
-					message.display,
-					undefined,
-					"agent",
-				);
-			}
-		} catch (error) {
-			logger.debug("Post-compaction kernel-state notice skipped", {
-				error: error instanceof Error ? error.message : String(error),
-			});
-		}
-	}
-
 	/**
 	 * Monotonic counter that changes whenever the in-flight pending context
 	 * snapshot is set or cleared. Status-line context memoization keys on this so
@@ -9146,9 +9187,10 @@ export class AgentSession {
 
 	/**
 	 * Whether a live advisor agent is attached to this session. True only when
-	 * `advisor.enabled` is set AND a model resolved for the `advisor` role AND
-	 * the advisor applies to this agent kind — i.e. the actual runtime exists,
-	 * not merely the setting. Drives the status-line badge and `/dump advisor`.
+	 * `advisor.enabled` is set for this session (subagents opt in per agent via
+	 * frontmatter `advisor` / `task.agentAdvisor`) AND a model resolved for the
+	 * `advisor` role — i.e. the actual runtime exists, not merely the setting.
+	 * Drives the status-line badge and `/dump advisor`.
 	 */
 	isAdvisorActive(): boolean {
 		return this.#advisors.isAdvisorActive();

@@ -35,7 +35,7 @@ class FakeStartupWorker {
 
 const initPayload = {
 	mode: "headless" as const,
-	headless: true,
+	browserWSEndpoint: "ws://127.0.0.1/devtools/browser/test",
 	safeDir: "/tmp/oms-puppeteer",
 	timeoutMs: 1_000,
 };

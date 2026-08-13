@@ -342,13 +342,6 @@ describe("ModelRegistry", () => {
 			}
 		});
 
-		test("rerouted bundled OpenAI models recompute inferred computer capability", () => {
-			const model = openaiProxy.find("openai", "gpt-5.4");
-
-			expect(model?.baseUrl).toBe("https://openai-proxy.example.com/v1");
-			expect(model?.supportsComputerUse).toBe(false);
-		});
-
 		test("overriding headers merges with model headers", () => {
 			const anthropicModels = getModelsForProvider(anthropicProxyHeaders, "anthropic");
 			for (const model of anthropicModels) {
@@ -362,6 +355,13 @@ describe("ModelRegistry", () => {
 			for (const model of anthropicModels) {
 				expect(model.headers?.["X-Custom-Header"]).toBe("custom-only");
 			}
+		});
+
+		test("rerouted bundled OpenAI models recompute inferred computer capability", () => {
+			const model = openaiProxy.find("openai", "gpt-5.4");
+
+			expect(model?.baseUrl).toBe("https://openai-proxy.example.com/v1");
+			expect(model?.supportsComputerUse).toBe(false);
 		});
 
 		test("provider header lookup excludes unrelated model overrides", () => {
@@ -551,9 +551,9 @@ describe("ModelRegistry", () => {
 	describe("provider compat overrides", () => {
 		let providerCompat: ModelRegistry;
 		let customCompat: ModelRegistry;
+		let customAnthropicCompat: ModelRegistry;
 		let customModelCompat: ModelRegistry;
 		let customResponsesCompat: ModelRegistry;
-		let customAnthropicCompat: ModelRegistry;
 		beforeAll(() => {
 			providerCompat = readonlyRegistry({
 				providers: {
@@ -692,6 +692,22 @@ describe("ModelRegistry", () => {
 			}
 		});
 
+		test("provider-level compat applies to custom models", () => {
+			const model = customCompat.find("demo", "demo-model");
+			const compat = getOpenAICompat(model);
+			expect(compat?.supportsUsageInStreaming).toBe(false);
+			expect(compat?.maxTokensField).toBe("max_tokens");
+			expect(compat?.cacheControlFormat).toBe("anthropic");
+		});
+
+		test("custom Anthropic providers can opt into eager tool input streaming", () => {
+			const model = customAnthropicCompat.find("anthropic-proxy", "claude-haiku-4.5");
+			expect(model?.compat).toMatchObject({
+				supportsEagerToolInputStreaming: true,
+				allowAnthropicHeaderOverrides: true,
+			});
+		});
+
 		test("provider-level Anthropic compat survives dynamic discovery refresh", async () => {
 			writeRawModelsJson({
 				anthropic: {
@@ -716,22 +732,6 @@ describe("ModelRegistry", () => {
 			await registry.refreshProvider("anthropic", "online");
 
 			expect(getReplayUnsignedThinking(registry.find("anthropic", "claude-sonnet-5"))).toBe(false);
-		});
-
-		test("provider-level compat applies to custom models", () => {
-			const model = customCompat.find("demo", "demo-model");
-			const compat = getOpenAICompat(model);
-			expect(compat?.supportsUsageInStreaming).toBe(false);
-			expect(compat?.maxTokensField).toBe("max_tokens");
-			expect(compat?.cacheControlFormat).toBe("anthropic");
-		});
-
-		test("custom Anthropic providers can opt into eager tool input streaming", () => {
-			const model = customAnthropicCompat.find("anthropic-proxy", "claude-haiku-4.5");
-			expect(model?.compat).toMatchObject({
-				supportsEagerToolInputStreaming: true,
-				allowAnthropicHeaderOverrides: true,
-			});
 		});
 
 		test("custom Responses providers can disable original image detail", () => {

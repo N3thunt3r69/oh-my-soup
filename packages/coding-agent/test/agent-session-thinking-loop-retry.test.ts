@@ -14,7 +14,7 @@ import type {
 import * as AIError from "@oh-my-soup/pi-ai/error";
 import { createMockModel } from "@oh-my-soup/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-soup/pi-ai/utils/event-stream";
-import { withGeminiThinkingLoopGuard } from "@oh-my-soup/pi-ai/utils/thinking-loop";
+import { withThinkingLoopGuard } from "@oh-my-soup/pi-ai/utils/thinking-loop";
 import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-soup/pi-coding-agent/session/agent-session";
@@ -65,7 +65,7 @@ function chunkedThinkingLoopStream(model: Model<Api>, options?: SimpleStreamOpti
 		inner.push({ type: "thinking_end", contentIndex: 0, content: thinking.thinking, partial });
 		inner.push({ type: "done", reason: "stop", message: partial });
 	});
-	return withGeminiThinkingLoopGuard(model, options, () => inner);
+	return withThinkingLoopGuard(model, options, () => inner);
 }
 
 function successStream(model: Model<Api>): AssistantMessageEventStream {

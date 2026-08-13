@@ -1,6 +1,6 @@
 {
   "name": "@oh-my-soup/pi-natives",
-  "version": "17.2.13",
+  "version": "17.3.0",
   "description": "Native Rust bindings for audio, WebRTC, grep, clipboard, image processing, syntax highlighting, PTY, and shell operations via N-API",
   "type": "module",
   "homepage": "https://github.com/pickpocket/oh-my-soup",
@@ -12,7 +12,7 @@
     "directory": "packages/natives"
   },
   "bugs": {
-    "url": "https://github.com/pickpocket/oh-my-soup/issues"
+    "url": "https://github.com/can1357/oh-my-pi/issues"
   },
   "keywords": [
     "napi",

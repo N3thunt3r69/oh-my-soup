@@ -1,4 +1,4 @@
-import { $env, ptree } from "@oh-my-soup/pi-utils";
+import { $env, ptree, USER_AGENT } from "@oh-my-soup/pi-utils";
 import type { RenderResult, SpecialHandler } from "./types";
 import { buildResult, formatMediaDuration, loadPage } from "./types";
 
@@ -121,7 +121,7 @@ export async function fetchGitHubApi(
 
 		const headers: Record<string, string> = {
 			Accept: "application/vnd.github.v3+json",
-			"User-Agent": "oms-web-fetch/1.0",
+			"User-Agent": USER_AGENT,
 		};
 
 		// Use GITHUB_TOKEN if available

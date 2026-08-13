@@ -191,13 +191,6 @@ export interface OpenAICompat {
 	reasoningEffortMap?: Partial<Record<Effort, string>>;
 	/** Whether the provider supports `stream_options: { include_usage: true }` for token usage in streaming responses. Default: true. */
 	supportsUsageInStreaming?: boolean;
-	/**
-	 * Enable the Gemini thinking-loop guard (pi-ai stream layer) for this model.
-	 * Defaults to true when the model id classifies as the gemini family. Set
-	 * explicitly to cover an opaque OpenAI-compat proxy alias (e.g. `my-model`)
-	 * that routes to Gemini, or to false to opt a gemini-family id out.
-	 */
-	enableGeminiThinkingLoopGuard?: boolean;
 	/** Which field to use for max tokens. Default: auto-detected from URL. */
 	maxTokensField?: "max_completion_tokens" | "max_tokens";
 	/** Whether tool results require the `name` field. Default: auto-detected from URL. */
@@ -628,8 +621,6 @@ export interface ResolvedOpenAISharedCompat {
 	isOpenRouterHost: boolean;
 	/** Whether this endpoint needs a max-token field even when caller did not set one. */
 	alwaysSendMaxTokens: boolean;
-	/** See {@link OpenAICompat.enableGeminiThinkingLoopGuard}. Set by the builder from the family classifier. */
-	enableGeminiThinkingLoopGuard?: boolean;
 	openRouterRouting?: OpenAICompat["openRouterRouting"];
 	/** Provider-specific wire model-id transform applied to the base id. */
 	wireModelIdMode: "raw" | "firepass" | "fireworks" | "openrouter";
@@ -698,7 +689,6 @@ export type ResolvedOpenAICompat = ResolvedOpenAISharedCompat &
 			| "thinkingKeep"
 			| "strictResponsesPairing"
 			| "supportsImageDetailOriginal"
-			| "enableGeminiThinkingLoopGuard"
 			| "whenThinking"
 		>
 	> & {

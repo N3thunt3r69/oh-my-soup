@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from "bun:test";
-import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-soup/pi-coding-agent/sdk";
 import { BrowserTool } from "@oh-my-soup/pi-coding-agent/tools/browser";
-import { ensureCamoufoxEngine } from "@oh-my-soup/pi-coding-agent/tools/browser/launch";
 import { getTabsMapForTest } from "@oh-my-soup/pi-coding-agent/tools/browser/tab-supervisor";
 import * as logger from "@oh-my-soup/pi-utils/logger";
+import { chromiumAvailable } from "./chromium-probe";
+
+const CHROMIUM_AVAILABLE = await chromiumAvailable();
 
 function makeSession(): ToolSession {
 	return {
@@ -17,26 +18,25 @@ function makeSession(): ToolSession {
 	};
 }
 
-/**
- * Whether the Camoufox engine can actually execute on this host. CI runners
- * without the engine's system libraries hold the downloaded binary but cannot
- * exec it — probe with --version and skip instead of failing.
- */
-async function camoufoxCanLaunch(): Promise<boolean> {
-	try {
-		const installDir = await ensureCamoufoxEngine();
-		const executable = join(installDir, process.platform === "win32" ? "camoufox.exe" : "camoufox");
-		const probe = Bun.spawnSync([executable, "--version"], { stdout: "ignore", stderr: "ignore" });
-		return probe.exitCode === 0;
-	} catch {
-		return false;
-	}
-}
+describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
+	const suiteTool = new BrowserTool(makeSession());
+	const suiteTabName = `evaluation-suite-${process.pid}`;
 
-const CAMOUFOX_AVAILABLE = await camoufoxCanLaunch();
+	// Keep one browser lease across the suite. Tests still get isolated tabs and workers,
+	// while the chunked full run avoids relaunching Chromium for every test under load.
+	beforeAll(async () => {
+		await suiteTool.execute("open", {
+			action: "open",
+			name: suiteTabName,
+			url: "data:text/html,<title>Browser evaluation suite</title>",
+		});
+	}, 30_000);
 
-describe.skipIf(!CAMOUFOX_AVAILABLE)("browser tab evaluation", () => {
-	// Launches a real Camoufox engine; CI cold start easily exceeds bun's 5s default.
+	afterAll(async () => {
+		await suiteTool.execute("close", { action: "close", name: suiteTabName, kill: true });
+	}, 30_000);
+
+	// Launches real headless Chromium; CI cold start easily exceeds bun's 5s default.
 	it("runs tab.evaluate in the page's main JavaScript world", async () => {
 		const tool = new BrowserTool(makeSession());
 		const name = `main-world-${process.pid}`;
@@ -98,8 +98,6 @@ describe.skipIf(!CAMOUFOX_AVAILABLE)("browser tab evaluation", () => {
 			expect(setupError).toBeInstanceOf(Error);
 			expect(setupError).toHaveProperty("message", "setup failed");
 
-			// NOTE: request.respond (BiDi provideResponse) is not supported on
-			// Camoufox — interception covers abort/continue only.
 			const afterThrow = await tool.execute("run", {
 				action: "run",
 				name,
@@ -126,6 +124,10 @@ describe.skipIf(!CAMOUFOX_AVAILABLE)("browser tab evaluation", () => {
 							heldSeen = true;
 							return;
 						}
+						if (pathname === "/mock") {
+							void request.respond({ status: 200, body: "mocked" });
+							return;
+						}
 						void request.continue();
 					});
 					await tab.evaluate(() => {
@@ -135,7 +137,7 @@ describe.skipIf(!CAMOUFOX_AVAILABLE)("browser tab evaluation", () => {
 					return await tab.evaluate(async () => await (await fetch("/mock")).text());
 				`,
 			});
-			expect(intercepted.content).toEqual([{ type: "text", text: "normal-mock" }]);
+			expect(intercepted.content).toEqual([{ type: "text", text: "mocked" }]);
 
 			const resumed = await tool.execute("run", {
 				action: "run",
@@ -193,26 +195,19 @@ describe.skipIf(!CAMOUFOX_AVAILABLE)("browser tab evaluation", () => {
 					const baseline = page.listenerCount("request");
 					globalThis.__requestListenerBaseline = baseline;
 					await page.setRequestInterception(true);
-					let fired = 0;
 					page.once("request", request => {
-						fired++;
-						void request.abort();
-					});
-					const aborted = await tab.evaluate(async () => {
-						try {
-							await fetch("/mock");
-							return "not-aborted";
-						} catch {
-							return "aborted";
+						if (new URL(request.url()).pathname === "/mock") {
+							void request.respond({ status: 200, body: "mocked-once" });
+							return;
 						}
+						void request.continue();
 					});
+					const body = await tab.evaluate(async () => await (await fetch("/mock")).text());
 					// A once handler that fired must unregister from the emitter, not just the tracker.
-					return { aborted, fired, leaked: page.listenerCount("request") - baseline };
+					return { body, leaked: page.listenerCount("request") - baseline };
 				`,
 			});
-			expect(fired.content).toEqual([
-				{ type: "text", text: '{\n  "aborted": "aborted",\n  "fired": 1,\n  "leaked": 0\n}' },
-			]);
+			expect(fired.content).toEqual([{ type: "text", text: '{\n  "body": "mocked-once",\n  "leaked": 0\n}' }]);
 
 			const resumed = await tool.execute("run", {
 				action: "run",
@@ -519,10 +514,36 @@ describe.skipIf(!CAMOUFOX_AVAILABLE)("browser tab evaluation", () => {
 			await tool.execute("close", { action: "close", name, kill: true });
 		}
 	}, 30_000);
-});
 
-// NOTE: the old "observes floating raw page promises when the target closes"
-// test was dropped in the Camoufox port: headless browsers are owned by their
-// tab worker (WebDriver BiDi), so the host can no longer close a tab's page
-// out from under a run — the scenario the test exercised is unrepresentable
-// by design now.
+	it("observes floating raw page promises when the target closes", async () => {
+		const tool = new BrowserTool(makeSession());
+		const name = `target-close-${process.pid}`;
+		const url = `data:text/html,<h1>ready</h1>#${name}`;
+
+		try {
+			await tool.execute("open", { action: "open", name, url });
+			const tabSession = getTabsMapForTest().get(name);
+			if (tabSession?.backend !== "worker") throw new Error("Worker tab was not created");
+			const pages = await tabSession.browser.browser.pages();
+			const targetPage = pages.find(page => page.url() === url);
+			if (!targetPage) throw new Error(`Target page was not found for ${url}`);
+
+			const started = targetPage.waitForFunction("document.documentElement.dataset.floating === 'true'", {
+				polling: "mutation",
+			});
+			const run = tool.execute("run", {
+				action: "run",
+				name,
+				code: "page.evaluate(() => { document.documentElement.dataset.floating = 'true'; return Promise.withResolvers().promise; }); try { await tab.waitForSelector('#never'); } catch {} return 'survived';",
+			});
+			const startedHandle = await started;
+			await startedHandle.dispose();
+			await targetPage.close();
+
+			const result = await run;
+			expect(result.content).toEqual([{ type: "text", text: "survived" }]);
+		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+});

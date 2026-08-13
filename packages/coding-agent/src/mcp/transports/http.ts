@@ -30,6 +30,13 @@ interface SSEResumeState {
 	retryMs: number;
 }
 
+/**
+ * Failure resuming an accepted request's logical SSE stream. Carries a
+ * never-replay contract: by resume time the server has accepted (and possibly
+ * executed) the originating POST, so auth-retry paths must not re-send it.
+ */
+class SSEResumeError extends Error {}
+
 /** Wait for the server-provided SSE retry interval while remaining abortable. */
 async function waitForSSERetry(ms: number, signal: AbortSignal): Promise<void> {
 	if (signal.aborted) throw signal.reason;
@@ -195,7 +202,7 @@ export class HttpTransport implements MCPTransport {
 		// If the stream ends unexpectedly (server restart, network drop),
 		// fire onClose so the manager can trigger reconnection.
 		const signal = connection.signal;
-		void this.#readSSEStream(response.body!, signal).finally(() => {
+		void this.#runSSEListener(response.body!, signal).finally(() => {
 			const wasConnected = this.#connected;
 			if (this.#sseConnection === connection) this.#sseConnection = null;
 			if (wasConnected) this.onClose?.();
@@ -213,6 +220,95 @@ export class HttpTransport implements MCPTransport {
 				this.onError?.(error);
 			}
 		}
+	}
+
+	/**
+	 * Read the long-lived GET SSE stream, resuming with `Last-Event-ID` when
+	 * the server closes the physical connection mid-stream (2025-11-25 permits
+	 * polling-style servers). Returns only when the logical stream ends — the
+	 * caller fires `onClose` and the manager's reconnect path takes over. A
+	 * resume cycle that delivers no events before dropping again ends the
+	 * stream rather than retrying forever against a broken server.
+	 */
+	async #runSSEListener(initialBody: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<void> {
+		const resume: SSEResumeState = { lastEventId: null, retryMs: DEFAULT_SSE_RETRY_MS };
+		let body = initialBody;
+		let progressed = true;
+		for (;;) {
+			try {
+				for await (const event of readSseEvents(body, signal)) {
+					progressed = true;
+					if (event.id !== undefined) resume.lastEventId = event.id || null;
+					if (event.retry !== undefined) resume.retryMs = event.retry;
+					if (event.data === "") continue;
+					if (!this.#connected) return;
+					this.#dispatchSSEMessage(JSON.parse(event.data) as JsonRpcMessage | JsonRpcMessage[]);
+				}
+			} catch (error) {
+				if (error instanceof Error && error.name === "AbortError") return;
+				logger.debug("HTTP SSE stream error", {
+					url: this.config.url,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				if (resume.lastEventId === null) {
+					if (error instanceof Error) this.onError?.(error);
+					return;
+				}
+			}
+			if (!this.#connected || signal.aborted || resume.lastEventId === null || !progressed) return;
+			progressed = false;
+			try {
+				const response = await this.#fetchSSEResume(resume, signal);
+				body = response.body as ReadableStream<Uint8Array>;
+			} catch (error) {
+				if (!(error instanceof Error && error.name === "AbortError")) {
+					logger.debug("HTTP SSE listener resume failed", {
+						url: this.config.url,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+				return;
+			}
+		}
+	}
+
+	/**
+	 * Resume a logical SSE stream via GET + `Last-Event-ID`, honoring the
+	 * server-provided retry interval and refreshing auth once on 401/403.
+	 * Failures throw {@link SSEResumeError} so `request()` never replays the
+	 * originating POST in response.
+	 */
+	async #fetchSSEResume(resume: SSEResumeState, signal: AbortSignal): Promise<Response> {
+		if (resume.lastEventId === null) {
+			throw new SSEResumeError("SSE stream ended without a resumable event ID");
+		}
+		await waitForSSERetry(resume.retryMs, signal);
+		const generated: Record<string, string> = {
+			Accept: "text/event-stream",
+			"Last-Event-ID": resume.lastEventId,
+		};
+		if (this.#sessionId) generated["Mcp-Session-Id"] = this.#sessionId;
+		let response = await this.#fetch({ method: "GET", signal }, generated);
+		if (this.onAuthError && (response.status === 401 || response.status === 403)) {
+			await response.body?.cancel();
+			const newHeaders = await this.onAuthError();
+			if (!newHeaders) {
+				throw new SSEResumeError(`HTTP ${response.status} resuming MCP SSE stream: auth refresh failed`);
+			}
+			// Persist refreshed headers so subsequent requests use them directly
+			this.config = { ...this.config, headers: newHeaders };
+			response = await this.#fetch({ method: "GET", signal }, generated);
+		}
+		if (!response.ok) {
+			const text = await response.text().catch(() => "");
+			throw new SSEResumeError(`HTTP ${response.status} resuming MCP SSE stream: ${text}`);
+		}
+		const contentType = response.headers.get("Content-Type") ?? "";
+		if (!contentType.includes("text/event-stream") || !response.body) {
+			await response.body?.cancel();
+			throw new SSEResumeError(`MCP SSE resume returned unsupported Content-Type: ${contentType || "(missing)"}`);
+		}
+		return response;
 	}
 
 	/** Route an SSE message (or batch) to the appropriate handler. */
@@ -240,9 +336,12 @@ export class HttpTransport implements MCPTransport {
 		try {
 			return await this.#executeRequest<T>(method, params, options);
 		} catch (error) {
-			// Retry once on auth failure if onAuthError is wired
+			// Retry once on auth failure if onAuthError is wired. Never replay
+			// after an SSE resume failure: the server already accepted the
+			// original POST and may have executed it — replaying could run a
+			// state-changing tool twice.
 			const status = error instanceof Error ? AIError.status(error) : undefined;
-			if (this.onAuthError && (status === 401 || status === 403)) {
+			if (!(error instanceof SSEResumeError) && this.onAuthError && (status === 401 || status === 403)) {
 				const newHeaders = await this.onAuthError();
 				if (newHeaders) {
 					// Persist refreshed headers so subsequent requests use them directly
@@ -355,53 +454,49 @@ export class HttpTransport implements MCPTransport {
 			try {
 				for (;;) {
 					if (!current.body) throw new Error("SSE response did not include a body");
-					for await (const event of readSseEvents(current.body, signal)) {
-						if (event.id !== undefined) resume.lastEventId = event.id || null;
-						if (event.retry !== undefined) resume.retryMs = event.retry;
-						if (event.data === "") continue;
-						const raw = JSON.parse(event.data) as JsonRpcMessage | JsonRpcMessage[];
-						const messages = Array.isArray(raw) ? raw : [raw];
-						for (const message of messages) {
-							if (
-								!captured &&
-								"id" in message &&
-								message.id === expectedId &&
-								("result" in message || "error" in message)
-							) {
-								captured = true;
-								operation.clear();
-								if (message.error) {
-									reject(new Error(`MCP error ${message.error.code}: ${message.error.message}`));
-								} else {
-									resolve(message.result as T);
+					try {
+						for await (const event of readSseEvents(current.body, signal)) {
+							if (event.id !== undefined) resume.lastEventId = event.id || null;
+							if (event.retry !== undefined) resume.retryMs = event.retry;
+							if (event.data === "") continue;
+							const raw = JSON.parse(event.data) as JsonRpcMessage | JsonRpcMessage[];
+							const messages = Array.isArray(raw) ? raw : [raw];
+							for (const message of messages) {
+								if (
+									!captured &&
+									"id" in message &&
+									message.id === expectedId &&
+									("result" in message || "error" in message)
+								) {
+									captured = true;
+									operation.clear();
+									if (message.error) {
+										reject(new Error(`MCP error ${message.error.code}: ${message.error.message}`));
+									} else {
+										resolve(message.result as T);
+									}
+									continue;
 								}
-								continue;
+								if (!this.#connected) continue;
+								this.#dispatchSSEMessage(message);
 							}
-							if (!this.#connected) continue;
-							this.#dispatchSSEMessage(message);
 						}
+					} catch (error) {
+						// An abrupt drop (socket reset, body-read failure) is as
+						// resumable as a server-initiated close once an event ID
+						// exists; the request timeout still bounds the total wait.
+						if (captured) return;
+						if (signal.aborted || resume.lastEventId === null) throw error;
+						logger.debug("MCP SSE response stream dropped; resuming", {
+							url: this.config.url,
+							error: error instanceof Error ? error.message : String(error),
+						});
 					}
 					if (captured) return;
 					if (resume.lastEventId === null) {
 						throw new Error(`No response received for request ID ${expectedId}`);
 					}
-
-					await waitForSSERetry(resume.retryMs, signal);
-					const generated: Record<string, string> = {
-						Accept: "text/event-stream",
-						"Last-Event-ID": resume.lastEventId,
-					};
-					if (this.#sessionId) generated["Mcp-Session-Id"] = this.#sessionId;
-					current = await this.#fetch({ method: "GET", signal }, generated);
-					if (!current.ok) {
-						const text = await current.text();
-						throw new Error(`HTTP ${current.status} resuming MCP SSE stream: ${text}`);
-					}
-					const contentType = current.headers.get("Content-Type") ?? "";
-					if (!contentType.includes("text/event-stream")) {
-						await current.body?.cancel();
-						throw new Error(`MCP SSE resume returned unsupported Content-Type: ${contentType || "(missing)"}`);
-					}
+					current = await this.#fetchSSEResume(resume, signal);
 				}
 			} catch (error) {
 				if (captured) return;

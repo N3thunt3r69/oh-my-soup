@@ -55,8 +55,8 @@ it("renders the prompt date in the startup timezone", async () => {
 			activeRepoContext: null,
 		});
 		const rendered = systemPrompt.join("\\n\\n");
-		expect(rendered).toContain(\`Today is \${process.env.OMS_EXPECTED_DATE}\`);
-		expect(rendered).not.toContain(\`Today is \${process.env.OMS_REJECTED_DATE}\`);
+		expect(rendered).toContain(\`Today: \${process.env.OMS_EXPECTED_DATE}\`);
+		expect(rendered).not.toContain(\`Today: \${process.env.OMS_REJECTED_DATE}\`);
 	} finally {
 		setSystemTime();
 	}

@@ -23,7 +23,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/pickpocket/oh-my-soup"
+Homepage = "https://omp.sh/"
 Repository = "https://github.com/pickpocket/oh-my-soup"
 Documentation = "https://github.com/pickpocket/oh-my-soup/blob/main/docs/rpc.md"
 

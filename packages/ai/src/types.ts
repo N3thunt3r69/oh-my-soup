@@ -413,6 +413,16 @@ export interface StreamOptions {
 	apiKey?: string;
 	cacheRetention?: CacheRetention;
 	/**
+	 * Keep Anthropic's 5-minute prompt cache warm across bounded idle gaps.
+	 *
+	 * This is an ownership flag, not a general provider default: exactly one
+	 * primary agent loop sharing `providerSessionState` should enable it.
+	 * Side-channel and advisor requests must leave it unset.
+	 */
+	anthropicCacheRefresh?: boolean;
+	/** @internal Marks a replay-only Anthropic request that must use non-streaming `max_tokens: 0`. */
+	anthropicCacheRefreshRequest?: boolean;
+	/**
 	 * Additional headers to include in provider requests.
 	 * These are merged on top of model-defined headers.
 	 */
@@ -478,6 +488,12 @@ export interface StreamOptions {
 	 * `false` so `previous_response_id` cannot explain a result.
 	 */
 	statefulResponses?: boolean;
+	/**
+	 * Disable native reasoning when the caller supplies an external scratchpad.
+	 * OpenAI Responses emits `reasoning: { effort: "none" }`; Anthropic and
+	 * Google transports use their native thinking-off controls.
+	 */
+	forceReasoningOff?: boolean;
 	/**
 	 * Provider-scoped mutable state store for this agent session.
 	 * Providers can use this to persist transport/session state between turns.
@@ -553,10 +569,10 @@ export interface StreamOptions {
 	 */
 	providerRetryWait?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 	/**
-	 * Accept a Google `STOP` response with no visible text or tool call as a
-	 * successful completion. Passive callers such as advisors use this because
-	 * silence is a valid result; interactive agent turns retain empty-response
-	 * retries by default. Ignored by non-Google providers.
+	 * Accept a normal provider stop with no visible text or tool call as a
+	 * successful completion. Passive callers and zero-output cache refreshes use
+	 * this because silence is their expected result; interactive agent turns
+	 * retain empty-response retries by default.
 	 */
 	acceptEmptyResponse?: boolean;
 	/**

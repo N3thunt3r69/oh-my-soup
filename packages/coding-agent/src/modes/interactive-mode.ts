@@ -88,6 +88,7 @@ import {
 	formatMCPConnectionStatusMessage,
 	isMcpConnectionStatusEvent,
 	MCP_CONNECTION_STATUS_EVENT_CHANNEL,
+	type McpConnectionFailure,
 	type McpConnectionStatusEvent,
 } from "../mcp/startup-events";
 import { humanizePlanTitle, type PlanApprovalDetails, resolvePlanTitle } from "../plan-mode/approved-plan";
@@ -198,6 +199,7 @@ import {
 import { createSessionTeardown, type SessionTeardown } from "./session-teardown";
 import { runProviderSetupWizard } from "./setup-wizard/lazy";
 import { interruptHint } from "./shared";
+import { invokeSkillCommandFromText, isKnownSkillCommand } from "./skill-command";
 import { clearMermaidCache } from "./theme/mermaid-cache";
 import { type ShimmerPalette, shimmerEnabled, shimmerSegments, shimmerText } from "./theme/shimmer";
 import type { Theme } from "./theme/theme";
@@ -324,9 +326,9 @@ function formatHudNoteMarker(count: number): string {
 	return theme.fg("dim", chalk.italic(` \u207a${sub}`));
 }
 
-type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop" | "budget" | "gates";
+type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop" | "budget";
 
-const GOAL_SUBCOMMANDS = new Set<GoalSubcommand>(["set", "show", "pause", "resume", "drop", "budget", "gates"]);
+const GOAL_SUBCOMMANDS = new Set<GoalSubcommand>(["set", "show", "pause", "resume", "drop", "budget"]);
 const PLAN_KEEP_CONTEXT_OPTION_INDEX = 2;
 const PLAN_KEEP_CONTEXT_DISABLE_THRESHOLD_PERCENT = 95;
 
@@ -385,6 +387,42 @@ class AnchoredLiveContainer extends Container implements NativeScrollbackLiveReg
 		return this.children.length > 0 ? 0 : undefined;
 	}
 }
+
+/**
+ * Preview of the command panels queued while the agent streams, rendered above
+ * the editor so `/usage` and friends answer immediately mid-turn.
+ *
+ * Capped in height: the panels are shown in full in the transcript at the next
+ * settle, so the preview only has to answer the question, not reproduce the
+ * whole report. Rendering is delegated to the real panels at the real width, so
+ * the preview cannot drift from what eventually lands in the transcript.
+ */
+class DeferredCommandPreview implements Component {
+	constructor(
+		private readonly items: readonly Component[],
+		private readonly maxRows: number,
+		private readonly commandCount: number,
+	) {}
+
+	render(width: number): readonly string[] {
+		const rows: string[] = [];
+		for (const item of this.items) rows.push(...item.render(width));
+		const queued = this.commandCount === 1 ? "1 command output" : `${this.commandCount} command outputs`;
+		if (rows.length <= this.maxRows) {
+			rows.push(theme.fg("dim", `${queued} — repeated in the transcript when the agent pauses`));
+			return rows;
+		}
+		const shown = rows.slice(0, Math.max(1, this.maxRows - 1));
+		const hidden = rows.length - shown.length;
+		shown.push(theme.fg("dim", `… ${hidden} more rows — ${queued} shown in full when the agent pauses`));
+		return shown;
+	}
+}
+
+/** Never shrink the queued-output preview below this, even on a short terminal. */
+const DEFERRED_PREVIEW_MIN_ROWS = 6;
+/** Ceiling for the preview as a share of the viewport, so the prompt stays visible. */
+const DEFERRED_PREVIEW_VIEWPORT_FRACTION = 0.4;
 
 /** How long the ctrl+p model-role cycle chip track lingers above the editor
  *  before it auto-clears, mirroring the todo HUD's auto-clear timer. */
@@ -463,6 +501,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	omfgContainer: Container;
 	errorBannerContainer: Container;
 	modelCycleContainer: Container;
+	deferredCommandContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	hookWidgetContainerAbove: Container;
@@ -570,6 +609,8 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
+	/** Commands (not components) queued while streaming, for the deferral hint. */
+	#pendingCommandOutputCommands = 0;
 	#pendingSlashCommands: SlashCommand[] = [];
 	/** Built-in editor autocomplete provider, before extension wrapping. */
 	#baseAutocompleteProvider: AutocompleteProvider | undefined;
@@ -657,6 +698,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.pendingMessagesContainer.disposeChildren();
 		this.#cancelModelCycleClearTimer();
 		this.modelCycleContainer.disposeChildren();
+		this.deferredCommandContainer.disposeChildren();
+		this.#pendingCommandOutput = [];
+		this.#pendingCommandOutputSessionId = undefined;
+		this.#pendingCommandOutputCommands = 0;
 		this.compactionQueuedMessages = [];
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
@@ -680,7 +725,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#mcpStatusOrder: string[] = [];
 	#mcpPendingServers = new Set<string>();
 	#mcpConnectedServers = new Set<string>();
-	#mcpFailedServers = new Map<string, string>();
+	#mcpFailedServers = new Map<string, { error: string; sourcePath?: string }>();
 	#welcomeComponent?: WelcomeComponent;
 	readonly #chatHost: ChatBlockHost = { requestRender: () => this.ui.requestRender() };
 
@@ -743,6 +788,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.omfgContainer = new AnchoredLiveContainer();
 		this.errorBannerContainer = new AnchoredLiveContainer();
 		this.modelCycleContainer = new AnchoredLiveContainer();
+		this.deferredCommandContainer = new AnchoredLiveContainer();
 		this.editor = new CustomEditor(getEditorTheme());
 		this.ui.enableScopedInputRender(this.editor);
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
@@ -794,6 +840,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
 
 		this.hideToolActivity = settings.get("display.hideToolActivity");
+		this.chatContainer.setToolActivityVisible(!this.hideToolActivity);
 		this.hideThinkingBlock = settings.get("hideThinkingBlock");
 		this.proseOnlyThinking = settings.get("proseOnlyThinking");
 
@@ -852,7 +899,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#trackMcpStatusServer(event.serverName);
 			this.#mcpPendingServers.delete(event.serverName);
 			this.#mcpConnectedServers.delete(event.serverName);
-			this.#mcpFailedServers.set(event.serverName, event.error);
+			this.#mcpFailedServers.set(event.serverName, {
+				error: event.error,
+				sourcePath: event.sourcePath,
+			});
 		}
 
 		const message = formatMCPConnectionStatusMessage({
@@ -873,10 +923,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#mcpStatusOrder.filter(serverName => servers.has(serverName));
 	}
 
-	#orderedMcpStatusFailures(): Array<{ serverName: string; error: string }> {
+	#orderedMcpStatusFailures(): McpConnectionFailure[] {
 		return this.#mcpStatusOrder.flatMap(serverName => {
-			const error = this.#mcpFailedServers.get(serverName);
-			return error === undefined ? [] : [{ serverName, error }];
+			const failure = this.#mcpFailedServers.get(serverName);
+			return failure === undefined ? [] : [{ serverName, ...failure }];
 		});
 	}
 
@@ -997,6 +1047,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.addChild(this.omfgContainer);
 		this.ui.addChild(this.errorBannerContainer);
 		this.ui.addChild(this.modelCycleContainer);
+		this.ui.addChild(this.deferredCommandContainer);
 		// Working loader / transient status sits below the sticky todo + subagent
 		// HUDs, just above the editor's hook-widget top margin — so it reads next to
 		// the prompt while keeping the one-line gap above the editor.
@@ -1415,48 +1466,15 @@ export class InteractiveMode implements InteractiveModeContext {
 			if ((this.editor.pendingImages?.length ?? 0) > 0) return;
 			const latestState = this.session.getGoalModeState();
 			if (!latestState?.enabled || latestState.goal.status !== "active") return;
-			void this.#submitGoalContinuationWithGates(prompt);
+			this.#goalContinuationTurnInFlight = true;
+			this.onInputCallback(
+				this.startPendingSubmission({
+					text: prompt,
+					customType: "goal-continuation",
+					display: false,
+				}),
+			);
 		}, 800);
-	}
-
-	/** Runs the goal's quality gates (if configured) before firing the
-	 *  continuation. A failing gate's output replaces the normal continuation
-	 *  prompt verbatim; exhausted gate retries stop auto-continuation. */
-	async #submitGoalContinuationWithGates(fallbackPrompt: string): Promise<void> {
-		let text: string | undefined = fallbackPrompt;
-		try {
-			text = await this.session.goalRuntime.buildGateAwareContinuationPrompt();
-		} catch {
-			// Gate execution problems must not kill the continuation loop; fall
-			// back to the plain continuation prompt.
-			text = fallbackPrompt;
-		}
-		if (!this.onInputCallback) return;
-		if (!this.goalModeEnabled || this.goalModePaused) return;
-		const latestState = this.session.getGoalModeState();
-		if (!latestState?.enabled || latestState.goal.status !== "active") return;
-		if (text === undefined) {
-			// Gate retries exhausted: stop auto-continuing; the operator decides.
-			const failure = this.session.goalRuntime.lastGateFailure;
-			if (failure) {
-				this.showWarning(
-					`Goal gate \`${failure.command}\` still failing after ${failure.attempt} attempts; auto-continuation stopped.`,
-				);
-			}
-			return;
-		}
-		if (this.#isAutoSubmitBlocked()) return;
-		if (this.#pendingSubmittedInput) return;
-		if (this.editor.getText().trim().length > 0) return;
-		if ((this.editor.pendingImages?.length ?? 0) > 0) return;
-		this.#goalContinuationTurnInFlight = true;
-		this.onInputCallback(
-			this.startPendingSubmission({
-				text,
-				customType: "goal-continuation",
-				display: false,
-			}),
-		);
 	}
 
 	#cancelGoalContinuation(): void {
@@ -3367,6 +3385,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		await this.#enterPlanMode();
 		if (!initialPrompt) return false;
+		if (isKnownSkillCommand(this, initialPrompt)) {
+			await invokeSkillCommandFromText(this, initialPrompt, "steer", {
+				images: input?.images,
+				propagateErrors: true,
+			});
+			return true;
+		}
 		if (this.session.isStreaming) {
 			const images = input?.images?.length ? input.images : undefined;
 			await this.withLocalSubmission(
@@ -3408,6 +3433,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		await this.#enterVibeMode();
 		if (!initialPrompt) return false;
+		if (isKnownSkillCommand(this, initialPrompt)) {
+			await invokeSkillCommandFromText(this, initialPrompt, "steer", {
+				images: input?.images,
+				propagateErrors: true,
+			});
+			return true;
+		}
 		if (this.session.isStreaming) {
 			const images = input?.images?.length ? input.images : undefined;
 			await this.withLocalSubmission(
@@ -3646,46 +3678,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				}
 				await this.#handleGoalBudgetCommand(rest);
 				return false;
-			case "gates":
-				await this.#handleGoalGatesCommand(rest);
-				return false;
 		}
-	}
-
-	async #handleGoalGatesCommand(rest: string): Promise<void> {
-		const state = this.session.getGoalModeState();
-		if (!state?.goal || state.goal.status === "complete" || state.goal.status === "dropped") {
-			this.showWarning("No goal to configure gates for.");
-			return;
-		}
-		const trimmed = rest.trim();
-		if (!trimmed) {
-			const prefill = state.goal.gates?.join("\n") ?? "";
-			const input = await this.showHookEditor(
-				"Goal quality gates (one shell command per line, empty to clear)",
-				prefill,
-				undefined,
-				{ promptStyle: true },
-			);
-			if (input === undefined) return;
-			await this.#applyGoalGates(input.split("\n"));
-			return;
-		}
-		if (trimmed.toLowerCase() === "off" || trimmed.toLowerCase() === "clear") {
-			await this.#applyGoalGates(undefined);
-			return;
-		}
-		await this.#applyGoalGates([trimmed]);
-	}
-
-	async #applyGoalGates(gates: string[] | undefined): Promise<void> {
-		const state = await this.session.goalRuntime.setGates(gates);
-		const configured = state?.goal.gates;
-		this.showStatus(
-			configured?.length
-				? `Goal gates set (${configured.length}):\n${configured.map(command => `  ${command}`).join("\n")}`
-				: "Goal gates cleared.",
-		);
 	}
 
 	async #openGoalMenu(state: "active" | "paused"): Promise<void> {
@@ -3736,9 +3729,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			`Tokens: ${budgetLine}`,
 			`Time spent: ${formatDuration(goal.timeUsedSeconds * 1000)}`,
 		];
-		if (goal.gates?.length) {
-			lines.push(`Gates: ${goal.gates.join("; ")}`);
-		}
 		this.showStatus(lines.join("\n"));
 	}
 
@@ -4296,6 +4286,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * flushed there. That is preferred over leaving it queued behind a command
 	 * the user runs during the pause, which mounts immediately and would put the
 	 * older panel out of order.
+	 *
+	 * The deferral is acknowledged in {@link deferredCommandContainer}, an
+	 * anchored container above the editor. Nothing is mounted into the
+	 * transcript: a mid-turn transcript mount re-renders rows below the growing
+	 * live block and duplicates them in native scrollback (issues #4806/#6767),
+	 * which is why the earlier `showStatus` acknowledgment was reverted. An
+	 * anchored container is cleared and rebuilt in place, so it costs no
+	 * scrollback rows — the same reason the ctrl+p role-cycle track lives there.
 	 */
 	presentCommandOutput(content: Component | readonly Component[]): void {
 		if (!this.session.isStreaming) {
@@ -4305,14 +4303,35 @@ export class InteractiveMode implements InteractiveModeContext {
 		const sessionId = this.sessionManager.getSessionId();
 		if (this.#pendingCommandOutput.length > 0 && this.#pendingCommandOutputSessionId !== sessionId) {
 			this.#pendingCommandOutput = [];
+			this.#pendingCommandOutputCommands = 0;
 		}
 		this.#pendingCommandOutputSessionId = sessionId;
 		const items = Array.isArray(content) ? content : [content as Component];
 		this.#pendingCommandOutput.push(...items);
-		// No feedback here on purpose: mounting anything into the transcript
-		// mid-turn (even a status line) re-renders rows below the growing live
-		// block and duplicates them in native scrollback — the exact regression
-		// issues #4806/#6767 pin. The queue flushes at the next settle.
+		this.#pendingCommandOutputCommands += 1;
+		this.#renderDeferredCommandNotice();
+		this.ui.requestRender();
+	}
+
+	/**
+	 * Preview the queued panels above the editor so a command answers straight
+	 * away, then clear at settle when the real panels enter the transcript.
+	 *
+	 * Height is capped against the viewport: a `/usage` report with several
+	 * providers is tall enough to push the prompt off screen, and the full text
+	 * is a moment away in the transcript either way.
+	 */
+	#renderDeferredCommandNotice(): void {
+		this.deferredCommandContainer.clear();
+		if (this.#pendingCommandOutput.length === 0) return;
+		const maxRows = Math.max(
+			DEFERRED_PREVIEW_MIN_ROWS,
+			Math.floor(this.ui.terminal.rows * DEFERRED_PREVIEW_VIEWPORT_FRACTION),
+		);
+		this.deferredCommandContainer.addChild(new Spacer(1));
+		this.deferredCommandContainer.addChild(
+			new DeferredCommandPreview([...this.#pendingCommandOutput], maxRows, this.#pendingCommandOutputCommands),
+		);
 	}
 
 	/** Mount every command panel queued for the current session while the agent was streaming. */
@@ -4322,6 +4341,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		const pendingSessionId = this.#pendingCommandOutputSessionId;
 		this.#pendingCommandOutput = [];
 		this.#pendingCommandOutputSessionId = undefined;
+		this.#pendingCommandOutputCommands = 0;
+		this.#renderDeferredCommandNotice();
 		if (pendingSessionId !== this.sessionManager.getSessionId()) return;
 		this.present(pending);
 	}
@@ -4365,8 +4386,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	showWarning(message: string): void {
-		this.#uiHelpers.showWarning(message);
+	showWarning(message: string, options?: { hideWithToolActivity?: boolean }): void {
+		this.#uiHelpers.showWarning(message, options);
 	}
 
 	#handleLspStartupEvent(event: LspStartupEvent): void {
@@ -4576,8 +4597,23 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers.renderSessionContext(sessionContext, options);
 	}
 
-	renderInitialMessages(options?: { preserveExistingChat?: boolean; clearTerminalHistory?: boolean }): void {
-		this.#uiHelpers.renderInitialMessages(options);
+	/** Render a session context in bounded chunks so terminal input runs between transcript paints. */
+	async renderSessionContextIncrementally(
+		sessionContext: SessionContext,
+		options: RenderSessionContextOptions,
+		renderChunk?: () => void,
+	): Promise<void> {
+		for (const message of sessionContext.messages) {
+			this.noteDisplayableThinkingContent(message);
+		}
+		await this.#uiHelpers.renderSessionContextIncrementally(sessionContext, options, renderChunk);
+	}
+
+	async renderInitialMessages(options?: {
+		preserveExistingChat?: boolean;
+		clearTerminalHistory?: boolean;
+	}): Promise<void> {
+		await this.#uiHelpers.renderInitialMessages(options);
 	}
 
 	getUserMessageText(message: Message): string {
@@ -4645,8 +4681,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#commandController.handleToolsCommand();
 	}
 
-	handleContextCommand(): Promise<void> {
-		return this.#commandController.handleContextCommand();
+	handleContextCommand(): void {
+		this.#commandController.handleContextCommand();
 	}
 
 	#vibeSessionTransitionBlocked(): boolean {
@@ -5039,7 +5075,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			}
 			this.#btwController.dispose();
 			this.#omfgController.dispose();
-			this.renderInitialMessages({ clearTerminalHistory: true });
+			await this.renderInitialMessages({ clearTerminalHistory: true });
 			this.updateEditorBorderColor();
 			this.showStatus(
 				result.sessionFile ? `Branched /btw to ${path.basename(result.sessionFile)}` : "Branched /btw",

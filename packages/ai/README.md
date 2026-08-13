@@ -218,7 +218,7 @@ for (const block of response.content) {
 
 ## Tools
 
-Tools enable LLMs to interact with external systems. Omstype schemas provide type-safe definitions, runtime validation, and JSON Schema conversion for providers.
+Tools enable LLMs to interact with external systems. Omptype schemas provide type-safe definitions, runtime validation, and JSON Schema conversion for providers.
 
 ### Defining Tools
 
@@ -1070,7 +1070,7 @@ Official docs: [Application Default Credentials](https://cloud.google.com/docs/a
 
 ### CLI Login
 
-Authenticate via the [`oms`](https://github.com/pickpocket/oh-my-soup) coding-agent CLI, which drives this library's OAuth/API-key flows in-process and persists into `agent.db`:
+Authenticate via the [`oms`](https://omp.sh) coding-agent CLI, which drives this library's OAuth/API-key flows in-process and persists into `agent.db`:
 
 ```bash
 oms auth-broker login              # interactive provider selection

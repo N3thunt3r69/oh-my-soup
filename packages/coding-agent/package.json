@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@oh-my-soup/pi-coding-agent",
-  "version": "17.2.13",
+  "version": "17.3.0",
   "description": "Coding agent CLI with read, bash, edit, write tools and session management",
   "homepage": "https://github.com/pickpocket/oh-my-soup",
   "author": "Can Boluk",
@@ -15,7 +15,7 @@
     "directory": "packages/coding-agent"
   },
   "bugs": {
-    "url": "https://github.com/pickpocket/oh-my-soup/issues"
+    "url": "https://github.com/can1357/oh-my-pi/issues"
   },
   "keywords": [
     "coding-agent",
@@ -41,7 +41,6 @@
     "format-prompts": "bun scripts/format-prompts.ts",
     "gen:tool-views": "bun --cwd=../collab-web run gen:tool-views",
     "gen:bundle": "bun scripts/bundle-dist.ts",
-    "gen:ida-bridge": "bun scripts/generate-ida-bridge-bundle.ts",
     "gen:mupdf": "bun scripts/embed-mupdf-wasm.ts --generate",
     "gen:mupdf:reset": "bun scripts/embed-mupdf-wasm.ts --reset",
     "gen:native": "bun --cwd=../natives run gen:native",
@@ -74,8 +73,6 @@
     "@opentelemetry/sdk-metrics": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@opentelemetry/sdk-trace-node": "catalog:",
-    "camoufox-js": "catalog:",
-    "chromium-bidi": "catalog:",
     "mupdf": "catalog:",
     "puppeteer-core": "catalog:"
   },
@@ -92,6 +89,7 @@
   "files": [
     "src",
     "dist/cli.js",
+    "dist/docs-index.generated.txt",
     "dist/CHANGELOG-*.md",
     "dist/*.node",
     "dist/template-*.css",
@@ -235,14 +233,6 @@
     "./debug/*": {
       "types": "./src/debug/*.ts",
       "import": "./src/debug/*.ts"
-    },
-    "./disasm": {
-      "types": "./src/disasm/index.ts",
-      "import": "./src/disasm/index.ts"
-    },
-    "./disasm/*": {
-      "types": "./src/disasm/*.ts",
-      "import": "./src/disasm/*.ts"
     },
     "./discovery": {
       "types": "./src/discovery/index.ts",

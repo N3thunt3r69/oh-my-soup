@@ -48,8 +48,6 @@ pub(crate) fn stat_builtin<SE: ShellExtensions>() -> Registration<SE> {
 mod imp {
 	#[cfg(unix)]
 	use std::os::unix::fs::{FileTypeExt, MetadataExt};
-	#[cfg(windows)]
-	use std::os::windows::fs::MetadataExt;
 	use std::{
 		borrow::Cow,
 		cell::OnceCell,
@@ -1951,10 +1949,9 @@ for details about the options it supports.";
 		}
 	}
 	/// file-status path is Unix-only (`std::os::unix`); this reimplements the
-	/// GNU directives on top of `std::fs::Metadata`, the `windows_by_handle`
-	/// metadata extensions (inode / link count / device via
-	/// `GetFileInformationByHandle`), and the Win32 volume APIs for
-	/// `--file-system` mode.
+	/// GNU directives on top of `std::fs::Metadata`, direct
+	/// `GetFileInformationByHandle` queries (inode / link count / device),
+	/// and the Win32 volume APIs for `--file-system` mode.
 	#[cfg(windows)]
 	mod win {
 		use std::{
@@ -2064,6 +2061,52 @@ for details about the options it supports.";
 				return logical;
 			}
 			(u64::from(high) << 32) | u64::from(low)
+		}
+
+		/// Per-file identity numbers for `%d`/`%D`/`%h`/`%i`: volume serial,
+		/// hard-link count, and NTFS file index.
+		pub struct HandleInfo {
+			pub volume_serial: u64,
+			pub links:         u64,
+			pub file_index:    u64,
+		}
+
+		/// Query [`HandleInfo`] via `GetFileInformationByHandle`, the stable
+		/// replacement for std's unstable `windows_by_handle` metadata
+		/// extensions. `follow_links` mirrors how the caller's metadata was
+		/// obtained, so a `--no-dereference` stat reports the link itself.
+		/// Returns `None` when the file cannot be opened or queried.
+		pub fn handle_info(path: &Path, follow_links: bool) -> Option<HandleInfo> {
+			use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+
+			use windows_sys::Win32::Storage::FileSystem::{
+				BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS,
+				FILE_FLAG_OPEN_REPARSE_POINT, GetFileInformationByHandle,
+			};
+
+			// `FILE_FLAG_BACKUP_SEMANTICS` is required to open directories;
+			// `access_mode(0)` asks for metadata access only.
+			let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
+			if !follow_links {
+				flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+			}
+			let file = std::fs::OpenOptions::new()
+				.access_mode(0)
+				.custom_flags(flags)
+				.open(path)
+				.ok()?;
+			// SAFETY: zeroed BY_HANDLE_FILE_INFORMATION is a valid out
+			// buffer, and the handle stays open across the call.
+			let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+			if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+				return None;
+			}
+			Some(HandleInfo {
+				volume_serial: u64::from(info.dwVolumeSerialNumber),
+				links:         u64::from(info.nNumberOfLinks),
+				file_index:    (u64::from(info.nFileIndexHigh) << 32)
+					| u64::from(info.nFileIndexLow),
+			})
 		}
 
 		/// File-system status collected for `stat --file-system` on Windows.
@@ -2249,6 +2292,11 @@ for details about the options it supports.";
 				},
 				Token::Directive { flag, width, precision, format } => {
 					let mode = win::synth_mode(meta);
+					// `%d`/`%D`/`%h`/`%i` need a fresh handle query; skip it for
+					// every other directive.
+					let ids = matches!(format, 'd' | 'D' | 'h' | 'i')
+						.then(|| win::handle_info(resolved, !meta.file_type().is_symlink()))
+						.flatten();
 					let output = match format {
 						// access rights in octal
 						'a' => OutputType::UnsignedOct(0o7777 & mode),
@@ -2264,9 +2312,11 @@ for details about the options it supports.";
 						'C' => OutputType::Str("unsupported for this operating system".to_string()),
 						// device number: Windows volume serial number
 						'd' if flag.major || flag.minor => OutputType::Unsigned(0),
-						'd' => OutputType::Unsigned(meta.volume_serial_number().map_or(0, u64::from)),
+						'd' => OutputType::Unsigned(ids.as_ref().map_or(0, |ids| ids.volume_serial)),
 						// device number in hex
-						'D' => OutputType::UnsignedHex(meta.volume_serial_number().map_or(0, u64::from)),
+						'D' => {
+							OutputType::UnsignedHex(ids.as_ref().map_or(0, |ids| ids.volume_serial))
+						},
 						// raw mode in hex
 						'f' => OutputType::UnsignedHex(u64::from(mode)),
 						// file type
@@ -2276,9 +2326,9 @@ for details about the options it supports.";
 						// group name of owner
 						'G' => OutputType::Str("UNKNOWN".to_string()),
 						// number of hard links
-						'h' => OutputType::Unsigned(meta.number_of_links().map_or(1, u64::from)),
+						'h' => OutputType::Unsigned(ids.as_ref().map_or(1, |ids| ids.links)),
 						// inode number (NTFS file index)
-						'i' => OutputType::Unsigned(meta.file_index().unwrap_or(0)),
+						'i' => OutputType::Unsigned(ids.as_ref().map_or(0, |ids| ids.file_index)),
 						// mount point (not resolved on Windows)
 						'm' => OutputType::Str(String::new()),
 						// file name

@@ -706,12 +706,12 @@ describe("CursorExecHandlers error results", () => {
 		// present-undefined and ArkType rejects the bash call.
 		const events: AgentEvent[] = [];
 		const executeArgs: Record<string, unknown>[] = [];
-		const bashParameters = type({ command: "string", "cwd?": "string", "timeout?": "number" });
-		const bashTool: AgentTool<typeof bashParameters> = {
+		const bashSchema = type({ command: "string", "cwd?": "string", "timeout?": "number" });
+		const bashTool: AgentTool<typeof bashSchema> = {
 			name: "bash",
 			label: "bash",
 			description: "records args",
-			parameters: bashParameters,
+			parameters: bashSchema,
 			execute: async (_id, args) => {
 				executeArgs.push({ ...args });
 				return { content: [{ type: "text", text: "ok" }], details: {} };
@@ -1121,41 +1121,37 @@ describe("CursorExecHandlers mounted tool bridge", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"refuses a download onto a FIFO instead of blocking on it",
-		async () => {
-			// A write-only open of a FIFO blocks until a reader attaches, and
-			// `download_path` comes from the server — so a named pipe planted (or
-			// simply present) in the workspace hung the turn forever, with the
-			// non-regular-file guard sitting unreachable behind the open. The refusal
-			// has to come from the open itself, which is what `O_NONBLOCK` buys.
-			const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-mcp-fifo-"));
-			try {
-				const fifo = path.join(workspace, "pipe");
-				const mkfifo = Bun.spawn(["mkfifo", fifo]);
-				if ((await mkfifo.exited) !== 0) throw new Error("mkfifo failed");
-				const handlers = new CursorExecHandlers({
-					cwd: workspace,
-					tools: new Map(),
-					mcpResources: {
-						serverNames: () => ["files"],
-						getServerResources: async () => undefined,
-						readServerResource: async (_name, uri) => ({ contents: [{ uri, text: "payload" }] }),
-					},
-				});
+	it("refuses a download onto a FIFO instead of blocking on it", async () => {
+		// A write-only open of a FIFO blocks until a reader attaches, and
+		// `download_path` comes from the server — so a named pipe planted (or
+		// simply present) in the workspace hung the turn forever, with the
+		// non-regular-file guard sitting unreachable behind the open. The refusal
+		// has to come from the open itself, which is what `O_NONBLOCK` buys.
+		const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-mcp-fifo-"));
+		try {
+			const fifo = path.join(workspace, "pipe");
+			const mkfifo = Bun.spawn(["mkfifo", fifo]);
+			if ((await mkfifo.exited) !== 0) throw new Error("mkfifo failed");
+			const handlers = new CursorExecHandlers({
+				cwd: workspace,
+				tools: new Map(),
+				mcpResources: {
+					serverNames: () => ["files"],
+					getServerResources: async () => undefined,
+					readServerResource: async (_name, uri) => ({ contents: [{ uri, text: "payload" }] }),
+				},
+			});
 
-				await expect(
-					handlers.readMcpResource({ server: "files", uri: "files://x", downloadPath: "pipe" }),
-				).rejects.toThrow(/special file|non-regular file/);
-			} finally {
-				await removeWithRetries(workspace);
-			}
-			// A regression does not fail this assertion — it never reaches it, because
-			// the open never returns. The timeout IS the detector, raised off the 5s
-			// default only so a slow runner cannot claim the same verdict.
-		},
-		20_000,
-	);
+			await expect(
+				handlers.readMcpResource({ server: "files", uri: "files://x", downloadPath: "pipe" }),
+			).rejects.toThrow(/special file|non-regular file/);
+		} finally {
+			await removeWithRetries(workspace);
+		}
+		// A regression does not fail this assertion — it never reaches it, because
+		// the open never returns. The timeout IS the detector, raised off the 5s
+		// default only so a slow runner cannot claim the same verdict.
+	}, 20_000);
 
 	it("refuses a download when the session withheld file mutation or policy denies it", async () => {
 		// Download mode creates and overwrites workspace files without going
@@ -1747,9 +1743,8 @@ describe("CursorExecHandlers Pi frame translation", () => {
 			// `optional int32`: a present 0 is clamped to 1 (as the reference
 			// does), not silently widened to the tool's default.
 			{ path: "*.ts", limit: 1 },
-			// Genuinely unset leaves the local tool's own default in place, so
-			// the optional key is absent rather than present with `undefined`.
-			{ path: "*.ts" },
+			// Genuinely unset leaves the local tool's own default in place.
+			{ path: "*.ts", limit: undefined },
 		]);
 	});
 

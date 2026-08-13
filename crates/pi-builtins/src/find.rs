@@ -776,7 +776,7 @@ pub mod matchers {
 			}
 
 			#[cfg(not(unix))]
-			fn matches(&self, _file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
+			fn matches(&self, _file_info: &WalkEntry, _matcher_io: &mut MatcherIO) -> bool {
 				false
 			}
 		}

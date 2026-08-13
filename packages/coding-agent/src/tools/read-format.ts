@@ -492,7 +492,7 @@ export function buildInMemoryMultiRangeResult(
 ): AgentToolResult<ReadToolDetails> {
 	const displayMode = resolveFileDisplayMode(session, { raw: options.raw, immutable: options.immutable });
 	const details = options.details ?? {};
-	const allLines = text.split("\n");
+	const allLines = options.raw === true ? text.split("\n") : splitAddressableFileLines(text);
 	const totalLines = allLines.length;
 	details.totalLines = totalLines;
 	const shouldAddHashLines = displayMode.hashLines;
