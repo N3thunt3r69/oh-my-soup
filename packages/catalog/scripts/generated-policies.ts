@@ -352,6 +352,46 @@ export function applyOllamaCloudOutputCap(models: ModelSpec<Api>[]): void {
 	}
 }
 
+/**
+ * Providers that surface Gemma through Google's native APIs, where system /
+ * developer instructions are rejected outright ("Developer instruction is not
+ * enabled"). Proxies that transform the prompt themselves (OpenRouter, kilo,
+ * aimlapi, ...) are deliberately excluded.
+ */
+const GEMMA_NO_SYSTEM_PROVIDERS: Record<string, true> = {
+	google: true,
+	"google-vertex": true,
+	"google-gemini-cli": true,
+	"google-antigravity": true,
+};
+
+/** OpenAI-family ids that reject both the `system` and `developer` roles. */
+const NO_SYSTEM_OPENAI_MODEL_IDS: Record<string, true> = {
+	"o1-mini": true,
+	"o1-preview": true,
+};
+
+/**
+ * Stamp `supportsSystemPrompt: false` on models whose provider channel
+ * rejects system/developer instructions, so `systemPromptPlacement: "auto"`
+ * relocates the prompt into the first user turn instead of sending a request
+ * the provider 400s.
+ */
+export function applyNoSystemPromptCapability(models: ModelSpec<Api>[]): void {
+	for (const model of models) {
+		const isGemma = /(^|[/.])gemma/i.test(model.id);
+		const gemmaNoSystem =
+			isGemma &&
+			(GEMMA_NO_SYSTEM_PROVIDERS[model.provider] === true ||
+				(model.provider === "amazon-bedrock" && model.id.startsWith("google.")));
+		const openaiNoSystem =
+			(model.provider === "openai" || model.provider === "azure") && NO_SYSTEM_OPENAI_MODEL_IDS[model.id] === true;
+		if (gemmaNoSystem || openaiNoSystem) {
+			model.supportsSystemPrompt = false;
+		}
+	}
+}
+
 function applyGeneratedModelPolicy(model: ModelSpec<Api>): void {
 	const copilotLimits = model.provider === "github-copilot" ? COPILOT_GENERATED_LIMITS[model.id] : undefined;
 	if (copilotLimits) {

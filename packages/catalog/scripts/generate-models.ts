@@ -58,6 +58,7 @@ import {
 	applyAntigravityPricingFallback,
 	applyCanonicalLimitFallback,
 	applyGeneratedModelPolicies,
+	applyNoSystemPromptCapability,
 	applyOllamaCloudOutputCap,
 	CLOUDFLARE_FALLBACK_MODEL,
 	dropBedrockMantleOpenAIModels,
@@ -697,6 +698,7 @@ async function generateModels() {
 	// Pin every Ollama Cloud model's max-output to the enforced ceiling; runs
 	// after canonical fallback so finalized context windows drive the cap.
 	applyOllamaCloudOutputCap(allModels);
+	applyNoSystemPromptCapability(allModels);
 
 	for (const model of allModels) {
 		canonicalizeModelCompat(model);

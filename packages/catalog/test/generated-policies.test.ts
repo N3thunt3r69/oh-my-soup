@@ -4,6 +4,7 @@ import type { Api, ModelSpec, Provider } from "@oh-my-soup/pi-catalog/types";
 import {
 	applyAntigravityPricingFallback,
 	applyGeneratedModelPolicies,
+	applyNoSystemPromptCapability,
 	applyOllamaCloudOutputCap,
 	linkOpenAIPromotionTargets,
 } from "../scripts/generated-policies";
@@ -466,6 +467,35 @@ describe("generated model policies", () => {
 		expect(models[1]?.applyPatchToolType).toBe("freeform");
 		expect(models[2]?.applyPatchToolType).toBeUndefined();
 		expect(models[3]?.applyPatchToolType).toBeUndefined();
+	});
+
+	it("flags no-system-prompt models on native surfaces and leaves proxies alone", () => {
+		const models: ModelSpec<Api>[] = [
+			createSpec({ id: "gemma-4-31b-it", api: "google-generative-ai", provider: "google", reasoning: false }),
+			createSpec({
+				id: "google.gemma-3-27b-it",
+				api: "bedrock-converse-stream",
+				provider: "amazon-bedrock",
+				reasoning: false,
+			}),
+			createSpec({ id: "o1-mini", api: "azure-openai-responses", provider: "azure" }),
+			// Proxies transform the prompt themselves — never flagged.
+			createSpec({ id: "google/gemma-3-27b-it", api: "openai-completions", provider: "kilo", reasoning: false }),
+			createSpec({ id: "gemma-3-12b-it", api: "openai-completions", provider: "aimlapi", reasoning: false }),
+			// Non-gemma google models keep their system channel.
+			createSpec({ id: "gemini-3-pro", api: "google-generative-ai", provider: "google" }),
+		];
+
+		applyNoSystemPromptCapability(models);
+
+		expect(models.map(model => model.supportsSystemPrompt)).toEqual([
+			false,
+			false,
+			false,
+			undefined,
+			undefined,
+			undefined,
+		]);
 	});
 });
 

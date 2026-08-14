@@ -9603,7 +9603,8 @@
 				"cacheWrite": 0
 			},
 			"contextWindow": 202752,
-			"maxTokens": 8192
+			"maxTokens": 8192,
+			"supportsSystemPrompt": false
 		},
 		"google.gemma-3-4b-it": {
 			"id": "google.gemma-3-4b-it",
@@ -9623,7 +9624,8 @@
 				"cacheWrite": 0
 			},
 			"contextWindow": 128000,
-			"maxTokens": 4096
+			"maxTokens": 4096,
+			"supportsSystemPrompt": false
 		},
 		"jp.anthropic.claude-haiku-4-5-20251001-v1:0": {
 			"id": "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -13490,7 +13492,8 @@
 					"xhigh"
 				],
 				"requiresEffort": true
-			}
+			},
+			"supportsSystemPrompt": false
 		},
 		"o3": {
 			"id": "o3",
@@ -25248,7 +25251,8 @@
 				"cacheWrite": 0
 			},
 			"contextWindow": 131072,
-			"maxTokens": 8192
+			"maxTokens": 8192,
+			"supportsSystemPrompt": false
 		},
 		"gemma-4-26b": {
 			"id": "gemma-4-26b",
@@ -25277,7 +25281,8 @@
 					"medium",
 					"high"
 				]
-			}
+			},
+			"supportsSystemPrompt": false
 		},
 		"gemma-4-26b-a4b-it": {
 			"id": "gemma-4-26b-a4b-it",
@@ -25306,7 +25311,8 @@
 					"medium",
 					"high"
 				]
-			}
+			},
+			"supportsSystemPrompt": false
 		},
 		"gemma-4-26b-it": {
 			"id": "gemma-4-26b-it",
@@ -25335,7 +25341,8 @@
 					"medium",
 					"high"
 				]
-			}
+			},
+			"supportsSystemPrompt": false
 		},
 		"gemma-4-31b": {
 			"id": "gemma-4-31b",
@@ -25364,7 +25371,8 @@
 					"medium",
 					"high"
 				]
-			}
+			},
+			"supportsSystemPrompt": false
 		},
 		"gemma-4-31b-it": {
 			"id": "gemma-4-31b-it",
@@ -25393,7 +25401,8 @@
 					"medium",
 					"high"
 				]
-			}
+			},
+			"supportsSystemPrompt": false
 		},
 		"gemma-4-E2B-it": {
 			"id": "gemma-4-E2B-it",
@@ -25422,7 +25431,8 @@
 					"medium",
 					"high"
 				]
-			}
+			},
+			"supportsSystemPrompt": false
 		},
 		"gemma-4-E4B-it": {
 			"id": "gemma-4-E4B-it",
@@ -25451,7 +25461,8 @@
 					"medium",
 					"high"
 				]
-			}
+			},
+			"supportsSystemPrompt": false
 		}
 	},
 	"google-antigravity": {
