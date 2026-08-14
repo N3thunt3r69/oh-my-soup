@@ -1,26 +1,28 @@
-Op-based `bd` (beads) wrapper: the project's dependency-aware issue graph and persistent agent memory. Issues live in `.beads/` (Dolt-backed) and survive across sessions; prefer it over ad-hoc plan files for durable, multi-session work tracking. The session-local `todo` tool still tracks the current turn's steps.
+OMS-native dependency-aware issue graph and persistent project memory. Data lives under `.beads/` in an OMS-owned SQLite store with deterministic JSONL interchange; no `bd`, Dolt, or other tracker executable is required. Use this for durable, multi-session work. The session-local `todo` tool still tracks the current turn.
 
 <instruction>
-Pick op via `op`. Beyond the field descriptions, per op:
-- `ready` — unblocked, claimable issues; check this before asking what to work on. `limit` bounds results.
-- `blocked` — issues waiting on open dependencies, with their blockers.
-- `list` — all issues; `status` filters (`open`/`in_progress`/`closed`/`deferred`).
-- `show` — full detail (description, design, acceptance, notes) for `id` or `ids`.
-- `create` — requires `title`; `priority` 0 (critical) … 4 (backlog, default 2), `issueType` defaults to task. Attach to an epic via `parent`. Link provenance with `deps: ["discovered-from:<id>"]` when work is discovered mid-task.
-- `update` — requires `id` plus at least one change. `claim: true` atomically assigns and marks in_progress — claim before starting work.
-- `close` — requires `id`/`ids`; give a substantive `reason` (it is the audit trail).
-- `dep_add` — `id` (dependent) now depends on `parent` (blocker). Prefer one call per edge.
-- `dep_tree` — dependency tree under `id`.
-- `prime` — workflow context + stored memories; run once when starting a beads-managed work session.
-- `remember` — store a durable project insight (`text`); replaces MEMORY.md-style files.
+Pick `op`. Per operation:
+- `init` — initialize the nearest Git repository (or current directory) as a native Beads workspace; optional `prefix` controls generated issue IDs.
+- `ready` — unblocked, claimable issues; check this before asking what to work on. `limit` bounds rows (maximum 50); continue with the returned `offset`.
+- `blocked` — issues waiting on open blocking dependencies, with their blockers. Supports row `limit`/`offset`.
+- `list` — all issues; `status` filters (`open`/`in_progress`/`closed`/`deferred`). Supports row `limit`/`offset`.
+- `show` — detail for `id` or `ids` (at most five inline). Large prose is previewed; request one `id` plus `field`, then follow character `offset`, for the complete field.
+- `create` — requires `title`; `priority` is 0 (critical) … 4 (backlog, default 2). Attach to an epic with `parent`. Use `deps: ["discovered-from:<id>"]` for work discovered while handling another issue.
+- `update` — requires `id` plus a change. `claim: true` atomically assigns the issue to this OMS session and marks it `in_progress`.
+- `close` — requires `id`/`ids`; give a substantive `reason`.
+- `dep_add` — `id` (dependent) now depends on `parent` (blocker).
+- `dep_tree` — dependency tree under `id`; follow character `offset` when the result is paged.
+- `prime` — workflow context plus stored memories; run once when starting a Beads-managed session. Supports `query`, row `limit` (maximum 20), and `offset`.
+- `memory` — retrieve the complete value for `key`; follow character `offset` when paged.
+- `remember` — store durable project insight in `text`.
 - `stats` — issue counts and graph health.
-- `sync` — pull then push the beads database to the git remote (`bd dolt pull` + `push`).
+- `sync` — merge and push deterministic snapshots through the configured Git remote's isolated `refs/heads/oms-beads` branch; never mutates the checked-out branch.
 </instruction>
 
 <output>
-Issue lines as `<status-glyph> <id> [P<n>] [<type>] <title>` (○ open, ◐ in progress, ● blocked, ✓ closed, ❄ deferred); `show` adds the prose fields.
+Issue lines use `<status-glyph> <id> [P<n>] [<type>] <title>` (`O` open, `>` in progress, `!` blocked, `X` closed, `~` deferred); `show` adds bounded prose previews.
 </output>
 
 <critical>
-Claim (`update` + `claim`) before working an issue and `close` it when done — unclosed finished work strands the graph. Discovered follow-up work gets a linked `create`, not a markdown TODO.
+Claim (`update` + `claim`) before working and `close` completed work. Record discovered follow-up work with linked `create`, not a markdown TODO.
 </critical>

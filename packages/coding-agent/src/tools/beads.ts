@@ -1,17 +1,5 @@
-/**
- * Beads tool — first-class wrapper around the `bd` CLI
- * (https://github.com/gastownhall/beads): a dependency-aware graph issue
- * tracker designed as persistent structured memory for coding agents.
- *
- * The tool activates only when the `bd` binary is installed AND the workspace
- * contains a `.beads/` database (i.e. the project opted in via `bd init`), so
- * it is zero-config in beads projects and absent everywhere else.
- *
- * All invocations run with `BD_JSON_ENVELOPE=1`; both the envelope shape
- * (`{schema_version, data}`) and the legacy raw array/object shapes are
- * accepted, so any bd version with `--json` support works.
- */
-import * as fs from "node:fs";
+/** Native TypeScript Beads tool backed by the OMS-owned project store. */
+import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type } from "@oh-my-soup/omstype";
@@ -23,26 +11,43 @@ import type {
 	ToolApprovalDecision,
 } from "@oh-my-soup/pi-agent-core";
 import { Text } from "@oh-my-soup/pi-tui";
-import { $which, prompt, untilAborted } from "@oh-my-soup/pi-utils";
+import { prompt, untilAborted } from "@oh-my-soup/pi-utils";
+import {
+	findBeadsInitRoot,
+	findBeadsWorkspaceRoot,
+	NativeBeadsError,
+	NativeBeadsRepository,
+} from "../beads/repository";
+import { syncNativeBeads } from "../beads/sync";
+import type { BeadsIssue, BeadsStats } from "../beads/types";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
 import beadsDescription from "../prompts/tools/beads.md" with { type: "text" };
 import { framedBlock, renderStatusLine } from "../tui";
 import type { ToolSession } from ".";
+import { truncateForPrompt } from "./approval";
 import { formatMoreItems } from "./render-utils";
-import { ToolAbortError, ToolError, throwIfAborted } from "./tool-errors";
+import { ToolError } from "./tool-errors";
 
-const BD_COMMAND_TIMEOUT_MS = 120_000;
-/** Client-side cap for list-like ops (`bd list` has no server-side pagination yet). */
+export { findBeadsInitRoot, findBeadsWorkspaceRoot, NativeBeadsRepository } from "../beads/repository";
+export { syncNativeBeads } from "../beads/sync";
+export type { BeadsDependency, BeadsIssue, BeadsMemory, BeadsStats } from "../beads/types";
+
 const LIST_RESULT_CAP = 50;
-/** Directory-walk bound for `.beads/` workspace detection. */
-const WORKSPACE_WALK_LIMIT = 32;
+const BATCH_ID_CAP = 50;
+const SHOW_ID_CAP = 5;
+const DETAIL_PREVIEW_CAP = 1_500;
+const DETAIL_FIELD_CAP = 8_000;
+const ISSUE_LINE_CAP = 4_000;
+const TOOL_TEXT_CAP = 64_000;
+const DEFAULT_MEMORY_RESULT_LIMIT = 20;
 
 const BEADS_READONLY_OPS: Record<string, true> = {
 	ready: true,
 	blocked: true,
 	list: true,
 	show: true,
+	memory: true,
 	dep_tree: true,
 	prime: true,
 	stats: true,
@@ -50,16 +55,20 @@ const BEADS_READONLY_OPS: Record<string, true> = {
 
 const beadsSchema = type({
 	op: type(
-		"'ready' | 'blocked' | 'list' | 'show' | 'create' | 'update' | 'close' | 'dep_add' | 'dep_tree' | 'prime' | 'remember' | 'stats' | 'sync'",
-	).describe("beads operation"),
-	"id?": type("string").describe("issue id (update/close/dep_tree; the dependent child for dep_add)"),
+		"'init' | 'ready' | 'blocked' | 'list' | 'show' | 'create' | 'update' | 'close' | 'dep_add' | 'dep_tree' | 'prime' | 'memory' | 'remember' | 'stats' | 'sync'",
+	).describe("native beads operation"),
+	"id?": type("string").describe("issue id (show/update/close/dep_tree; dependent child for dep_add)"),
 	"ids?": type("string[]").describe("issue ids (show/close several at once)"),
-	"title?": type("string").describe("issue title (create)"),
+	"key?": type("string").describe("persistent memory key (memory; use offset to page its value)"),
+	"field?": type("'description' | 'design' | 'acceptance_criteria' | 'notes' | 'close_reason'").describe(
+		"full issue text field to page (show with one id; use offset for later characters)",
+	),
+	"title?": type("string").describe("issue title (create/update)"),
 	"description?": type("string").describe("issue description (create/update)"),
 	"issueType?": type("'bug' | 'feature' | 'task' | 'epic' | 'chore'").describe("issue type (create)"),
 	"priority?": type("0 | 1 | 2 | 3 | 4").describe("priority: 0 critical … 4 backlog (create/update)"),
 	"parent?": type("string").describe("parent epic id (create), or the blocking issue (dep_add)"),
-	"deps?": type("string[]").describe("dependency links as 'type:id' or bare id (create), e.g. discovered-from:bd-12"),
+	"deps?": type("string[]").describe("dependency links as 'type:id' or bare blocking id (create)"),
 	"claim?": type("boolean").describe("atomically claim: assignee + in_progress (update)"),
 	"reason?": type("string").describe("close reason"),
 	"notes?": type("string").describe("notes field (update)"),
@@ -67,245 +76,145 @@ const beadsSchema = type({
 	"acceptance?": type("string").describe("acceptance criteria (create/update)"),
 	"text?": type("string").describe("insight to store (remember)"),
 	"status?": type("'open' | 'in_progress' | 'closed' | 'deferred'").describe("status filter (list)"),
-	"limit?": type("number").describe("max results (ready/list)"),
+	"limit?": type("number").describe("max results (issue lists cap at 50; prime caps at 20)"),
+	"offset?": type("number").describe(
+		"result offset (ready/blocked/list/prime; character offset for show/memory/dep_tree)",
+	),
+	"query?": type("string").describe("case-insensitive memory key/value filter (prime)"),
+	"prefix?": type("string").describe("issue id prefix (init; defaults to project directory name)"),
+	"+": "reject",
 });
 
 type BeadsInput = typeof beadsSchema.infer;
-
-/** Subset of the bd issue JSON contract the tool surfaces (unknown fields are ignored). */
-export interface BeadsIssue {
-	id: string;
-	title: string;
-	status: string;
-	priority: number;
-	issue_type: string;
-	assignee?: string;
-	owner?: string;
-	parent?: string | null;
-	labels?: string[];
-	dependency_count?: number;
-	dependent_count?: number;
-	blocked_by?: Array<string | { id: string; title?: string; status?: string }>;
-	description?: string;
-	acceptance_criteria?: string;
-	design?: string;
-	notes?: string;
-	created_at?: string;
-	updated_at?: string;
-	closed_at?: string;
-}
 
 export interface BeadsToolDetails {
 	op: BeadsInput["op"];
 	issues?: BeadsIssue[];
 	text?: string;
 	truncated?: boolean;
+	root?: string;
+	nextOffset?: number;
+	stats?: BeadsStats;
 }
-
-interface BdCommandResult {
-	exitCode: number;
-	stdout: string;
-	stderr: string;
-}
-
-/** Read one string-valued field from an untrusted/partial object without asserting its shape. */
-function readStringField(value: unknown, key: string): string | undefined {
-	if (value !== null && typeof value === "object" && key in value) {
-		const field = (value as Record<string, unknown>)[key];
-		if (typeof field === "string") return field;
-	}
-	return undefined;
-}
-
-function unwrapEnvelope(value: unknown): unknown {
-	if (
-		value !== null &&
-		typeof value === "object" &&
-		!Array.isArray(value) &&
-		"schema_version" in value &&
-		"data" in value
-	) {
-		return value.data;
-	}
-	return value;
-}
-
-/**
- * Humanize a bd failure. JSON-mode errors emit `{error, code?, hint?}` (most
- * to stderr, some to stdout); fall back to raw output.
- */
-function formatBdFailure(args: readonly string[], stdout: string, stderr: string): string {
-	for (const channel of [stderr, stdout]) {
-		const trimmed = channel.trim();
-		if (!trimmed.startsWith("{")) continue;
-		try {
-			const parsed = unwrapEnvelope(JSON.parse(trimmed));
-			const error = readStringField(parsed, "error");
-			if (error) {
-				const hint = readStringField(parsed, "hint");
-				return hint ? `${error} (${hint})` : error;
-			}
-		} catch {
-			// fall through to raw output
-		}
-	}
-	const message = (stderr || stdout).trim();
-	if (message.includes("schema version mismatch")) {
-		return `${message}\nUpgrade the bd binary to match the database schema.`;
-	}
-	if (message.length > 0) return message;
-	return `beads command failed: bd ${args.join(" ")}`;
-}
-
-export const bd = {
-	/** Resolve the bd executable: `beads.binary` setting, else `bd` on PATH. */
-	binary(session: ToolSession): string {
-		const configured = session.settings.get("beads.binary")?.trim();
-		return configured || "bd";
-	},
-
-	/** Check if the bd CLI is installed (or explicitly configured). */
-	available(session: ToolSession): boolean {
-		const configured = session.settings.get("beads.binary")?.trim();
-		if (configured) return fs.existsSync(configured) || Boolean($which(configured));
-		return Boolean($which("bd"));
-	},
-
-	/**
-	 * Find the nearest ancestor of `cwd` containing a `.beads/` database, if
-	 * any. The walk stops at the user's home directory: `~/.beads` is bd's
-	 * user-level config dir, not a project database — treating it as one would
-	 * light the tool up for every directory under `$HOME`.
-	 */
-	workspaceRoot(cwd: string): string | null {
-		const home = path.resolve(os.homedir());
-		let current = path.resolve(cwd);
-		for (let depth = 0; depth < WORKSPACE_WALK_LIMIT; depth++) {
-			if (current === home) return null;
-			try {
-				if (fs.statSync(path.join(current, ".beads")).isDirectory()) return current;
-			} catch {
-				// not here; keep walking up
-			}
-			const parentDir = path.dirname(current);
-			if (parentDir === current) return null;
-			current = parentDir;
-		}
-		return null;
-	},
-
-	/** Run a raw bd command. Does not throw on non-zero exit. */
-	async run(session: ToolSession, args: string[], signal?: AbortSignal): Promise<BdCommandResult> {
-		throwIfAborted(signal);
-		const timeoutSignal = AbortSignal.timeout(BD_COMMAND_TIMEOUT_MS);
-		const spawnSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-		try {
-			const child = Bun.spawn([bd.binary(session), ...args], {
-				cwd: session.cwd,
-				env: { ...Bun.env, BD_JSON_ENVELOPE: "1" },
-				stdin: "ignore",
-				stdout: "pipe",
-				stderr: "pipe",
-				windowsHide: true,
-				signal: spawnSignal,
-			});
-			const [stdout, stderr, exitCode] = await Promise.all([
-				new Response(child.stdout).text(),
-				new Response(child.stderr).text(),
-				child.exited,
-			]);
-			throwIfAborted(signal);
-			if (timeoutSignal.aborted) {
-				throw new ToolError(`beads command timed out after ${BD_COMMAND_TIMEOUT_MS / 1000}s: bd ${args.join(" ")}`);
-			}
-			return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
-		} catch (error) {
-			if (signal?.aborted) throw new ToolAbortError();
-			if (error instanceof ToolError) throw error;
-			const message = error instanceof Error ? error.message : String(error);
-			if (message.includes("ENOENT") || message.includes("Executable not found")) {
-				throw new ToolError(
-					`beads CLI (${bd.binary(session)}) is not installed. Install it from https://github.com/gastownhall/beads and run \`bd init\` in the project.`,
-				);
-			}
-			throw error;
-		}
-	},
-
-	/** Run bd with `--json` semantics and parse stdout (envelope or legacy shape). */
-	async json<T>(session: ToolSession, args: string[], signal?: AbortSignal): Promise<T> {
-		const result = await bd.run(session, args, signal);
-		if (result.exitCode !== 0) {
-			throw new ToolError(formatBdFailure(args, result.stdout, result.stderr));
-		}
-		if (!result.stdout) {
-			throw new ToolError("beads returned empty output.");
-		}
-		try {
-			return unwrapEnvelope(JSON.parse(result.stdout)) as T;
-		} catch {
-			throw new ToolError("beads returned invalid JSON output.");
-		}
-	},
-
-	/** Run bd and return stdout as text. Throws on non-zero exit. */
-	async text(session: ToolSession, args: string[], signal?: AbortSignal): Promise<string> {
-		const result = await bd.run(session, args, signal);
-		if (result.exitCode !== 0) {
-			throw new ToolError(formatBdFailure(args, result.stdout, result.stderr));
-		}
-		return result.stdout;
-	},
-};
 
 const STATUS_GLYPHS: Record<string, string> = {
-	open: "○",
-	in_progress: "◐",
-	blocked: "●",
-	closed: "✓",
-	deferred: "❄",
+	open: "O",
+	in_progress: ">",
+	blocked: "!",
+	closed: "X",
+	deferred: "~",
 };
 
+function readStringField(value: unknown, key: string): string | undefined {
+	if (value === null || typeof value !== "object" || !(key in value)) return undefined;
+	const field = Reflect.get(value, key);
+	return typeof field === "string" ? field : undefined;
+}
+
+function inlineText(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
+}
+
+function boundedToolText(value: string): string {
+	return truncateForPrompt(value, TOOL_TEXT_CAP);
+}
+
+function pagedText(label: string, value: string, offset: number): { text: string; nextOffset?: number } {
+	if (offset > value.length) throw new ToolError(`\`offset\` exceeds the ${value.length} character ${label} length.`);
+	const end = Math.min(value.length, offset + DETAIL_FIELD_CAP);
+	const lines = [`${label} characters ${offset}-${end} of ${value.length}`, "", value.slice(offset, end)];
+	if (end < value.length) lines.push("", `… more; request the same value with offset ${end}.`);
+	return { text: lines.join("\n"), ...(end < value.length ? { nextOffset: end } : {}) };
+}
+
 function formatIssueLine(issue: BeadsIssue): string {
-	const glyph = STATUS_GLYPHS[issue.status] ?? "○";
-	const parts = [glyph, issue.id, `[P${issue.priority}]`, `[${issue.issue_type}]`, issue.title];
+	const activeBlockers =
+		(issue.status === "open" || issue.status === "in_progress") && issue.blocked_by && issue.blocked_by.length > 0
+			? issue.blocked_by
+			: [];
+	const glyph = activeBlockers.length > 0 ? STATUS_GLYPHS.blocked : (STATUS_GLYPHS[issue.status] ?? "O");
+	const parts = [
+		glyph,
+		issue.id,
+		`[P${issue.priority}]`,
+		`[${inlineText(issue.issue_type)}]`,
+		inlineText(issue.title),
+	];
 	const qualifiers: string[] = [];
 	if (issue.status === "in_progress") {
 		const holder = issue.assignee || issue.owner;
-		qualifiers.push(holder ? `claimed by ${holder}` : "in progress");
+		qualifiers.push(holder ? `claimed by ${inlineText(holder)}` : "in progress");
 	}
-	if (issue.blocked_by && issue.blocked_by.length > 0) {
-		const blockers = issue.blocked_by.map(entry => (typeof entry === "string" ? entry : entry.id));
-		qualifiers.push(`blocked by: ${blockers.join(", ")}`);
+	if (activeBlockers.length > 0) {
+		const blockers = activeBlockers
+			.slice(0, 3)
+			.map(entry => truncateForPrompt(inlineText(typeof entry === "string" ? entry : entry.id), 160));
+		const remaining = activeBlockers.length - blockers.length;
+		qualifiers.push(`blocked by: ${blockers.join(", ")}${remaining > 0 ? `, … +${remaining} more` : ""}`);
 	}
-	if (issue.parent) qualifiers.push(`parent: ${issue.parent}`);
+	if (issue.parent) qualifiers.push(`parent: ${inlineText(issue.parent)}`);
 	if (qualifiers.length > 0) parts.push(`(${qualifiers.join("; ")})`);
-	return parts.join(" ");
+	return truncateForPrompt(parts.join(" "), ISSUE_LINE_CAP);
 }
 
 function formatIssueDetail(issue: BeadsIssue): string {
 	const lines = [formatIssueLine(issue)];
-	if (issue.description?.trim()) lines.push("", issue.description.trim());
-	if (issue.design?.trim()) lines.push("", `Design: ${issue.design.trim()}`);
-	if (issue.acceptance_criteria?.trim()) lines.push("", `Acceptance: ${issue.acceptance_criteria.trim()}`);
-	if (issue.notes?.trim()) lines.push("", `Notes: ${issue.notes.trim()}`);
+	const append = (label: string | null, value: string | undefined): void => {
+		const trimmed = value?.trim();
+		if (!trimmed) return;
+		lines.push(
+			"",
+			label
+				? `${label}: ${truncateForPrompt(trimmed, DETAIL_PREVIEW_CAP)}`
+				: truncateForPrompt(trimmed, DETAIL_PREVIEW_CAP),
+		);
+	};
+	append(null, issue.description);
+	append("Design", issue.design);
+	append("Acceptance", issue.acceptance_criteria);
+	append("Notes", issue.notes);
+	append("Close reason", issue.close_reason);
 	return lines.join("\n");
+}
+
+function resultLimit(limit: number | undefined): number {
+	if (limit === undefined) return LIST_RESULT_CAP;
+	if (!Number.isSafeInteger(limit) || limit < 1) throw new ToolError("`limit` must be a positive integer.");
+	return Math.min(limit, LIST_RESULT_CAP);
+}
+
+function resultOffset(offset: number | undefined): number {
+	if (offset === undefined) return 0;
+	if (!Number.isSafeInteger(offset) || offset < 0) throw new ToolError("`offset` must be a non-negative integer.");
+	return offset;
 }
 
 function issueListResult(
 	op: BeadsInput["op"],
 	issues: BeadsIssue[],
 	emptyText: string,
-	limit?: number,
+	cap: number,
+	offset: number,
 ): AgentToolResult<BeadsToolDetails> {
-	const cap = limit && limit > 0 ? limit : LIST_RESULT_CAP;
-	const visible = issues.slice(0, cap);
-	const truncated = issues.length > visible.length;
-	const lines = visible.map(formatIssueLine);
-	if (truncated) lines.push(formatMoreItems(issues.length - visible.length, "issue"));
+	const candidates = issues.slice(0, cap);
+	const visible: BeadsIssue[] = [];
+	const lines: string[] = [];
+	let usedCharacters = 0;
+	for (const issue of candidates) {
+		const line = formatIssueLine(issue);
+		const addedCharacters = line.length + (lines.length > 0 ? 1 : 0);
+		if (lines.length > 0 && usedCharacters + addedCharacters > TOOL_TEXT_CAP - 128) break;
+		visible.push(issue);
+		lines.push(line);
+		usedCharacters += addedCharacters;
+	}
+	const truncated = visible.length < issues.length;
+	const nextOffset = truncated ? offset + visible.length : undefined;
+	if (nextOffset !== undefined) lines.push(`… more issues; call ${op} again with offset ${nextOffset}.`);
+	const text = lines.length > 0 ? lines.join("\n") : emptyText;
 	return {
-		content: [{ type: "text", text: lines.length > 0 ? lines.join("\n") : emptyText }],
-		details: { op, issues: visible, truncated },
+		content: [{ type: "text", text }],
+		details: { op, issues: visible, truncated, ...(nextOffset !== undefined ? { nextOffset } : {}) },
 	};
 }
 
@@ -316,10 +225,48 @@ function requireField(value: string | undefined, message: string): string {
 }
 
 function collectIds(params: BeadsInput): string[] {
-	const ids = [params.id, ...(params.ids ?? [])]
-		.map(value => value?.trim())
-		.filter((value): value is string => Boolean(value));
-	return [...new Set(ids)];
+	const ids = [
+		...new Set(
+			[params.id, ...(params.ids ?? [])]
+				.map(value => value?.trim())
+				.filter((value): value is string => Boolean(value)),
+		),
+	];
+	if (ids.length > BATCH_ID_CAP) throw new ToolError(`At most ${BATCH_ID_CAP} issue ids may be processed at once.`);
+	return ids;
+}
+
+function actorForSession(session: ToolSession): string {
+	const agentId = session.getAgentId?.()?.trim() || "agent";
+	const sessionId = session.getSessionId?.()?.trim();
+	if (sessionId) {
+		const token = createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
+		return `oms:${agentId}:${token}`;
+	}
+	return `oms:${agentId}`;
+}
+
+function samePath(left: string, right: string): boolean {
+	const normalizedLeft = path.resolve(left);
+	const normalizedRight = path.resolve(right);
+	return process.platform === "win32"
+		? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+		: normalizedLeft === normalizedRight;
+}
+
+function formatStats(stats: BeadsStats): string {
+	return [
+		`Issues: ${stats.total}`,
+		`Open: ${stats.open}`,
+		`In progress: ${stats.inProgress}`,
+		`Closed: ${stats.closed}`,
+		`Deferred: ${stats.deferred}`,
+		`Ready: ${stats.ready}`,
+		`Blocked: ${stats.blocked}`,
+		`Dependencies: ${stats.dependencies}`,
+		`Memories: ${stats.memories}`,
+		`Blocking cycles: ${stats.cycles}`,
+	].join("\n");
 }
 
 export class BeadsTool implements AgentTool<typeof beadsSchema, BeadsToolDetails> {
@@ -329,7 +276,7 @@ export class BeadsTool implements AgentTool<typeof beadsSchema, BeadsToolDetails
 		if (BEADS_READONLY_OPS[op]) return "read";
 		return op === "sync" ? "exec" : "write";
 	};
-	readonly summary = "Track work in the project's beads (bd) dependency-aware issue graph";
+	readonly summary = "Track durable work in OMS's native dependency-aware Beads graph";
 	readonly loadMode = "discoverable";
 	readonly label = "Beads";
 	readonly description = prompt.render(beadsDescription);
@@ -339,8 +286,7 @@ export class BeadsTool implements AgentTool<typeof beadsSchema, BeadsToolDetails
 	constructor(private readonly session: ToolSession) {}
 
 	static createIf(session: ToolSession): BeadsTool | null {
-		if (!bd.available(session)) return null;
-		if (bd.workspaceRoot(session.cwd) === null) return null;
+		if (!session.settings.get("beads.enabled")) return null;
 		return new BeadsTool(session);
 	}
 
@@ -352,168 +298,282 @@ export class BeadsTool implements AgentTool<typeof beadsSchema, BeadsToolDetails
 		_context?: AgentToolContext,
 	): Promise<AgentToolResult<BeadsToolDetails>> {
 		return untilAborted(signal, async () => {
-			switch (params.op) {
-				case "ready":
-					return this.#executeReady(params, signal);
-				case "blocked":
-					return this.#executeBlocked(params, signal);
-				case "list":
-					return this.#executeList(params, signal);
-				case "show":
-					return this.#executeShow(params, signal);
-				case "create":
-					return this.#executeCreate(params, signal);
-				case "update":
-					return this.#executeUpdate(params, signal);
-				case "close":
-					return this.#executeClose(params, signal);
-				case "dep_add":
-					return this.#executeDepAdd(params, signal);
-				case "dep_tree":
-					return this.#executeTextOp(
-						params.op,
-						["dep", "tree", requireField(params.id, "dep_tree requires `id`.")],
-						signal,
-					);
-				case "prime":
-					return this.#executeTextOp(params.op, ["prime"], signal);
-				case "remember":
-					return this.#executeRemember(params, signal);
-				case "stats":
-					return this.#executeTextOp(params.op, ["stats"], signal);
-				case "sync":
-					return this.#executeSync(signal);
+			try {
+				switch (params.op) {
+					case "init":
+						return this.#executeInit(params);
+					case "ready": {
+						const cap = resultLimit(params.limit);
+						const offset = resultOffset(params.offset);
+						return this.#withRepository(repository =>
+							issueListResult(
+								params.op,
+								repository.ready(cap + 1, offset),
+								"No ready work — every open issue is blocked or claimed.",
+								cap,
+								offset,
+							),
+						);
+					}
+					case "blocked": {
+						const cap = resultLimit(params.limit);
+						const offset = resultOffset(params.offset);
+						return this.#withRepository(repository =>
+							issueListResult(params.op, repository.blocked(cap + 1, offset), "No blocked issues.", cap, offset),
+						);
+					}
+					case "list": {
+						const cap = resultLimit(params.limit);
+						const offset = resultOffset(params.offset);
+						return this.#withRepository(repository =>
+							issueListResult(
+								params.op,
+								repository.list(params.status, cap + 1, offset),
+								"No issues found.",
+								cap,
+								offset,
+							),
+						);
+					}
+					case "show":
+						return this.#executeShow(params);
+					case "create":
+						return this.#executeCreate(params);
+					case "update":
+						return this.#executeUpdate(params);
+					case "close":
+						return this.#executeClose(params);
+					case "dep_add":
+						return this.#executeDepAdd(params);
+					case "dep_tree":
+						return this.#withRepository(repository => {
+							const id = requireField(params.id, "dep_tree requires `id`.");
+							const page = pagedText(
+								`${id} dependency tree`,
+								repository.dependencyTree(id),
+								resultOffset(params.offset),
+							);
+							return {
+								content: [{ type: "text", text: page.text }],
+								details: {
+									op: params.op,
+									text: page.text,
+									...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+								},
+							};
+						});
+					case "prime": {
+						const requestedCap =
+							params.limit === undefined ? DEFAULT_MEMORY_RESULT_LIMIT : resultLimit(params.limit);
+						const cap = Math.min(requestedCap, DEFAULT_MEMORY_RESULT_LIMIT);
+						const offset = resultOffset(params.offset);
+						return this.#withRepository(repository => {
+							const text = repository.prime(params.query, offset, cap);
+							return { content: [{ type: "text", text }], details: { op: params.op, text } };
+						});
+					}
+					case "memory":
+						return this.#executeMemory(params);
+					case "remember":
+						return this.#executeRemember(params);
+					case "stats":
+						return this.#withRepository(repository => {
+							const stats = repository.stats();
+							return {
+								content: [{ type: "text", text: formatStats(stats) }],
+								details: { op: params.op, stats },
+							};
+						});
+					case "sync":
+						return this.#executeSync(signal);
+				}
+			} catch (error) {
+				if (error instanceof ToolError) throw error;
+				if (error instanceof NativeBeadsError) throw new ToolError(error.message);
+				throw new ToolError(error instanceof Error ? error.message : String(error));
 			}
 		});
 	}
 
-	async #executeReady(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
-		const args = ["ready", "--json"];
-		if (params.limit && params.limit > 0) args.push("--limit", String(Math.trunc(params.limit)));
-		const issues = await bd.json<BeadsIssue[]>(this.session, args, signal);
-		return issueListResult(
-			params.op,
-			issues,
-			"No ready work — every open issue is blocked or claimed.",
-			params.limit,
-		);
+	#workspaceRoot(): string {
+		const root = findBeadsWorkspaceRoot(this.session.cwd);
+		if (!root)
+			throw new ToolError(
+				"This project is not initialized for native Beads. Run the beads tool with `op: init` first.",
+			);
+		return root;
 	}
 
-	async #executeBlocked(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
-		const issues = await bd.json<BeadsIssue[]>(this.session, ["blocked", "--json"], signal);
-		return issueListResult(params.op, issues, "No blocked issues.", params.limit);
+	#withRepository<T>(operation: (repository: NativeBeadsRepository) => T): T {
+		const repository = NativeBeadsRepository.open(this.#workspaceRoot());
+		try {
+			return operation(repository);
+		} finally {
+			repository.close();
+		}
 	}
 
-	async #executeList(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
-		const args = ["list", "--json"];
-		if (params.status) args.push("--status", params.status);
-		const issues = await bd.json<BeadsIssue[]>(this.session, args, signal);
-		return issueListResult(params.op, issues, "No issues found.", params.limit);
+	#executeInit(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
+		const existingRoot = findBeadsWorkspaceRoot(this.session.cwd);
+		const root = existingRoot ?? findBeadsInitRoot(this.session.cwd);
+		if (!existingRoot && samePath(root, os.homedir())) {
+			throw new ToolError(
+				"Native Beads cannot initialize in the home directory; run init from a project subdirectory.",
+			);
+		}
+		const repository = NativeBeadsRepository.initialize(root, params.prefix);
+		try {
+			const text = `Initialized native Beads at ${repository.beadsDir} with issue prefix ${repository.prefix}.`;
+			return { content: [{ type: "text", text }], details: { op: params.op, text, root } };
+		} finally {
+			repository.close();
+		}
 	}
 
-	async #executeShow(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
+	#executeShow(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
 		const ids = collectIds(params);
 		if (ids.length === 0) throw new ToolError("show requires `id` (or `ids`).");
-		const issues = await bd.json<BeadsIssue[]>(this.session, ["show", ...ids, "--json"], signal);
-		return {
-			content: [{ type: "text", text: issues.map(formatIssueDetail).join("\n\n") || "Issue not found." }],
-			details: { op: params.op, issues },
-		};
-	}
-
-	async #executeCreate(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
-		const title = requireField(params.title, "create requires `title`.");
-		const args = ["create", title, "--json", "-p", String(params.priority ?? 2)];
-		if (params.issueType) args.push("-t", params.issueType);
-		if (params.description?.trim()) args.push(`--description=${params.description}`);
-		if (params.parent?.trim()) args.push("--parent", params.parent.trim());
-		if (params.design?.trim()) args.push(`--design=${params.design}`);
-		if (params.acceptance?.trim()) args.push(`--acceptance=${params.acceptance}`);
-		for (const dep of params.deps ?? []) {
-			if (dep.trim()) args.push("--deps", dep.trim());
+		if (params.field === undefined && ids.length > SHOW_ID_CAP) {
+			throw new ToolError(`At most ${SHOW_ID_CAP} issue ids may be shown with inline details at once.`);
 		}
-		const created = await bd.json<BeadsIssue>(this.session, args, signal);
-		return {
-			content: [{ type: "text", text: `Created ${formatIssueLine(created)}` }],
-			details: { op: params.op, issues: [created] },
-		};
+		return this.#withRepository(repository => {
+			const issues = repository.show(ids);
+			if (params.field !== undefined) {
+				if (issues.length !== 1) throw new ToolError("paged show with `field` requires exactly one issue id.");
+				const page = pagedText(
+					`${issues[0].id} ${params.field}`,
+					issues[0][params.field] ?? "",
+					resultOffset(params.offset),
+				);
+				return {
+					content: [{ type: "text", text: page.text }],
+					details: {
+						op: params.op,
+						issues,
+						text: page.text,
+						...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+					},
+				};
+			}
+			const text = boundedToolText(issues.map(formatIssueDetail).join("\n\n"));
+			return { content: [{ type: "text", text }], details: { op: params.op, issues, text } };
+		});
 	}
 
-	async #executeUpdate(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
+	#executeCreate(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
+		const title = requireField(params.title, "create requires `title`.");
+		return this.#withRepository(repository => {
+			const created = repository.create({
+				title,
+				actor: actorForSession(this.session),
+				...(params.description !== undefined ? { description: params.description } : {}),
+				...(params.issueType !== undefined ? { issueType: params.issueType } : {}),
+				...(params.priority !== undefined ? { priority: params.priority } : {}),
+				...(params.parent?.trim() ? { parent: params.parent.trim() } : {}),
+				...(params.deps !== undefined ? { deps: params.deps } : {}),
+				...(params.design !== undefined ? { design: params.design } : {}),
+				...(params.acceptance !== undefined ? { acceptance: params.acceptance } : {}),
+			});
+			return {
+				content: [{ type: "text", text: `Created ${formatIssueLine(created)}` }],
+				details: { op: params.op, issues: [created] },
+			};
+		});
+	}
+
+	#executeUpdate(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
 		const id = requireField(params.id, "update requires `id`.");
-		const args = ["update", id, "--json"];
-		if (params.claim) args.push("--claim");
-		if (params.title?.trim()) args.push("--title", params.title.trim());
-		if (params.description !== undefined) args.push(`--description=${params.description}`);
-		if (params.notes !== undefined) args.push(`--notes=${params.notes}`);
-		if (params.design !== undefined) args.push(`--design=${params.design}`);
-		if (params.acceptance !== undefined) args.push(`--acceptance=${params.acceptance}`);
-		if (params.priority !== undefined) args.push("--priority", String(params.priority));
-		if (args.length === 3) {
+		const hasChange =
+			params.claim === true ||
+			params.title !== undefined ||
+			params.description !== undefined ||
+			params.notes !== undefined ||
+			params.design !== undefined ||
+			params.acceptance !== undefined ||
+			params.priority !== undefined;
+		if (!hasChange) {
 			throw new ToolError(
 				"update requires at least one change (claim, title, description, notes, design, acceptance, priority).",
 			);
 		}
-		const updated = await bd.json<BeadsIssue[]>(this.session, args, signal);
-		const lines = updated.map(issue => `Updated ${formatIssueLine(issue)}`);
-		return {
-			content: [{ type: "text", text: lines.join("\n") || `Updated ${id}` }],
-			details: { op: params.op, issues: updated },
-		};
+		return this.#withRepository(repository => {
+			const updated = repository.update({
+				id,
+				actor: actorForSession(this.session),
+				...(params.claim !== undefined ? { claim: params.claim } : {}),
+				...(params.title !== undefined ? { title: params.title } : {}),
+				...(params.description !== undefined ? { description: params.description } : {}),
+				...(params.notes !== undefined ? { notes: params.notes } : {}),
+				...(params.design !== undefined ? { design: params.design } : {}),
+				...(params.acceptance !== undefined ? { acceptance: params.acceptance } : {}),
+				...(params.priority !== undefined ? { priority: params.priority } : {}),
+			});
+			return {
+				content: [{ type: "text", text: `Updated ${formatIssueLine(updated)}` }],
+				details: { op: params.op, issues: [updated] },
+			};
+		});
 	}
 
-	async #executeClose(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
+	#executeClose(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
 		const ids = collectIds(params);
 		if (ids.length === 0) throw new ToolError("close requires `id` (or `ids`).");
-		const args = ["close", ...ids, "--json"];
-		if (params.reason?.trim()) args.push("--reason", params.reason.trim());
-		const closed = await bd.json<BeadsIssue[]>(this.session, args, signal);
-		const lines = closed.map(issue => `Closed ${formatIssueLine(issue)}`);
-		return {
-			content: [{ type: "text", text: lines.join("\n") || `Closed ${ids.join(", ")}` }],
-			details: { op: params.op, issues: closed },
-		};
+		return this.#withRepository(repository => {
+			const closed = repository.closeIssues(ids, params.reason);
+			return {
+				content: [{ type: "text", text: closed.map(issue => `Closed ${formatIssueLine(issue)}`).join("\n") }],
+				details: { op: params.op, issues: closed },
+			};
+		});
 	}
 
-	async #executeDepAdd(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
+	#executeDepAdd(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
 		const child = requireField(params.id, "dep_add requires `id` (the dependent issue).");
 		const parent = requireField(params.parent, "dep_add requires `parent` (the issue it depends on).");
-		const output = await bd.text(this.session, ["dep", "add", child, parent], signal);
-		return {
-			content: [{ type: "text", text: output || `${child} now depends on ${parent}.` }],
-			details: { op: params.op, text: output },
-		};
+		return this.#withRepository(repository => {
+			const inserted = repository.addDependency(child, parent, "blocks", actorForSession(this.session));
+			const text = inserted ? `${child} now depends on ${parent}.` : `${child} already depends on ${parent}.`;
+			return { content: [{ type: "text", text }], details: { op: params.op, text } };
+		});
 	}
 
-	async #executeRemember(params: BeadsInput, signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
+	#executeMemory(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
+		const key = requireField(params.key, "memory requires `key`.");
+		return this.#withRepository(repository => {
+			const memory = repository.memory(key);
+			const page = pagedText(`Memory [${memory.key}]`, memory.value, resultOffset(params.offset));
+			return {
+				content: [{ type: "text", text: page.text }],
+				details: {
+					op: params.op,
+					text: page.text,
+					...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+				},
+			};
+		});
+	}
+
+	#executeRemember(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
 		const insight = requireField(params.text, "remember requires `text` (the insight to store).");
-		const output = await bd.text(this.session, ["remember", insight], signal);
-		return {
-			content: [{ type: "text", text: output || "Memory stored." }],
-			details: { op: params.op, text: output },
-		};
+		return this.#withRepository(repository => {
+			const memory = repository.remember(insight);
+			const text = `Remembered [${memory.key}]: ${truncateForPrompt(memory.value, DETAIL_FIELD_CAP)}`;
+			return { content: [{ type: "text", text }], details: { op: params.op, text } };
+		});
 	}
 
 	async #executeSync(signal?: AbortSignal): Promise<AgentToolResult<BeadsToolDetails>> {
-		const pull = await bd.text(this.session, ["dolt", "pull"], signal);
-		const push = await bd.text(this.session, ["dolt", "push"], signal);
-		const text = [pull, push].filter(Boolean).join("\n") || "Beads database synced.";
-		return {
-			content: [{ type: "text", text }],
-			details: { op: "sync", text },
-		};
-	}
-
-	async #executeTextOp(
-		op: BeadsInput["op"],
-		args: string[],
-		signal?: AbortSignal,
-	): Promise<AgentToolResult<BeadsToolDetails>> {
-		const output = await bd.text(this.session, args, signal);
-		return {
-			content: [{ type: "text", text: output || "(no output)" }],
-			details: { op, text: output },
-		};
+		const repository = NativeBeadsRepository.open(this.#workspaceRoot());
+		try {
+			const remote = this.session.settings.get("beads.remote")?.trim() || "origin";
+			const result = await syncNativeBeads(repository, remote, signal);
+			return {
+				content: [{ type: "text", text: result.text }],
+				details: { op: "sync", text: result.text, root: repository.root },
+			};
+		} finally {
+			repository.close();
+		}
 	}
 }
 
@@ -521,7 +581,6 @@ const RENDER_LINE_CAP = 12;
 
 export const beadsToolRenderer = {
 	renderCall(args: unknown, options: RenderResultOptions, uiTheme: Theme) {
-		// Streaming partial args: every field may be absent or mistyped mid-delta.
 		const meta: string[] = [];
 		const op = readStringField(args, "op");
 		const id = readStringField(args, "id");

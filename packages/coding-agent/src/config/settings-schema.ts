@@ -4243,18 +4243,18 @@ export const SETTINGS_SCHEMA = {
 			group: "Available Tools",
 			label: "Beads",
 			description:
-				"Enable the beads tool (bd graph issue tracker: ready-work detection, dependency-aware issues, persistent agent memory). Activates only when the bd binary is installed and the workspace has a .beads database.",
+				"Enable OMS-native Beads: a dependency-aware issue graph and persistent project memory stored directly by TypeScript in .beads.",
 		},
 	},
 
-	"beads.binary": {
+	"beads.remote": {
 		type: "string",
-		default: "",
+		default: "origin",
 		ui: {
 			tab: "tools",
 			group: "Available Tools",
-			label: "Beads Binary",
-			description: "Optional path to an exact bd executable. When empty, bd is resolved from PATH.",
+			label: "Beads Git Remote",
+			description: "Git remote used by native Beads sync. Snapshots use the isolated refs/heads/oms-beads branch.",
 		},
 	},
 
