@@ -14,6 +14,7 @@ import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-soup/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
+import { createSubagentSettings } from "@oh-my-soup/pi-coding-agent/task/executor";
 import { TempDir } from "@oh-my-soup/pi-utils";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
@@ -29,6 +30,8 @@ async function captureProviderContext(options: {
 	supportsSystemPrompt?: boolean;
 	placement?: "auto" | "system" | "first-turn";
 	promptFile?: string;
+	/** Pre-built settings instance; wins over placement/promptFile shorthands. */
+	settingsInstance?: Settings;
 }): Promise<{ context: Context; dispose: () => Promise<void> }> {
 	const api = `test-placement-${Math.random().toString(36).slice(2)}`;
 	const contexts: Context[] = [];
@@ -65,13 +68,15 @@ async function captureProviderContext(options: {
 		sessionManager: SessionManager.inMemory(tempDir.path()),
 		authStorage,
 		modelRegistry,
-		settings: Settings.isolated({
-			"compaction.enabled": false,
-			...(options.placement ? { systemPromptPlacement: options.placement } : {}),
-			...(options.promptFile
-				? { systemPromptFiles: { "managed-primary/placement-probe": options.promptFile } }
-				: {}),
-		}),
+		settings:
+			options.settingsInstance ??
+			Settings.isolated({
+				"compaction.enabled": false,
+				...(options.placement ? { systemPromptPlacement: options.placement } : {}),
+				...(options.promptFile
+					? { systemPromptFiles: { "managed-primary/placement-probe": options.promptFile } }
+					: {}),
+			}),
 		model,
 		systemPrompt: [MARKER_PROMPT],
 		disableExtensionDiscovery: true,
@@ -188,6 +193,38 @@ describe("systemPromptFiles provider wiring (/sprompt)", () => {
 			expect(firstMessageText(flagged.context)).not.toContain(MARKER_PROMPT);
 		} finally {
 			await flagged.dispose();
+		}
+	});
+});
+
+describe("subagent inheritance of /sprompt bindings", () => {
+	afterEach(() => {
+		clearCustomApis();
+	});
+
+	it("createSubagentSettings snapshots bindings and the subagent request carries the file prompt", async () => {
+		using promptDir = TempDir.createSync("@pi-placement-subagent-");
+		const promptFile = promptDir.join("model-prompt.md");
+		await Bun.write(promptFile, "SUBAGENT-FILE-PROMPT: inherited binding.");
+
+		// Parent session settings as /sprompt would leave them.
+		const parentSettings = Settings.isolated({ "compaction.enabled": false });
+		parentSettings.set("systemPromptFiles", { "managed-primary/placement-probe": promptFile });
+		parentSettings.set("systemPromptPlacement", "first-turn");
+
+		// Exactly what the task executor hands to createAgentSession for a child.
+		const subagentSettings = createSubagentSettings(parentSettings);
+		expect(subagentSettings.get("systemPromptFiles")).toEqual({
+			"managed-primary/placement-probe": promptFile,
+		});
+		expect(subagentSettings.get("systemPromptPlacement")).toBe("first-turn");
+
+		const { context, dispose } = await captureProviderContext({ settingsInstance: subagentSettings });
+		try {
+			expect(context.systemPrompt ?? []).toHaveLength(0);
+			expect(firstMessageText(context)).toContain("SUBAGENT-FILE-PROMPT: inherited binding.");
+		} finally {
+			await dispose();
 		}
 	});
 });
