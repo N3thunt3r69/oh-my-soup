@@ -57,6 +57,7 @@
       "@typescript/native-preview": "7.0.0-dev.20260707.2",
       "camoufox-js": "0.12.0",
       "chart.js": "^4.5.1",
+      "chromium-bidi": "12.0.0",
       "diff": "^9.0.0",
       "fastembed": "2.1.0",
       "ghostty-web": "^0.4.0",
