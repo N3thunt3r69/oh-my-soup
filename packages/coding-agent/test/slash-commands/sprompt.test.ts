@@ -140,4 +140,35 @@ describe("/sprompt", () => {
 		await executeAcpBuiltinSlashCommand("/sprompt clear", harness.runtime);
 		expect(harness.output).toHaveBeenLastCalledWith("No prompt file configured for anthropic/claude-fable-5.");
 	});
+
+	it("toggle suspends and re-enables the current model's binding, keeping the path", async () => {
+		using tempDir = TempDir.createSync("@pi-sprompt-toggle-");
+		await Bun.write(tempDir.join("prompt.md"), "toggle me");
+		const harness = createRuntime({ cwd: tempDir.path(), model: CAPABLE_MODEL });
+		const file = tempDir.join("prompt.md");
+
+		await executeAcpBuiltinSlashCommand("/sprompt toggle", harness.runtime);
+		expect(harness.output).toHaveBeenLastCalledWith(
+			"No prompt file configured for anthropic/claude-fable-5. Use /sprompt set <file> first.",
+		);
+
+		await executeAcpBuiltinSlashCommand("/sprompt set prompt.md", harness.runtime);
+
+		await executeAcpBuiltinSlashCommand("/sprompt toggle", harness.runtime);
+		expect(harness.settings.get("systemPromptFiles")).toEqual({
+			"anthropic/claude-fable-5": { path: file, enabled: false },
+		});
+		expect(harness.output).toHaveBeenLastCalledWith(
+			`Disabled prompt file for anthropic/claude-fable-5 (kept ${file}). Run /sprompt toggle to re-enable.`,
+		);
+
+		await executeAcpBuiltinSlashCommand("/sprompt", harness.runtime);
+		expect(harness.output.mock.calls.at(-1)?.[0] as string).toContain(`${file} (disabled) [system prompt]`);
+
+		await executeAcpBuiltinSlashCommand("/sprompt toggle", harness.runtime);
+		expect(harness.settings.get("systemPromptFiles")).toEqual({ "anthropic/claude-fable-5": file });
+		expect(harness.output).toHaveBeenLastCalledWith(
+			`Enabled prompt file for anthropic/claude-fable-5: ${file}. Delivered as system prompt on this model.`,
+		);
+	});
 });

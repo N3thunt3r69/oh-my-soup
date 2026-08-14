@@ -60,6 +60,30 @@ export function modelPromptKey(model: Pick<Model, "provider" | "id">): string {
 	return `${model.provider}/${model.id}`;
 }
 
+/**
+ * Normalized `systemPromptFiles` entry. Stored either as a bare path string
+ * (enabled) or as `{ path, enabled: false }` when `/sprompt toggle` suspends
+ * the binding without forgetting the file.
+ */
+export interface ModelPromptBinding {
+	path: string;
+	enabled: boolean;
+}
+
+/** Normalize a raw `systemPromptFiles` value; `undefined` for malformed entries. */
+export function resolveModelPromptBinding(value: unknown): ModelPromptBinding | undefined {
+	if (typeof value === "string") {
+		return value.length > 0 ? { path: value, enabled: true } : undefined;
+	}
+	if (value && typeof value === "object" && "path" in value) {
+		const candidate = value.path;
+		if (typeof candidate !== "string" || candidate.length === 0) return undefined;
+		const enabled = !("enabled" in value) || value.enabled !== false;
+		return { path: candidate, enabled };
+	}
+	return undefined;
+}
+
 /** mtime-keyed cache so per-request application does not re-read unchanged prompt files. */
 const promptFileCache = new Map<string, { mtimeMs: number; text: string }>();
 
@@ -94,9 +118,9 @@ export async function applyModelPromptFile(
 	model: Pick<Model, "provider" | "id">,
 	files: Record<string, unknown>,
 ): Promise<Context> {
-	const configured = files[modelPromptKey(model)];
-	if (typeof configured !== "string" || configured.length === 0) return context;
-	const text = await loadModelPromptFile(configured);
+	const binding = resolveModelPromptBinding(files[modelPromptKey(model)]);
+	if (!binding?.enabled) return context;
+	const text = await loadModelPromptFile(binding.path);
 	if (!text) return context;
 	return { ...context, systemPrompt: [text] };
 }

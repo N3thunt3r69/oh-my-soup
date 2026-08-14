@@ -136,4 +136,19 @@ describe("applyModelPromptFile", () => {
 		expect(placed.systemPrompt).toBeUndefined();
 		expect(placed.messages[0]).toMatchObject({ role: "user", content: "composed prompt", synthetic: true });
 	});
+
+	test("disabled bindings and object-form entries resolve correctly", async () => {
+		using tempDir = TempDir.createSync("@pi-prompt-file-toggle-");
+		const file = tempDir.join("prompt.md");
+		await Bun.write(file, "bound prompt");
+		const context = baseContext();
+
+		// Disabled binding keeps the session prompt untouched.
+		const disabled = { [modelPromptKey(MODEL)]: { path: file, enabled: false } };
+		expect(await applyModelPromptFile(context, MODEL, disabled)).toBe(context);
+
+		// Object form without enabled: false behaves like the bare string.
+		const objectForm = { [modelPromptKey(MODEL)]: { path: file } };
+		expect((await applyModelPromptFile(context, MODEL, objectForm)).systemPrompt).toEqual(["bound prompt"]);
+	});
 });
