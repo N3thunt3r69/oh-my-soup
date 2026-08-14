@@ -9,6 +9,7 @@ export const BUILTIN_TOOL_NAMES = [
 	"debug",
 	"disasm",
 	"eval",
+	"frida",
 	"github",
 	"glob",
 	"grep",

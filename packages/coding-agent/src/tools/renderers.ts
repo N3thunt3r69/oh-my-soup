@@ -21,6 +21,7 @@ import { computerToolRenderer } from "./computer-renderer";
 import { debugToolRenderer } from "./debug";
 import { disasmToolRenderer } from "./disasm";
 import { evalToolRenderer } from "./eval-render";
+import { fridaToolRenderer } from "./frida";
 import { githubToolRenderer } from "./gh-renderer";
 import { globToolRenderer } from "./glob";
 import { grepToolRenderer } from "./grep";
@@ -91,6 +92,7 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	debug: debugToolRenderer as ToolRenderer,
 	disasm: disasmToolRenderer as ToolRenderer,
 	eval: evalToolRenderer as ToolRenderer,
+	frida: fridaToolRenderer as ToolRenderer,
 	edit: editToolRenderer as ToolRenderer,
 	apply_patch: editToolRenderer as ToolRenderer,
 	glob: globToolRenderer as ToolRenderer,

@@ -5,6 +5,7 @@ describe("clampTimeout", () => {
 	it("returns the per-tool default when no raw timeout is given", () => {
 		expect(clampTimeout("bash")).toBe(TOOL_TIMEOUTS.bash.default);
 		expect(clampTimeout("eval")).toBe(TOOL_TIMEOUTS.eval.default);
+		expect(clampTimeout("frida")).toBe(TOOL_TIMEOUTS.frida.default);
 	});
 
 	it("clamps explicit values to the per-tool min/max", () => {

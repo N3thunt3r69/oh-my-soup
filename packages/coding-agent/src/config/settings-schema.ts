@@ -148,6 +148,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 		"Todos",
 		"Grep & Browser",
 		"Disassembler",
+		"Frida",
 		"Computer",
 		"GitHub",
 		"Output Limits",
@@ -3968,6 +3969,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"frida.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			group: "Available Tools",
+			label: "Frida",
+			description: "Enable the live-process Frida instrumentation tool",
+		},
+	},
+
 	"disasm.defaultBackend": {
 		type: "string",
 		default: "ida",
@@ -4053,6 +4065,17 @@ export const SETTINGS_SCHEMA = {
 			group: "Disassembler",
 			label: "Binary Ninja Python Executable",
 			description: "Python executable compatible with the installed Binary Ninja API",
+		},
+	},
+
+	"frida.python": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Frida",
+			label: "Python Executable",
+			description: "Python 3 executable used to provision and host the managed Frida worker",
 		},
 	},
 

@@ -49,6 +49,7 @@ import { DebugTool } from "./debug";
 import { DisasmTool } from "./disasm";
 import { EvalTool } from "./eval";
 import { resolveEvalBackends } from "./eval-backends";
+import { FridaTool } from "./frida";
 import { GithubTool } from "./gh";
 import { GlobTool } from "./glob";
 import { GrepTool } from "./grep";
@@ -91,6 +92,7 @@ export * from "./disasm";
 export * from "./essential-tools";
 export * from "./eval";
 export * from "./eval-backends";
+export * from "./frida";
 export * from "./gh";
 export * from "./glob";
 export * from "./grep";
@@ -445,6 +447,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	beads: BeadsTool.createIf,
 	debug: DebugTool.createIf,
 	disasm: DisasmTool.createIf,
+	frida: FridaTool.createIf,
 	eval: s => new EvalTool(s),
 	github: GithubTool.createIf,
 	glob: s => new GlobTool(s, { rootPathAlias: true }),
@@ -626,6 +629,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "eval") return allowEval;
 		if (name === "debug") return session.settings.get("debug.enabled");
 		if (name === "disasm") return session.settings.get("disasm.enabled");
+		if (name === "frida") return session.settings.get("frida.enabled");
 		if (name === "todo")
 			return (!includeYield || session.prewalkArmed === true) && session.settings.get("todo.enabled");
 		if (name === "glob") return session.settings.get("glob.enabled");
