@@ -17,6 +17,7 @@ import type { MCPManager } from "@oh-my-soup/pi-coding-agent/mcp/manager";
 import type { CreateAgentSessionResult } from "@oh-my-soup/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-soup/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import type { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { runSubprocess } from "@oh-my-soup/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-soup/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-soup/pi-coding-agent/utils/event-bus";
@@ -147,6 +148,49 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		expect(spy.mock.calls[0]?.[0]?.getApiKey).toBe(getApiKey);
 	});
 
+	it("installs the parent's explicit pin before constructing the child session", async () => {
+		const session = yieldEmittingSession();
+		const inherited: Array<{ provider: string; parent: string; child: string }> = [];
+		const authStorage = {
+			inheritPinnedSessionOAuthAccount(provider: string, parent: string, child: string) {
+				inherited.push({ provider, parent, child });
+				return true;
+			},
+		} as unknown as AuthStorage;
+		const modelRegistry = {
+			authStorage,
+			refresh: async () => {},
+		} as unknown as ModelRegistry;
+		const spy = vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			const childSessionId = options?.sessionManager?.getSessionId();
+			expect(childSessionId).toBeString();
+			expect(inherited.length).toBeGreaterThan(0);
+			expect(inherited.every(call => call.parent === "provider-parent" && call.child === childSessionId)).toBe(true);
+			return createSessionResult(session);
+		});
+
+		const result = await runSubprocess({
+			...baseOptions,
+			authStorage,
+			modelRegistry,
+			parentProviderSessionId: "provider-parent",
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+	it("forwards the parent's search-browser owner unchanged", async () => {
+		const session = yieldEmittingSession();
+		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
+
+		const result = await runSubprocess({
+			...baseOptions,
+			parentSearchBrowserSessionId: "search-browser-parent",
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(spy.mock.calls[0]?.[0]?.searchBrowserSessionId).toBe("search-browser-parent");
+	});
 	it("forwards undefined when the parent has not pre-discovered state", async () => {
 		const session = yieldEmittingSession();
 		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));

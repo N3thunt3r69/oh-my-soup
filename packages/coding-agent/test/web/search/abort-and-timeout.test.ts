@@ -278,22 +278,44 @@ describe("executeSearch abort propagation", () => {
 		expect(secondProviderSearch).not.toHaveBeenCalled();
 	});
 
-	it("still reports provider failures as a tool result when the caller has not aborted", async () => {
-		// Defensive: the abort re-throw must NOT alter normal provider-error
-		// flow. A genuine provider error should still produce an error result
-		// rather than throwing.
-		mockProviderChain([
-			fakeProvider("anthropic", async () => {
-				throw new Error("upstream 500");
-			}),
-		]);
+	it("retries provider failures three times before reporting the final error", async () => {
+		const failedSearch = vi.fn(async () => {
+			throw new Error("upstream 500");
+		});
+		mockProviderChain([fakeProvider("anthropic", failedSearch)]);
 
 		const tool = new WebSearchTool(FAKE_SESSION);
 		const result = await tool.execute("test-id", { query: "anything" });
 		const block = result.content[0];
+
+		expect(failedSearch).toHaveBeenCalledTimes(3);
 		expect(block?.type).toBe("text");
 		expect(block && "text" in block ? block.text : "").toContain("upstream 500");
 		expect(result.details?.error).toContain("upstream 500");
+	});
+
+	it("returns a successful third attempt without loading the fallback provider", async () => {
+		let attempts = 0;
+		const retriedSearch = vi.fn(async (): Promise<SearchResponse> => {
+			attempts++;
+			if (attempts < 3) throw new SearchProviderError("exa", "Transient upstream failure.", 503);
+			return {
+				provider: "exa",
+				sources: [{ title: "Recovered result", url: "https://example.com/recovered" }],
+			};
+		});
+		const fallbackSearch = vi.fn();
+		const getProvider = mockProviderChain([
+			fakeProvider("exa", retriedSearch),
+			fakeProvider("brave", fallbackSearch),
+		]);
+
+		const result = await new WebSearchTool(FAKE_SESSION).execute("test-id", { query: "anything" });
+
+		expect(result.details?.response.provider).toBe("exa");
+		expect(retriedSearch).toHaveBeenCalledTimes(3);
+		expect(getProvider).toHaveBeenCalledTimes(1);
+		expect(fallbackSearch).not.toHaveBeenCalled();
 	});
 
 	it("falls through when a provider returns no renderable search content", async () => {
@@ -314,7 +336,7 @@ describe("executeSearch abort propagation", () => {
 		const tool = new WebSearchTool(FAKE_SESSION);
 		const result = await tool.execute("test-id", { query: "anything" });
 
-		expect(emptyProviderSearch).toHaveBeenCalledTimes(1);
+		expect(emptyProviderSearch).toHaveBeenCalledTimes(3);
 		expect(sourceProviderSearch).toHaveBeenCalledTimes(1);
 		const block = result.content[0];
 		expect(block?.type).toBe("text");
@@ -341,7 +363,10 @@ describe("executeSearch abort propagation", () => {
 		expect(fallbackSearch).not.toHaveBeenCalled();
 	});
 
-	it("falls through after the preferred provider fails", async () => {
+	it("falls through after the preferred provider fails three attempts", async () => {
+		const preferredSearch = vi.fn(async () => {
+			throw new SearchProviderError("exa", "Preferred provider failed.", 500);
+		});
 		const fallbackSearch = vi.fn(
 			async (): Promise<SearchResponse> => ({
 				provider: "brave",
@@ -349,12 +374,7 @@ describe("executeSearch abort propagation", () => {
 			}),
 		);
 		const getProvider = mockProviderChain(
-			[
-				fakeProvider("exa", async () => {
-					throw new SearchProviderError("exa", "Preferred provider failed.", 500);
-				}),
-				fakeProvider("brave", fallbackSearch),
-			],
+			[fakeProvider("exa", preferredSearch), fakeProvider("brave", fallbackSearch)],
 			{ explicitFirst: true },
 		);
 
@@ -363,6 +383,7 @@ describe("executeSearch abort propagation", () => {
 
 		expect(result.details?.response.provider).toBe("brave");
 		expect(getProvider).toHaveBeenCalledTimes(2);
+		expect(preferredSearch).toHaveBeenCalledTimes(3);
 		expect(fallbackSearch).toHaveBeenCalledTimes(1);
 	});
 

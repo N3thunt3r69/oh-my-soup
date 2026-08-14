@@ -11,12 +11,13 @@ import { withHardTimeout } from "./utils";
  * Credential-free engines the Public Web aggregate fans out to. Order is the
  * tiebreak for merged ranking (earlier engines win equal consensus/rank), so
  * engines with the best ranking quality when they answer come first:
- * Google-index engines (startpage, google) lead, and Mojeek's independent
- * index breaks remaining ties (measured 2026-07).
+ * Google-index engines (startpage, google) lead; Yandex and Mojeek add
+ * independent-index coverage for remaining ties (measured 2026-08).
  */
 const PUBLIC_ENGINE_IDS = [
 	"startpage",
 	"google",
+	"yandex",
 	"duckduckgo",
 	"ecosia",
 	"mojeek",
@@ -29,7 +30,7 @@ const MAX_NUM_RESULTS = 30;
 /**
  * Soft deadline for the fan-out: past this point the aggregate returns as
  * soon as it has at least one engine's results. Fast HTML engines answer
- * well under this; browser-backed engines (google, ecosia, mojeek) routinely
+ * well under this; browser-backed engines (google, yandex, ecosia, mojeek) routinely
  * exceed it and are treated as bonus coverage rather than latency floor.
  */
 const SOFT_DEADLINE_MS = 5_000;

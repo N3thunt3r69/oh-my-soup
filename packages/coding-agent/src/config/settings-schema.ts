@@ -61,9 +61,10 @@ import {
  * - Optional UI metadata (label, description, tab, group)
  *
  * UI metadata places the setting in the settings panel: `tab` picks the
- * panel tab, `group` the titled section within it (registered in
- * TAB_GROUPS). Sections render in TAB_GROUPS order; settings within a
- * section keep declaration order.
+ * primary panel tab, `group` the titled section within it (registered in
+ * TAB_GROUPS), and `additionalPlacements` can expose the same setting in
+ * other tabs without defining a second config path. Sections render in
+ * TAB_GROUPS order; settings within a section keep declaration order.
  *
  * The Settings singleton provides type-safe path-based access:
  *   settings.get("compaction.enabled")  // => boolean
@@ -140,7 +141,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 		"Git",
 	],
 	context: ["General", "Compaction", "Rules (TTSR)", "Experimental"],
-	memory: ["General", "Auto-Learn", "Refine", "Mnemopi", "Hindsight"],
+	memory: ["General", "Beads", "Auto-Learn", "Refine", "Mnemopi", "Hindsight"],
 	files: ["Editing", "Reading", "Read Summaries", "LSP"],
 	shell: ["Bash", "Eval & Runtimes"],
 	tools: [
@@ -194,10 +195,18 @@ export type SubmenuOption<V extends string = string> = {
 	description?: string;
 };
 
+export interface SettingUiPlacement {
+	tab: SettingTab;
+	/** Section within the tab; must be listed in TAB_GROUPS[tab]. */
+	group?: string;
+}
+
 interface UiBase {
 	tab: SettingTab;
 	/** Section within the tab; must be listed in TAB_GROUPS[tab]. Ungrouped settings render at the top. */
 	group?: string;
+	/** Additional panel locations backed by this same setting path and value. */
+	additionalPlacements?: readonly SettingUiPlacement[];
 	label: string;
 	description: string;
 	/** Condition function name - setting only shown when true */
@@ -4239,8 +4248,9 @@ export const SETTINGS_SCHEMA = {
 		type: "boolean",
 		default: true,
 		ui: {
-			tab: "tools",
-			group: "Available Tools",
+			tab: "memory",
+			group: "Beads",
+			additionalPlacements: [{ tab: "tools", group: "Available Tools" }],
 			label: "Beads",
 			description:
 				"Enable OMS-native Beads: a dependency-aware issue graph and persistent project memory stored directly by TypeScript in .beads.",
@@ -4251,8 +4261,9 @@ export const SETTINGS_SCHEMA = {
 		type: "string",
 		default: "origin",
 		ui: {
-			tab: "tools",
-			group: "Available Tools",
+			tab: "memory",
+			group: "Beads",
+			additionalPlacements: [{ tab: "tools", group: "Available Tools" }],
 			label: "Beads Git Remote",
 			description: "Git remote used by native Beads sync. Snapshots use the isolated refs/heads/oms-beads branch.",
 		},
@@ -5182,7 +5193,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "providers",
 			group: "Services",
 			label: "Web Search Timeout",
-			description: `Hard timeout for each provider's search transport before web_search advances to the next fallback, in seconds (maximum ${MAX_WEB_SEARCH_TIMEOUT_SECONDS})`,
+			description: `Hard timeout in seconds for each provider search attempt (maximum ${MAX_WEB_SEARCH_TIMEOUT_SECONDS}); web_search tries each provider up to three times before advancing`,
 			options: [
 				{ value: "30", label: "30 seconds" },
 				{ value: "60", label: "1 minute" },
@@ -5892,9 +5903,14 @@ export function getUi(path: SettingPath): AnyUiMetadata | undefined {
 	return "ui" in def ? (def.ui as AnyUiMetadata) : undefined;
 }
 
+/** Get every declared setting path in schema order. */
+export function getAllPaths(): SettingPath[] {
+	return Object.keys(SETTINGS_SCHEMA) as SettingPath[];
+}
+
 /** Get all paths for a specific tab */
 export function getPathsForTab(tab: SettingTab): SettingPath[] {
-	return (Object.keys(SETTINGS_SCHEMA) as SettingPath[]).filter(path => {
+	return getAllPaths().filter(path => {
 		const ui = getUi(path);
 		return ui?.tab === tab;
 	});

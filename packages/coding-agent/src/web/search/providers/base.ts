@@ -72,6 +72,11 @@ export interface SearchParams {
 	 * caller's agent session when available; otherwise omit.
 	 */
 	sessionId?: string;
+	/**
+	 * Stable logical browser owner shared by a parent AgentSession and its
+	 * subagents. Browser-backed providers serialize onto that session's page.
+	 */
+	searchBrowserSessionId?: string;
 	antigravityEndpointMode?: "auto" | "production" | "sandbox";
 	geminiModel?: string;
 }

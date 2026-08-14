@@ -257,6 +257,8 @@ export interface ToolSession {
 	 * session-file id. Subagent spawns use it to inherit pinned OAuth accounts.
 	 */
 	getProviderSessionId?: () => string | null;
+	/** Stable search-browser owner inherited unchanged by subagents. */
+	getSearchBrowserSessionId?: () => string | null;
 	/** Get Hindsight runtime state for this agent session. */
 	getHindsightSessionState?: () => HindsightSessionState | undefined;
 	/** Get Mnemopi runtime state for this agent session. */

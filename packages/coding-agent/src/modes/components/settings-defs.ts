@@ -4,15 +4,18 @@
  * settings selector.
  *
  * To add a new setting to the UI: declare it in `settings-schema.ts`
- * with a `ui` block carrying `tab` and `group` (the group must be listed
- * in `TAB_GROUPS[tab]`). If it needs a submenu, include `options: [...]`
- * (or `options: "runtime"` for runtime-injected lists like themes).
+ * with a `ui` block carrying its primary `tab` and `group` (the group
+ * must be listed in `TAB_GROUPS[tab]`). Use `additionalPlacements` to
+ * render the same setting path in other tabs. If it needs a submenu,
+ * include `options: [...]` (or `options: "runtime"` for runtime-injected
+ * lists like themes).
  */
 
 import { TERMINAL } from "@oh-my-soup/pi-tui";
 import { Settings } from "../../config/settings";
 import {
 	type AnyUiMetadata,
+	getAllPaths,
 	getDefault,
 	getEnumValues,
 	getPathsForTab,
@@ -22,6 +25,7 @@ import {
 	SETTING_TABS,
 	type SettingPath,
 	type SettingTab,
+	type SettingUiPlacement,
 	type SubmenuOption,
 	TAB_GROUPS,
 } from "../../config/settings-schema";
@@ -156,13 +160,21 @@ function resolveOptions(ui: AnyUiMetadata): OptionList | "runtime" | undefined {
 	return ui.options;
 }
 
-function pathToSettingDef(path: SettingPath): SettingDef | null {
+function pathToSettingDef(path: SettingPath, placement?: SettingUiPlacement): SettingDef | null {
 	const ui = getUi(path);
 	if (!ui) return null;
 
 	const schemaType = getType(path);
 	const condition = ui.condition ? CONDITIONS[ui.condition] : undefined;
-	const base = { path, label: ui.label, description: ui.description, tab: ui.tab, group: ui.group, condition };
+	const resolvedPlacement = placement ?? ui;
+	const base = {
+		path,
+		label: ui.label,
+		description: ui.description,
+		tab: resolvedPlacement.tab,
+		group: resolvedPlacement.group,
+		condition,
+	};
 
 	if (schemaType === "boolean") {
 		return { ...base, type: "boolean" };
@@ -243,7 +255,16 @@ export function getAllSettingDefs(): SettingDef[] {
  * declaration order is preserved.
  */
 export function getSettingsForTab(tab: SettingTab): SettingDef[] {
-	const defs = getAllSettingDefs().filter(def => def.tab === tab);
+	const defs: SettingDef[] = [];
+	for (const path of getAllPaths()) {
+		const ui = getUi(path);
+		if (!ui) continue;
+		const placement =
+			ui.tab === tab ? { tab: ui.tab, group: ui.group } : ui.additionalPlacements?.find(item => item.tab === tab);
+		if (!placement) continue;
+		const def = pathToSettingDef(path, placement);
+		if (def) defs.push(def);
+	}
 	const order = TAB_GROUPS[tab];
 	const rank = (def: SettingDef): number => {
 		if (!def.group) return -1;

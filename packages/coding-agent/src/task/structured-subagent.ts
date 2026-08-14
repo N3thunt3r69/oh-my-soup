@@ -389,6 +389,7 @@ function buildExecutorOptions(
 		additionalDirectories: session.additionalDirectories,
 		getApiKey: session.getApiKey,
 		parentProviderSessionId: session.getProviderSessionId?.() ?? undefined,
+		parentSearchBrowserSessionId: session.getSearchBrowserSessionId?.() ?? undefined,
 		agent: policy.effectiveAgent,
 		task: renderSubagentPrompt(request.assignment),
 		assignment: request.assignment.trim(),

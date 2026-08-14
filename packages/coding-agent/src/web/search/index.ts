@@ -38,6 +38,8 @@ import {
 	type SearchResponse,
 } from "./types";
 
+const MAX_WEB_SEARCH_ATTEMPTS = 3;
+
 /** Web search tool parameters schema */
 export const webSearchSchema = type({
 	query: "string",
@@ -131,6 +133,7 @@ interface ExecuteSearchOptions {
 	authStorage: AuthStorage;
 	modelRegistry?: ModelRegistry;
 	sessionId?: string;
+	searchBrowserSessionId?: string;
 	signal?: AbortSignal;
 }
 
@@ -140,7 +143,7 @@ async function executeSearch(
 	params: SearchQueryParams,
 	options: ExecuteSearchOptions,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: SearchRenderDetails }> {
-	const { authStorage, modelRegistry, sessionId, signal } = options;
+	const { authStorage, modelRegistry, sessionId, searchBrowserSessionId, signal } = options;
 	const explicitProvider = params.provider;
 	let candidates: SearchProviderCandidate[];
 	if (explicitProvider && explicitProvider !== "auto") {
@@ -202,7 +205,7 @@ async function executeSearch(
 			availableProviderCount++;
 			lastProvider = provider;
 
-			const response = await provider.search({
+			const providerParams = {
 				query: params.query,
 				parsedQuery,
 				limit: params.limit,
@@ -216,36 +219,49 @@ async function executeSearch(
 				authStorage,
 				modelRegistry,
 				sessionId,
+				searchBrowserSessionId,
 				antigravityEndpointMode,
 				geminiModel,
-			});
-
-			// Lenient constraint pass over whatever the provider returned: enforce
-			// site:/inurl:/intitle:/filetype:/date directives the provider could
-			// not (or only partially) honor natively, relaxing any dimension that
-			// would wipe out every result. Citations/answer text stay untouched.
-			let finalResponse = response;
-			const constraintNotes: string[] = [];
-			if (parsedQuery.hasConstraints && response.sources.length > 0) {
-				const filtered = applyQueryConstraints(response.sources, parsedQuery);
-				if (filtered.sources.length !== response.sources.length) {
-					finalResponse = { ...response, sources: filtered.sources };
-				}
-				for (const label of filtered.dropped) {
-					constraintNotes.push(`no results matched \`${label}\`; the constraint was relaxed`);
-				}
-			}
-
-			if (!hasRenderableSearchContent(finalResponse)) {
-				throw new SearchProviderError(provider.id, `${provider.label} returned no renderable search content.`, 204);
-			}
-
-			const text = formatForLLM(finalResponse, constraintNotes);
-
-			return {
-				content: [{ type: "text" as const, text }],
-				details: { response: finalResponse },
 			};
+
+			for (let attempt = 1; attempt <= MAX_WEB_SEARCH_ATTEMPTS; attempt++) {
+				try {
+					const response = await provider.search(providerParams);
+
+					// Lenient constraint pass over whatever the provider returned: enforce
+					// site:/inurl:/intitle:/filetype:/date directives the provider could
+					// not (or only partially) honor natively, relaxing any dimension that
+					// would wipe out every result. Citations/answer text stay untouched.
+					let finalResponse = response;
+					const constraintNotes: string[] = [];
+					if (parsedQuery.hasConstraints && response.sources.length > 0) {
+						const filtered = applyQueryConstraints(response.sources, parsedQuery);
+						if (filtered.sources.length !== response.sources.length) {
+							finalResponse = { ...response, sources: filtered.sources };
+						}
+						for (const label of filtered.dropped) {
+							constraintNotes.push(`no results matched \`${label}\`; the constraint was relaxed`);
+						}
+					}
+
+					if (!hasRenderableSearchContent(finalResponse)) {
+						throw new SearchProviderError(
+							provider.id,
+							`${provider.label} returned no renderable search content.`,
+							204,
+						);
+					}
+
+					const text = formatForLLM(finalResponse, constraintNotes);
+					return {
+						content: [{ type: "text" as const, text }],
+						details: { response: finalResponse },
+					};
+				} catch (error) {
+					throwIfAborted(signal);
+					if (attempt === MAX_WEB_SEARCH_ATTEMPTS) throw error;
+				}
+			}
 		} catch (error) {
 			// Surface user-initiated cancellation immediately so the session sees
 			// a clean abort instead of a generic "all providers failed" message.
@@ -290,7 +306,13 @@ async function executeSearch(
  */
 export async function runSearchQuery(
 	params: SearchQueryParams,
-	options: { authStorage?: AuthStorage; modelRegistry?: ModelRegistry; sessionId?: string; signal?: AbortSignal } = {},
+	options: {
+		authStorage?: AuthStorage;
+		modelRegistry?: ModelRegistry;
+		sessionId?: string;
+		searchBrowserSessionId?: string;
+		signal?: AbortSignal;
+	} = {},
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: SearchRenderDetails }> {
 	const createdAuthStorage = options.authStorage || options.modelRegistry ? undefined : await discoverAuthStorage();
 	const authStorage = options.authStorage ?? options.modelRegistry?.authStorage ?? createdAuthStorage;
@@ -303,6 +325,7 @@ export async function runSearchQuery(
 			authStorage,
 			modelRegistry,
 			sessionId: options.sessionId,
+			searchBrowserSessionId: options.searchBrowserSessionId,
 			signal: options.signal,
 		});
 	} finally {
@@ -341,10 +364,12 @@ export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchRe
 	): Promise<AgentToolResult<SearchRenderDetails>> {
 		const authStorage = this.#session.authStorage ?? (await discoverAuthStorage());
 		const sessionId = this.#session.getSessionId?.() ?? undefined;
+		const searchBrowserSessionId = this.#session.getSearchBrowserSessionId?.() ?? sessionId;
 		return executeSearch(_toolCallId, params, {
 			authStorage,
 			modelRegistry: this.#session.modelRegistry,
 			sessionId,
+			searchBrowserSessionId,
 			signal,
 		});
 	}
@@ -371,6 +396,7 @@ export const webSearchCustomTool: CustomTool<typeof webSearchSchema, SearchRende
 			authStorage,
 			modelRegistry: ctx.modelRegistry,
 			sessionId,
+			searchBrowserSessionId: ctx.searchBrowserSessionId ?? sessionId,
 			signal,
 		});
 	},

@@ -96,7 +96,9 @@ async function runSmokeTest(): Promise<void> {
 	const { smokeTestDaemonBroker } = await import("./launch/client");
 	const { smokeTestLspMux } = await import("./lsp/mux/daemon");
 	const { smokeTestTerminalOutputWorker } = await import("./launch/terminal-output-worker-client");
+	const { smokeTestCamoufoxAssets } = await import("./tools/browser/launch");
 	await smokeTestSyncWorker();
+	await smokeTestCamoufoxAssets();
 
 	const statsServer = await startServer(0);
 	try {

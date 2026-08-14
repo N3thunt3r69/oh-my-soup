@@ -112,6 +112,7 @@ async function callEcosiaHtml(params: SearchParams): Promise<string> {
 			fetch: params.fetch,
 			signal,
 			timeoutMs: params.timeoutMs,
+			searchBrowserSessionId: params.searchBrowserSessionId,
 			referer: ECOSIA_HOME_URL,
 			browser: {
 				homeUrl: ECOSIA_HOME_URL,

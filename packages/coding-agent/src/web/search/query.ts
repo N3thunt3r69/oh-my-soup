@@ -639,8 +639,8 @@ export function formatQuery(q: StructuredQuery, syntax: QuerySyntax = {}): strin
 
 /**
  * Build the engine query for a credential-free HTML engine (Google,
- * Startpage, DuckDuckGo, Ecosia, Mojeek, SearXNG, and the Public Web
- * fan-out over them).
+ * Yandex, Startpage, DuckDuckGo, Ecosia, Mojeek, SearXNG, and the Public
+ * Web fan-out over them).
  *
  * Canonicalizes directives via {@link formatQuery} with the engine's
  * {@link QuerySyntax} (default: full Google syntax), after demoting the

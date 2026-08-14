@@ -46,7 +46,7 @@ import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../../thinking";
 import { getTabBarTheme } from "../shared";
 import { bottomBorder, divider, row, topBorder } from "./overlay-box";
 import { handleInputOrEscape, PluginSettingsComponent } from "./plugin-settings";
-import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
+import { getAllSettingDefs, getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "./status-line/presets";
 
@@ -802,9 +802,11 @@ export class SettingsSelectorComponent implements Component {
 		const tabResults: { tab: SettingTab; matched: SettingItem[]; bestScore: number; order: number }[] = [];
 		this.#searchFirstMatch.clear();
 		let total = 0;
+		const primaryDefs = getAllSettingDefs();
 		for (const tab of SETTING_TABS) {
 			const candidates: SettingItem[] = [];
-			for (const def of getSettingsForTab(tab)) {
+			for (const def of primaryDefs) {
+				if (def.tab !== tab) continue;
 				const item = this.#defToItem(def);
 				if (item) candidates.push(item);
 			}

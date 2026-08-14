@@ -2,6 +2,7 @@ import type { FetchImpl } from "@oh-my-soup/pi-ai";
 import { untilAborted } from "@oh-my-soup/pi-utils";
 import type { Browser, Page } from "puppeteer-core";
 import { adoptInitialPage, launchCamoufoxBrowser, loadPuppeteer } from "../../../tools/browser/launch";
+import { runInSearchBrowserSession } from "../../../tools/browser/search-session";
 import { buildBrowserNavigationHeaders } from "./browser-headers";
 import { SEARCH_HARD_TIMEOUT_MS } from "./utils";
 
@@ -13,10 +14,19 @@ export interface LoadedHtmlPage {
 }
 
 interface BrowserFallbackOptions {
+	/**
+	 * `always` skips the preliminary global fetch and navigates in Camoufox.
+	 * Agent callers reuse their retained session browser; one-shot callers
+	 * launch a process for the request. An explicitly injected `fetch` remains
+	 * a deterministic transport override for tests and programmatic callers.
+	 */
+	mode?: "fallback" | "always";
 	homeUrl?: string;
 	ready?: { selector: string; timeoutMs: number };
 	afterNavigation?: (page: Page, signal: AbortSignal) => Promise<void>;
 	shouldFallback: (page: LoadedHtmlPage) => boolean;
+	/** Throw inside the serialized page operation so a rejected final page cannot taint the retained browser. */
+	onFallbackExhausted?: (page: LoadedHtmlPage) => Error;
 	attempts?: number;
 	retryDelayMs?: number;
 }
@@ -31,6 +41,8 @@ export interface BrowserFetchOptions {
 	init?: Omit<RequestInit, "headers" | "signal">;
 	headers?: Readonly<Record<string, string>>;
 	browser?: BrowserFallbackOptions;
+	/** Stable owner shared by a parent AgentSession and all of its subagents. */
+	searchBrowserSessionId?: string;
 }
 
 async function fetchHtmlPage(url: string, options: BrowserFetchOptions, fetchImpl: FetchImpl): Promise<LoadedHtmlPage> {
@@ -46,16 +58,60 @@ async function fetchHtmlPage(url: string, options: BrowserFetchOptions, fetchImp
 	return { html: await response.text(), status: response.status, url: response.url || url };
 }
 
+async function navigateBrowserPage(
+	page: Page,
+	fresh: boolean,
+	url: string,
+	options: BrowserFallbackOptions,
+	signal: AbortSignal,
+	timeoutMs: number,
+): Promise<LoadedHtmlPage> {
+	const { homeUrl, ready, retryDelayMs } = options;
+	const attempts = Math.max(1, options.attempts ?? 1);
+	if (fresh && homeUrl) {
+		await untilAborted(signal, () => page.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs }));
+	}
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		if (attempt > 0 && retryDelayMs) {
+			await untilAborted(signal, () => Bun.sleep(retryDelayMs));
+		}
+
+		const response = await untilAborted(signal, () =>
+			page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs }),
+		);
+		if (options.afterNavigation) await options.afterNavigation(page, signal);
+		if (ready) {
+			await untilAborted(signal, () =>
+				page.waitForSelector(ready.selector, { timeout: ready.timeoutMs }).catch(() => null),
+			);
+		}
+		const loaded = {
+			html: await untilAborted(signal, () => page.content()),
+			status: response?.status() ?? 200,
+			url: page.url(),
+		};
+		if (!options.shouldFallback(loaded)) return loaded;
+		if (attempt === attempts - 1) {
+			if (options.onFallbackExhausted) throw options.onFallbackExhausted(loaded);
+			return loaded;
+		}
+	}
+	throw new Error("Browser fallback exhausted without a response");
+}
+
 async function browseHtmlPage(
 	url: string,
 	options: BrowserFallbackOptions,
 	signal: AbortSignal,
 	timeoutMs = SEARCH_HARD_TIMEOUT_MS,
+	searchBrowserSessionId?: string,
 ): Promise<LoadedHtmlPage> {
-	const { homeUrl, ready } = options;
-	const attempts = Math.max(1, options.attempts ?? 1);
-	// One-shot Camoufox engine per fallback: the Camoufox fingerprint is the
-	// stealth layer now, and per-query isolation beats a shared browser.
+	if (searchBrowserSessionId) {
+		return runInSearchBrowserSession(searchBrowserSessionId, signal, ({ page, fresh, signal: sessionSignal }) =>
+			navigateBrowserPage(page, fresh, url, options, sessionSignal, timeoutMs),
+		);
+	}
+
 	const puppeteer = await untilAborted(signal, () => loadPuppeteer());
 	let browser: Browser | undefined;
 	let page: Page | undefined;
@@ -71,52 +127,38 @@ async function browseHtmlPage(
 			() => undefined,
 		);
 		browser = await untilAborted(signal, () => launch);
-		const activePage = await untilAborted(signal, () => adoptInitialPage(browser!));
-		page = activePage;
-		if (homeUrl) {
-			await untilAborted(signal, () =>
-				activePage.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs }),
-			);
-		}
-		for (let attempt = 0; attempt < attempts; attempt++) {
-			if (attempt > 0 && options.retryDelayMs) await Bun.sleep(options.retryDelayMs);
-
-			const response = await untilAborted(signal, () =>
-				activePage.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs }),
-			);
-			if (options.afterNavigation) await options.afterNavigation(activePage, signal);
-			if (ready) {
-				await untilAborted(signal, () =>
-					activePage.waitForSelector(ready.selector, { timeout: ready.timeoutMs }).catch(() => null),
-				);
-			}
-			const loaded = {
-				html: await untilAborted(signal, () => activePage.content()),
-				status: response?.status() ?? 200,
-				url: activePage.url(),
-			};
-			if (!options.shouldFallback(loaded) || attempt === attempts - 1) return loaded;
-		}
-		throw new Error("Browser fallback exhausted without a response");
+		page = await untilAborted(signal, () => adoptInitialPage(browser!));
+		return await navigateBrowserPage(page, true, url, options, signal, timeoutMs);
 	} finally {
 		await page?.close().catch(() => undefined);
 		await browser?.close().catch(() => undefined);
 	}
 }
 
-/** Fetch with a fresh browser profile, escalating rejected production responses to the stealth browser. */
+/**
+ * Load HTML through a browser-profiled fetch or Camoufox. Agent callers pass a
+ * stable `searchBrowserSessionId` to reuse one serialized browser; one-shot
+ * programmatic callers retain launch-per-request behavior.
+ *
+ * `browser.mode: "always"` makes Camoufox the production transport rather
+ * than a rejection fallback; an injected fetch remains an explicit override.
+ */
 export async function browserFetch(url: string, options: BrowserFetchOptions): Promise<LoadedHtmlPage> {
 	const fetchImpl = options.fetch ?? fetch;
+	if (options.browser?.mode === "always" && !options.fetch) {
+		return browseHtmlPage(url, options.browser, options.signal, options.timeoutMs, options.searchBrowserSessionId);
+	}
+
 	let page: LoadedHtmlPage;
 	try {
 		page = await fetchHtmlPage(url, options, fetchImpl);
 	} catch (error) {
 		if (options.fetch || !options.browser) throw error;
-		return browseHtmlPage(url, options.browser, options.signal, options.timeoutMs);
+		return browseHtmlPage(url, options.browser, options.signal, options.timeoutMs, options.searchBrowserSessionId);
 	}
 
 	if (!options.browser || options.fetch) return page;
 	const isSuccessful = page.status >= 200 && page.status < 300;
 	if (isSuccessful && !options.browser.shouldFallback(page)) return page;
-	return browseHtmlPage(url, options.browser, options.signal, options.timeoutMs);
+	return browseHtmlPage(url, options.browser, options.signal, options.timeoutMs, options.searchBrowserSessionId);
 }

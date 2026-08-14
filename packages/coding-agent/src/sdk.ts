@@ -211,6 +211,7 @@ import {
 	xdevDocsAll,
 	xdevEntries,
 } from "./tools";
+import { retainSearchBrowserSession } from "./tools/browser/search-session";
 import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
 import { ToolContextStore } from "./tools/context";
 import { isIrcEnabled } from "./tools/hub";
@@ -409,6 +410,11 @@ export interface CreateAgentSessionOptions {
 	/** Optional provider-facing session identifier for prompt caches and sticky auth selection.
 	 * Keeps persisted session files isolated while reusing provider-side caches. */
 	providerSessionId?: string;
+	/**
+	 * Stable logical owner for browser-backed search. Subagents inherit this
+	 * unchanged so the whole agent family serializes onto one Camoufox page.
+	 */
+	searchBrowserSessionId?: string;
 	/** Optional provider-facing prompt cache key, distinct from request lineage. */
 	providerPromptCacheKey?: string;
 	/** Whether `providerPromptCacheKey` is caller-pinned or inherited from a full fork. */
@@ -891,6 +897,7 @@ function createCustomToolContext(ctx: ExtensionContext): CustomToolContext {
 		hasQueuedMessages: ctx.hasPendingMessages,
 		abort: ctx.abort,
 		localProtocolOptions: ctx.localProtocolOptions,
+		searchBrowserSessionId: ctx.searchBrowserSessionId,
 	};
 }
 
@@ -1346,6 +1353,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		await sessionManager.setAdditionalDirectories(merged);
 	}
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
+	let searchBrowserSessionId = options.searchBrowserSessionId ?? sessionManager.getSessionId();
 	const forkCacheShapeChanged =
 		options.model !== undefined ||
 		options.modelPattern !== undefined ||
@@ -1637,6 +1645,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		agentRegistry.unregister(resolvedAgentId, ref);
 	};
 	const evalKernelOwnerId = `agent-session:${Snowflake.next()}`;
+	let releaseSearchBrowserLease: (() => Promise<void>) | undefined;
+	let unregisterSearchBrowserSessionChange: (() => void) | undefined;
+	let searchBrowserReleaseTail = Promise.resolve();
+	const queueSearchBrowserRelease = (release: (() => Promise<void>) | undefined): void => {
+		if (!release) return;
+		searchBrowserReleaseTail = searchBrowserReleaseTail.then(release).catch(error => {
+			logger.warn("Failed to release search browser session", { error: String(error) });
+		});
+	};
 
 	try {
 		const getActiveModelString = (): string | undefined => {
@@ -1704,6 +1721,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				session ? session.trackEvalExecution(execution, abortController) : execution,
 			getSessionId: () => sessionManager.getSessionId?.() ?? null,
 			getProviderSessionId: () => session?.sessionId ?? null,
+			getSearchBrowserSessionId: () => searchBrowserSessionId,
 			isDisposed: () => session?.isDisposed ?? false,
 			getHindsightSessionState: () => session?.getHindsightSessionState(),
 			getMnemopiSessionState: () => session?.getMnemopiSessionState(),
@@ -2575,6 +2593,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			settings,
 			localProtocolOptions,
 			() => (hasSession ? session.getAsyncJobSnapshot() : null),
+			() => searchBrowserSessionId,
 		);
 
 		credentialDisabledTarget = extensionRunner;
@@ -2594,6 +2613,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			},
 			settings,
 			localProtocolOptions,
+			searchBrowserSessionId,
 			autoApprove: options.autoApprove ?? false,
 		});
 		const toolContextStore = new ToolContextStore(getSessionContext);
@@ -3491,6 +3511,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			titleSystemPrompt: options.titleSystemPrompt,
 		});
 		hasSession = true;
+		releaseSearchBrowserLease = retainSearchBrowserSession(searchBrowserSessionId);
+		if (options.searchBrowserSessionId === undefined) {
+			unregisterSearchBrowserSessionChange = session.registerSessionChangeCallback(() => {
+				const nextSessionId = sessionManager.getSessionId();
+				if (nextSessionId === searchBrowserSessionId) return;
+				const previousRelease = releaseSearchBrowserLease;
+				searchBrowserSessionId = nextSessionId;
+				releaseSearchBrowserLease = retainSearchBrowserSession(nextSessionId);
+				queueSearchBrowserRelease(previousRelease);
+			});
+		}
 		// Extension factories normally register tools before session construction,
 		// but Pi-compatible extensions may discover them asynchronously from a
 		// session_start handler. Install those late registrations into the live
@@ -3664,6 +3695,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					unsubscribeCredentialDisabled?.();
 					unsubscribeMcpNotifications?.();
 					unregisterMcpPostmortem?.();
+					unregisterSearchBrowserSessionChange?.();
+					unregisterSearchBrowserSessionChange = undefined;
+					queueSearchBrowserRelease(releaseSearchBrowserLease);
+					releaseSearchBrowserLease = undefined;
+					await searchBrowserReleaseTail;
 					for (const callback of disposeCallbacks) callback();
 					disposeCallbacks.clear();
 					// Drop refs so the process-global postmortem list doesn't retain

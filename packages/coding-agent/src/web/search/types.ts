@@ -75,7 +75,12 @@ export const SEARCH_PROVIDER_OPTIONS = [
 	{
 		value: "google",
 		label: "Google",
-		description: "Credential-free browser-backed fallback; slower and may be bot-challenged",
+		description: "Credential-free direct Google results in the session's Camoufox browser; may be challenged",
+	},
+	{
+		value: "yandex",
+		label: "Yandex",
+		description: "Credential-free direct Yandex results in the session's Camoufox browser; may be challenged",
 	},
 	{
 		value: "mojeek",

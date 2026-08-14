@@ -349,6 +349,8 @@ export interface ExecutorOptions {
 	 * account picker) onto the child session's auth stickiness.
 	 */
 	parentProviderSessionId?: string;
+	/** Stable browser-backed search owner inherited unchanged by child sessions. */
+	parentSearchBrowserSessionId?: string;
 	worktree?: string;
 	agent: AgentDefinition;
 	task: string;
@@ -3138,6 +3140,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						: [...defaultPrompt.slice(0, -1), subagentPrompt, defaultPrompt[defaultPrompt.length - 1]];
 				},
 				sessionManager: sessionManagerForRun,
+				searchBrowserSessionId: options.parentSearchBrowserSessionId,
 				hasUI: false,
 				prewalk,
 				spawns: spawnsEnv,
@@ -3167,6 +3170,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			if (options.parentArtifactManager) {
 				sessionManager.adoptArtifactManager(options.parentArtifactManager);
 			}
+			// Seed the child's provider identity before createAgentSession: startup
+			// can prewarm authenticated transports, so copying the pin after the
+			// factory resolves is already too late to guarantee the chosen account.
+			if (options.parentProviderSessionId) {
+				inheritPinnedCredentials(authStorage, options.parentProviderSessionId, sessionManager.getSessionId());
+			}
 			sessionOpenedAt = performance.now();
 
 			const sessionPromise = createAgentSession(buildSubagentSessionOptions(sessionManager, null));
@@ -3182,14 +3191,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 			sessionCreatedAt = performance.now();
 
-			// Route the child to the parent's explicitly pinned OAuth account
-			// (/rotateaccount, account picker) before its first request; without
-			// this, account ranking re-ranks by usage headroom — biased away from
-			// the pinned account precisely because the parent is burning it.
-			if (options.parentProviderSessionId) {
-				inheritPinnedCredentials(authStorage, options.parentProviderSessionId, session.sessionId);
-			}
-
 			monitor.setActiveSession(session);
 			installRegistryStatusSync(session);
 			if (sessionFile !== null && worktree === undefined) {
@@ -3204,14 +3205,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					if (options.parentArtifactManager) {
 						reopened.adoptArtifactManager(options.parentArtifactManager);
 					}
+					if (options.parentProviderSessionId) {
+						inheritPinnedCredentials(authStorage, options.parentProviderSessionId, reopened.getSessionId());
+					}
 					const { session: revived } = await createAgentSession(
 						buildSubagentSessionOptions(reopened, expectedAgentRef),
 					);
 					installRegistryStatusSync(revived);
 					installIrcWakeTurnMonitor(revived);
-					if (options.parentProviderSessionId) {
-						inheritPinnedCredentials(authStorage, options.parentProviderSessionId, revived.sessionId);
-					}
 					return revived;
 				};
 			}

@@ -453,6 +453,8 @@ export interface ExtensionContext {
 	modelRegistry: ModelRegistry;
 	/** Calling session's `local://` root mapping for external tool bridges. */
 	localProtocolOptions?: LocalProtocolOptions;
+	/** Stable search-browser owner shared by the parent session and its subagents. */
+	searchBrowserSessionId?: string;
 	/** Current model (may be undefined) */
 	model: Model | undefined;
 	/** Read-only model query facade: list / current / resolve / family. */

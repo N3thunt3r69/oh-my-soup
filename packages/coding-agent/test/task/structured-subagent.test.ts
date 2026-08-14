@@ -581,4 +581,25 @@ describe("structured subagent primitive", () => {
 		expect(await fs.stat(artifactsDir ?? "")).toBeDefined();
 		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
+
+	it("forwards the parent provider and search-browser identities", async () => {
+		mockDiscovery();
+		const parentSession = session();
+		Object.assign(parentSession, {
+			getProviderSessionId: () => "provider-parent",
+			getSearchBrowserSessionId: () => "search-browser-parent",
+		});
+		let dispatched: executorModule.ExecutorOptions | undefined;
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched = options;
+			return result();
+		});
+
+		await runStructuredSubagent(request({ session: parentSession }));
+
+		expect(dispatched).toMatchObject({
+			parentProviderSessionId: "provider-parent",
+			parentSearchBrowserSessionId: "search-browser-parent",
+		});
+	});
 });

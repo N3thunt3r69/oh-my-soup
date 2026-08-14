@@ -7,11 +7,12 @@ import {
 	type SettingTab,
 	TAB_GROUPS,
 } from "@oh-my-soup/pi-coding-agent/config/settings-schema";
-import { getSettingsForTab } from "@oh-my-soup/pi-coding-agent/modes/components/settings-defs";
+import { getAllSettingDefs, getSettingsForTab } from "@oh-my-soup/pi-coding-agent/modes/components/settings-defs";
 
 interface UiShape {
 	tab: SettingTab;
 	group?: string;
+	additionalPlacements?: ReadonlyArray<{ tab: SettingTab; group?: string }>;
 }
 
 describe("settings layout", () => {
@@ -24,15 +25,18 @@ describe("settings layout", () => {
 		resetSettingsForTest();
 	});
 
-	it("every UI setting declares a group registered in TAB_GROUPS for its tab", () => {
+	it("every UI placement declares a group registered in TAB_GROUPS for its tab", () => {
 		const violations: string[] = [];
 		for (const path in SETTINGS_SCHEMA) {
 			const ui = (SETTINGS_SCHEMA[path as keyof typeof SETTINGS_SCHEMA] as { ui?: UiShape }).ui;
 			if (!ui) continue;
-			if (!ui.group) {
-				violations.push(`${path}: missing ui.group`);
-			} else if (!TAB_GROUPS[ui.tab].includes(ui.group)) {
-				violations.push(`${path}: group "${ui.group}" not in TAB_GROUPS["${ui.tab}"]`);
+			const placements = [{ tab: ui.tab, group: ui.group }, ...(ui.additionalPlacements ?? [])];
+			for (const placement of placements) {
+				if (!placement.group) {
+					violations.push(`${path}: missing ui.group`);
+				} else if (!TAB_GROUPS[placement.tab].includes(placement.group)) {
+					violations.push(`${path}: group "${placement.group}" not in TAB_GROUPS["${placement.tab}"]`);
+				}
 			}
 		}
 		expect(violations).toEqual([]);
@@ -58,6 +62,23 @@ describe("settings layout", () => {
 			const expected = TAB_GROUPS[tab].filter(group => grouped.includes(group));
 			expect(grouped).toEqual(expected);
 		}
+	});
+
+	it("exposes Beads under both Memory and Tools while indexing each setting once", () => {
+		const selectBeads = (tab: SettingTab) =>
+			getSettingsForTab(tab)
+				.filter(def => def.path.startsWith("beads."))
+				.map(def => ({ path: def.path, tab: def.tab, group: def.group }));
+
+		expect(selectBeads("memory")).toEqual([
+			{ path: "beads.enabled", tab: "memory", group: "Beads" },
+			{ path: "beads.remote", tab: "memory", group: "Beads" },
+		]);
+		expect(selectBeads("tools")).toEqual([
+			{ path: "beads.enabled", tab: "tools", group: "Available Tools" },
+			{ path: "beads.remote", tab: "tools", group: "Available Tools" },
+		]);
+		expect(getAllSettingDefs().filter(def => def.path.startsWith("beads."))).toHaveLength(2);
 	});
 
 	it("exposes native terminal progress in the appearance settings menu", () => {

@@ -11,9 +11,9 @@
   - `packages/coding-agent/src/web/search/render.ts` — TUI renderer details type.
   - `packages/coding-agent/src/web/search/providers/base.ts` — provider interface and shared params contract.
   - `packages/coding-agent/src/web/search/providers/utils.ts` — credential lookup; source normalization.
-  - `packages/coding-agent/src/web/search/providers/browser-headers.ts` — shared Chromium navigation headers for scrape providers.
+  - `packages/coding-agent/src/web/search/providers/browser-headers.ts` — shared browser-profiled navigation headers for fetch-backed scrape providers.
   - `packages/coding-agent/src/web/search/query.ts` — Google-style query parsing, provider syntax formatting, and lenient result filtering.
-  - `packages/coding-agent/src/web/search/providers/browser-page.ts` — shared fetch/headless-browser page loader for scrape providers.
+  - `packages/coding-agent/src/web/search/providers/browser-page.ts` — shared fetch/Camoufox page loader for scrape providers.
   - `packages/coding-agent/src/web/search/providers/anthropic.ts` — Claude web-search provider.
   - `packages/coding-agent/src/web/search/providers/brave.ts` — Brave Search API adapter.
   - `packages/coding-agent/src/web/search/providers/codex.ts` — OpenAI Codex SSE adapter.
@@ -27,6 +27,7 @@
   - `packages/coding-agent/src/web/search/providers/kagi.ts` — Kagi provider wrapper.
   - `packages/coding-agent/src/web/search/providers/kimi.ts` — Kimi search adapter.
   - `packages/coding-agent/src/web/search/providers/mojeek.ts` — Mojeek browser-backed scraper (independent index).
+  - `packages/coding-agent/src/web/search/providers/yandex.ts` — Yandex browser-backed SERP scraper.
   - `packages/coding-agent/src/web/search/providers/parallel.ts` — Parallel provider wrapper.
   - `packages/coding-agent/src/web/search/providers/perplexity.ts` — Perplexity API / OAuth adapter.
   - `packages/coding-agent/src/web/search/providers/public.ts` — Public Web aggregate over all credential-free engines.
@@ -46,7 +47,7 @@
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `query` | `string` | Yes | Raw query. The orchestrator parses Google-style directives (`site:`/`-site:`, `after:`/`before:`, `inurl:`, `intitle:`, `filetype:`, quoted phrases, exclusions, and `OR`) so providers can map them to native filters or supported syntax; the original string remains available to adapters. |
-| `recency` | `"day" \| "week" \| "month" \| "year"` | No | Relative time filter. Implemented by Brave, Perplexity, Tavily, SearXNG, Kagi, TinyFish, Firecrawl, DuckDuckGo, Startpage, Google, and Mojeek; other adapters ignore it. |
+| `recency` | `"day" \| "week" \| "month" \| "year"` | No | Relative time filter. Implemented by Brave, Perplexity, Tavily, SearXNG, Kagi, TinyFish, Firecrawl, DuckDuckGo, Startpage, Google, Yandex, and Mojeek; other adapters ignore it. |
 | `limit` | `number` | No | Max results to return. Usually becomes the provider request's result-count parameter when `num_search_results` is absent. TinyFish uses it for paginated fetches before slicing. xAI uses the collapsed value only as a local cap on parsed sources/citations, defaulting to `10` and max `30`. |
 | `max_tokens` | `number` | No | Passed through as provider token caps (`maxOutputTokens`, `max_tokens`, or xAI `max_output_tokens`) only by Anthropic, Gemini, xAI, and Perplexity API-key mode. Ignored by the other providers. |
 | `temperature` | `number` | No | Passed through only by Anthropic models that support sampling parameters, Gemini, xAI, and Perplexity API-key mode. Ignored or omitted by the other provider/model paths. |
@@ -79,7 +80,7 @@ Failure output is not thrown at the tool boundary when providers are unavailable
 
 Streaming: none. `WebSearchTool.execute()` forwards its `AbortSignal` into `executeSearch()`, and `executeSearch()` passes it to providers. If the signal is aborted during fallback handling, `throwIfAborted(signal)` rethrows the cancellation instead of returning an `"Error: ..."` text result.
 
-Each provider search transport receives a hard timeout from `providers.webSearchTimeoutSeconds` (default `60`, maximum `300`). When that transport exceeds the ceiling, the automatic chain records the provider failure and advances to the next candidate. The setting is not a whole-chain deadline, and providers may impose shorter upstream, retry, or aggregate limits. Set a positive number of seconds, for example `oms config set providers.webSearchTimeoutSeconds 180` for slower model-backed search.
+Each provider attempt receives a hard timeout from `providers.webSearchTimeoutSeconds` (default `60`, maximum `300`). A failed or empty provider search is attempted up to three times before the automatic chain advances. The setting is not a whole-chain or whole-provider deadline, and providers may impose shorter upstream, retry, or aggregate limits. Set a positive number of seconds, for example `oms config set providers.webSearchTimeoutSeconds 180` for slower model-backed search.
 
 ## Flow
 1. `WebSearchTool.execute()` in `packages/coding-agent/src/web/search/index.ts` delegates directly to `executeSearch()`.
@@ -88,15 +89,15 @@ Each provider search transport receives a hard timeout from `providers.webSearch
    - otherwise it uses the configured candidate order. Entries explicitly listed in `providers.webSearchOrder` use `isExplicitlyAvailable()`; ordinary fallback entries use `isAvailable()`.
 3. `resolveProviderCandidates()` prioritizes valid first-occurrence IDs from `providers.webSearchOrder`, then appends unlisted providers in `SEARCH_PROVIDER_ORDER`. An empty list preserves built-in order. `providers.webSearchExclude` removes providers from the automatic/configured chain and from Public Web fan-out. Internal per-request forced providers bypass that configured chain.
 4. If no candidate is available (for example, settings exclude every credential-free engine and no keyed/OAuth provider is configured), `executeSearch()` returns `Error: No web search provider configured.` with `details.response.provider = "none"`.
-5. For each provider in order, `executeSearch()` calls `provider.search()` with:
+5. For each provider in order, `executeSearch()` calls `provider.search()` up to three times with:
    - `query`,
    - `limit`, `recency`, `temperature`, `maxOutputTokens`, `numSearchResults`,
    - `timeoutMs`, derived from `providers.webSearchTimeoutSeconds`,
    - `systemPrompt` from `packages/coding-agent/src/prompts/system/web-search.md`,
    - the parsed structured query, including recognized directives and date/domain/title/URL/filetype constraints.
 6. After a provider responds, `applyQueryConstraints()` leniently post-filters its sources for constraints not guaranteed upstream. It applies each filterable dimension in turn; any dimension that would eliminate every remaining result is relaxed and a leading `Note: no results matched ...` is emitted. Answer/citation text is not rewritten.
-7. A `SearchResponse` with no renderable content (`hasRenderableSearchContent()` returns false) is rejected as a `SearchProviderError` (status `204`) so the loop advances to the next provider. On the first renderable response, `formatForLLM()` renders notes, answer, sources, citations, related questions, and search queries into one text block.
-8. If a provider throws, `executeSearch()` records the error and tries the next provider. There is no provider-level parallel fan-out; fallback is sequential.
+7. A `SearchResponse` with no renderable content (`hasRenderableSearchContent()` returns false) is rejected as a `SearchProviderError` (status `204`) and retried like a thrown provider error. On the first renderable response, `formatForLLM()` renders notes, answer, sources, citations, related questions, and search queries into one text block.
+8. If all three attempts fail, `executeSearch()` records only the final error and tries the next provider. User cancellation is rethrown immediately and is never retried. There is no provider-level parallel fan-out; fallback is sequential.
 9. After all candidates fail, `formatSearchProviderFailure()` normalizes each error:
    - Anthropic `404` becomes `Anthropic web search returned 404 (model or endpoint not found).`
    - `401`/`403` become `<Provider> authorization failed ...` except Z.AI, which preserves its raw message.
@@ -108,8 +109,8 @@ Each provider search transport receives a hard timeout from `providers.webSearch
   - **Forced provider**: internal callers may pass `provider`; a non-`auto` value is the only attempted provider and uses `isExplicitlyAvailable()`, while `auto` (or omitting it) walks the configured chain. This field is not in the model-facing schema.
   - **Configured order**: `setSearchProviderOrder()` prioritizes valid, first-occurrence provider IDs in `providers.webSearchOrder`; omitted providers follow in built-in relative order. Listed providers are explicit selections and resolve through `isExplicitlyAvailable()`, so Perplexity, Exa, and Firecrawl can use their unauthenticated/keyless paths.
   - **Excluded providers**: `setExcludedSearchProviders()` removes providers from the automatic/configured chain and Public Web fan-out. Wired from `providers.webSearchExclude` through `packages/coding-agent/src/config/provider-globals.ts`.
-  - **Default auto chain order** (23 providers): `perplexity`, `gemini`, `anthropic`, `codex`, `xai`, `zai`, `exa`, `tinyfish`, `jina`, `kagi`, `tavily`, `firecrawl`, `brave`, `kimi`, `parallel`, `synthetic`, `searxng`, `startpage`, `duckduckgo`, `ecosia`, `google`, `mojeek`, `public` (`SEARCH_PROVIDER_ORDER` in `packages/coding-agent/src/web/search/types.ts`). `public` is explicit-only: its `isAvailable()` returns `false`, so the auto chain never fans out implicitly.
-- **Provider timeout**: `providers.webSearchTimeoutSeconds` supplies the hard ceiling for each provider's search transport before the automatic chain advances. It defaults to `60`; invalid non-positive values fall back to that default and values above `300` are capped, while provider-specific upstream or aggregate limits may still be shorter.
+  - **Default auto chain order** (24 providers): `perplexity`, `gemini`, `anthropic`, `codex`, `xai`, `zai`, `exa`, `tinyfish`, `jina`, `kagi`, `tavily`, `firecrawl`, `brave`, `kimi`, `parallel`, `synthetic`, `searxng`, `startpage`, `duckduckgo`, `ecosia`, `google`, `yandex`, `mojeek`, `public` (`SEARCH_PROVIDER_ORDER` in `packages/coding-agent/src/web/search/types.ts`). `public` is explicit-only: its `isAvailable()` returns `false`, so the auto chain never fans out implicitly.
+- **Provider timeout**: `providers.webSearchTimeoutSeconds` supplies the hard ceiling for each provider attempt. It defaults to `60`; invalid non-positive values fall back to that default and values above `300` are capped. A failed provider can therefore consume up to three such windows before the chain advances, while provider-specific upstream or aggregate limits may still be shorter.
 - **Provider adapters**
   - **Perplexity** — `packages/coding-agent/src/web/search/providers/perplexity.ts`
     - Availability: auth attempt order is `PERPLEXITY_COOKIES` -> OAuth token in `agent.db` -> direct Perplexity API key -> OpenRouter key -> anonymous ask-endpoint fallback. The automatic chain requires direct Perplexity auth (cookies, OAuth, or a Perplexity credential); explicit selection is always available and can use OpenRouter or anonymous search.
@@ -220,13 +221,20 @@ Each provider search transport receives a hard timeout from `providers.webSearch
   - **Startpage** — `packages/coding-agent/src/web/search/providers/startpage.ts`
     - Availability: always available; no API key. It proxies Google's index, GETs the homepage to obtain the `sc` anti-bot form token, then POSTs `/sp/search` (with a tokenless GET fallback). `recency` maps to `with_date=d|w|m|y`.
     - Bot/challenge or consent pages raise a provider-tagged `SearchProviderError` (429) so the chain advances.
-  - **Google / Ecosia / Mojeek** — `providers/google.ts`, `providers/ecosia.ts`, `providers/mojeek.ts`
-    - Availability: always available; no API key. `browserFetch` (`providers/browser-page.ts`) tries a browser-profiled plain fetch first and escalates fetch failures, non-2xx statuses, and challenge bodies to the shared stealth headless browser (`acquireBrowser`); an injected `params.fetch` (tests) never escalates.
-    - Google: seeds cookies via the homepage, then loads the rendered SERP; `recency` maps to `tbs=qdr:*`. Ecosia sits behind Cloudflare (hence the browser); its organic results are Google-backed; `recency` is a server-side no-op and silently ignored. Mojeek fronts an ALTCHA proof-of-work wall that the browser path auto-solves; `recency` maps to `since=day|week|month|year`.
-    - Challenge pages (Google `unusual traffic`, Ecosia Firewall, Mojeek ALTCHA/robot 403) raise provider-tagged `SearchProviderError`s (429).
+  - **Google** — `packages/coding-agent/src/web/search/providers/google.ts`
+    - Availability: always available; no API key and independent of the model-facing `browser.enabled` switch. Production searches skip the preliminary HTTP fetch and navigate Google in the caller's OMS-managed Camoufox browser. A parent session and all of its subagents share that browser and serialize page use; the first launch and any recovery launch receive a new BrowserForge fingerprint. An explicitly injected `params.fetch` remains a deterministic transport override for tests and SDK callers.
+    - Querying: visits the Google homepage, loads the rendered `udm=14` SERP with personalization disabled (`pws=0`), and parses organic `h3` results, snippets, and redirect targets. Regional consent interstitials prefer **Reject all**, then **Accept all** only when rejection is unavailable.
+    - `recency` maps to `tbs=qdr:d|w|m|y`; `limit` / `num_search_results` are clamped to `1..20`, default `10`. Empty SERPs, JavaScript walls, consent failures, and unusual-traffic challenges raise provider-tagged errors so the chain advances.
+  - **Yandex** — `packages/coding-agent/src/web/search/providers/yandex.ts`
+    - Availability: always available; no API key and independent of the model-facing `browser.enabled` switch. Production searches navigate Yandex in the same session-owned Camoufox browser used by Google; an explicitly injected `params.fetch` remains a deterministic transport override.
+    - Querying: visits `https://yandex.com/search/`, parses organic `li.serp-item` rows, skips `yabs.yandex.*` advertisements and Yandex navigation, deduplicates direct target URLs, and clamps `limit` / `num_search_results` to `1..20`, default `10`.
+    - Quoted phrases, exclusions, and `site:` are sent in Yandex-compatible query syntax; one `filetype:` becomes `mime:`, absolute date bounds become `date:`, and `recency` becomes a UTC `date:>` cutoff. SmartCaptcha, non-2xx pages, and empty SERPs raise provider-tagged errors. A challenged retained browser is discarded before the orchestrator retries, so the next attempt receives a fresh fingerprint.
+  - **Ecosia / Mojeek** — `providers/ecosia.ts`, `providers/mojeek.ts`
+    - Availability: always available; no API key. Their shared `browserFetch` path tries a browser-profiled fetch first and escalates failed, non-2xx, or challenged production responses to the caller's session-owned Camoufox browser. An injected `params.fetch` never escalates.
+    - Ecosia sits behind Cloudflare and returns Google-backed organic results; `recency` is ignored. Mojeek uses its independent index and maps `recency` to `since=day|week|month|year`. Challenge pages raise provider-tagged errors.
   - **Public Web** — `packages/coding-agent/src/web/search/providers/public.ts`
     - Availability: explicit selection only (`isAvailable()` is `false`; `isExplicitlyAvailable()` is `true`).
-    - Querying: fans out to the five credential-free engines (`startpage`, `google`, `duckduckgo`, `ecosia`, `mojeek`, minus excluded ones), then consolidates. URLs are deduplicated on a canonical key (host without `www.`, normalized trailing slash, query preserved, fragment removed), ranked by cross-engine consensus, then best per-engine rank; the longest snippet wins.
+    - Querying: fans out to the six credential-free engines (`startpage`, `google`, `yandex`, `duckduckgo`, `ecosia`, `mojeek`, minus excluded ones), then consolidates. URLs are deduplicated on a canonical key (host without `www.`, normalized trailing slash, query preserved, fragment removed), ranked by cross-engine consensus, then best per-engine rank; the longest snippet wins.
     - Deadline race: returns at the earliest of all engines settled, 5s soft deadline with at least one success, or 30s hard cap; stragglers are aborted. Individual engine failures are tolerated; it fails only when every engine fails.
 
 ## Side Effects
@@ -234,23 +242,25 @@ Each provider search transport receives a hard timeout from `providers.webSearch
   - Calls one or more external search providers over HTTPS until one succeeds or all fail.
   - Provider-specific transports include JSON POST, JSON GET, SSE streaming (Perplexity OAuth/API, Gemini, Codex), and JSON-RPC over HTTP (Z.AI).
 - Subprocesses / native bindings
-  - Most HTTP/API adapters spawn nothing. Google, Ecosia, and Mojeek first try a plain fetch, but failed, non-2xx, or challenged production responses can acquire the project-shared broker-owned headless Chromium. Hosts without a CLI worker entry (such as an embedded SDK host) instead launch process-local Chromium.
-  - This fallback can start a Chromium process and create its browser-profile lifecycle. On first browser use it can also download Chromium into the oms Puppeteer cache unless a system Chromium or `PUPPETEER_EXECUTABLE_PATH` is available. The search adapter itself uses no native binding.
+  - Google and Yandex use the session-owned headless Camoufox process for production searches. Ecosia and Mojeek use that same process only when their fetch-first response fails or is challenged. Browser page use is serialized across the parent and its subagents; the process closes after the last related `AgentSession` is disposed. Aborted browser operations and final challenge pages discard the process so the next attempt launches a clean fingerprint.
+  - First browser use may download the sha256-verified Camoufox engine (~490 MB) into the OMS cache. Compiled distributions also materialize their embedded, integrity-checked locale and WebGL datasets under the Camoufox cache because SQLite requires a real filesystem path. The search providers do not require the model-facing `browser` tool to be enabled and use no native binding.
 - Session state (transcript, memory, jobs, checkpoints, registries)
   - Uses a module-global provider-instance cache in `packages/coding-agent/src/web/search/provider.ts`.
+  - Retains one lazy Camoufox browser entry per logical parent-session family. Child AgentSessions inherit the parent's browser owner id; reference-counted session leases close the entry after the last parent/child session ends.
   - Uses a module-global preferred-provider setting in the same file.
   - `packages/coding-agent/src/tools/index.ts` gates tool availability behind `session.settings.get("web_search.enabled")`.
 - Background work / cancellation
   - Many provider adapters accept `AbortSignal`; `WebSearchTool.execute()` passes the tool call signal into `executeSearch()`, which forwards it as `params.signal` to providers and rethrows cancellation during fallback.
 
 ## Limits & Caps
-- Provider auto-order length: 23 providers (`SEARCH_PROVIDER_ORDER` in `packages/coding-agent/src/web/search/types.ts`).
+- Provider auto-order length: 24 providers (`SEARCH_PROVIDER_ORDER` in `packages/coding-agent/src/web/search/types.ts`).
+- Provider attempt cap: 3 per candidate; only the final failure is reported before automatic fallback.
 - `formatForLLM()` truncates source snippets and citation text to 240 chars (`packages/coding-agent/src/web/search/index.ts`).
 - `formatForLLM()` emits at most 3 search queries, each truncated to 120 chars (`packages/coding-agent/src/web/search/index.ts`).
 - Brave result count: default `10`, max `20` (`DEFAULT_NUM_RESULTS`, `MAX_NUM_RESULTS` in `packages/coding-agent/src/web/search/providers/brave.ts`).
 - TinyFish local result count: default `10`, max `20`; the API has no count parameter and returns at most 10 results per page, so the adapter fetches documented pages (`page=0`, then `page=1` when needed) and slices locally (`packages/coding-agent/src/web/search/providers/tinyfish.ts`).
 - DuckDuckGo result count: default `10`, max `20` (`packages/coding-agent/src/web/search/providers/duckduckgo.ts`).
-- Startpage / Google / Ecosia / Mojeek result count: default `10`, max `20` (their `providers/*.ts` modules).
+- Startpage / Google / Yandex / Ecosia / Mojeek result count: default `10`, max `20` (their `providers/*.ts` modules).
 - Public Web result count: default `15`, max `30`; fan-out soft deadline `5s`, hard cap `30s` (`packages/coding-agent/src/web/search/providers/public.ts`).
 - Tavily result count: default `5`, max `20` (`packages/coding-agent/src/web/search/providers/tavily.ts`).
 - Firecrawl result count: default `10`, max `100` (`packages/coding-agent/src/web/search/providers/firecrawl.ts`).
@@ -265,7 +275,7 @@ Each provider search transport receives a hard timeout from `providers.webSearch
 
 ## Errors
 - Tool-level no-provider case returns a normal tool result with `Error: No web search provider configured.`; it does not throw.
-- Tool-level all-failed case also returns a normal tool result with `Error: ...`; the message is either the single normalized provider error or a semicolon-separated summary of all failed providers.
+- Tool-level all-failed case also returns a normal tool result with `Error: ...`; after three attempts per available provider, the message is either the single normalized provider error or a semicolon-separated summary of final provider failures.
 - Provider adapters usually throw `SearchProviderError(provider, message, status)` for HTTP or protocol failures.
 - Availability probes intentionally swallow lookup errors and report `false` in many providers via `isApiKeyAvailable()`.
 - Per-provider notable failures:
@@ -280,7 +290,7 @@ Each provider search transport receives a hard timeout from `providers.webSearch
 - The model-facing schema does not expose `provider`, but internal callers can force one through `SearchQueryParams`.
 - `executeSearch()` walks `resolveProviderCandidates()` lazily; `resolveProviderChain()` remains a compatibility helper that loads every candidate. Provider instances are cached, and asking for labels via `getSearchProviderLabel()` does not trigger imports.
 - Most providers treat `limit` and `num_search_results` as the same number because adapters pass `params.numSearchResults ?? params.limit`. Perplexity preserves both concepts. TinyFish uses the collapsed value as a local cap, serializes `num_results` per page, and paginates when more results are needed. xAI uses it only to cap parsed sources/citations (`10` default, `30` max).
-- `recency` has native or engine-query mappings in Brave, Perplexity, Tavily, SearXNG, Kagi, TinyFish, Firecrawl, DuckDuckGo, Startpage, Google, and Mojeek. xAI retains absolute date directives as natural-language query hints because its current Responses tool has no date parameters; Ecosia ignores recency. Public Web passes the request through to its engines.
+- `recency` has native or engine-query mappings in Brave, Perplexity, Tavily, SearXNG, Kagi, TinyFish, Firecrawl, DuckDuckGo, Startpage, Google, Yandex, and Mojeek. xAI retains absolute date directives as natural-language query hints because its current Responses tool has no date parameters; Ecosia ignores recency. Public Web passes the request through to its engines.
 - `packages/coding-agent/src/config/settings-schema.ts` uses the shared `SEARCH_PROVIDER_PREFERENCES` / `SEARCH_PROVIDER_OPTIONS` metadata, so the settings selector and setup wizard expose `auto` plus every provider in the auto chain.
-- The credential-free scrapers close the auto chain: Startpage and DuckDuckGo precede the browser-backed Ecosia, Google, and Mojeek paths; `public` is listed last and never auto-selected.
+- The credential-free scrapers close the auto chain: Startpage and DuckDuckGo precede the browser-backed Ecosia, Google, Yandex, and Mojeek paths; `public` is listed last and never auto-selected.
 - `/login exa` stores the pasted key in AuthStorage; Exa resolves stored or environment credentials before the unauthenticated `https://mcp.exa.ai/mcp` fallback.

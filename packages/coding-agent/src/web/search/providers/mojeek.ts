@@ -145,6 +145,7 @@ async function callMojeekHtml(params: SearchParams, numResults: number): Promise
 			fetch: params.fetch,
 			signal,
 			timeoutMs: params.timeoutMs,
+			searchBrowserSessionId: params.searchBrowserSessionId,
 			randomizeHeaders: false,
 			referer: MOJEEK_HOME_URL,
 			browser: {

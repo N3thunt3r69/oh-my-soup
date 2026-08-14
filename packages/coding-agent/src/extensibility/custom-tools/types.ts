@@ -101,6 +101,8 @@ export interface CustomToolContext {
 	fetch?: FetchImpl;
 	/** Calling session's `local://` root mapping for tools that bridge out of the OMS process. */
 	localProtocolOptions?: LocalProtocolOptions;
+	/** Stable search-browser owner shared by the parent session and its subagents. */
+	searchBrowserSessionId?: string;
 	/** Whether to auto-approve all destructive tool operations (--auto-approve CLI flag) */
 	autoApprove?: boolean;
 }

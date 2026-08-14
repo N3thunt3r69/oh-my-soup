@@ -334,6 +334,7 @@
     },
   },
   "patchedDependencies": {
+    "camoufox-js@0.12.0": "patches/camoufox-js@0.12.0.patch",
     "puppeteer-core@25.3.0": "patches/puppeteer-core@25.3.0.patch",
     "@ark/schema@0.56.2": "patches/@ark%2Fschema@0.56.2.patch",
   },

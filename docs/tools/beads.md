@@ -73,4 +73,6 @@ Issue lines render as `<glyph> <id> [P<n>] [<type>] <title>` (`O` open, `>` in p
 | `beads.enabled` | `true` | Master availability switch. |
 | `beads.remote` | `"origin"` | Git remote used for the isolated snapshot branch. |
 
+Both controls appear in `/settings` under **Memory → Beads** and **Tools → Available Tools**.
+
 The session-local `todo` tool remains complementary: `todo` tracks the current turn; Beads tracks durable multi-session work and dependencies.
