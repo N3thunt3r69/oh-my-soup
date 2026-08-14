@@ -124,7 +124,9 @@ export async function runEvalCompletion(
 	}
 
 	const registry = options.session.modelRegistry;
-	const apiKey = await registry?.getApiKey(model);
+	// Provider session id keys auth session-stickiness: completion() must honor
+	// the session's pinned OAuth account (/rotateaccount) like any other call.
+	const apiKey = await registry?.getApiKey(model, options.session.getProviderSessionId?.() ?? undefined);
 	if (!registry || !apiKey) {
 		throw new ToolError(
 			`completion() has no API key for ${formatModelString(model)}. Configure credentials for this provider or choose another tier.`,

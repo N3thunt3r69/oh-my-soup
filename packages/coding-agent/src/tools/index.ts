@@ -248,6 +248,13 @@ export interface ToolSession {
 	trackEvalExecution?<T>(execution: Promise<T>, abortController: AbortController): Promise<T>;
 	/** Get session ID */
 	getSessionId?: () => string | null;
+	/**
+	 * Get the provider-facing session id that keys auth session-stickiness
+	 * (AgentSession.sessionId). Distinct from {@link getSessionId}: after
+	 * `/new` or on tan sessions the provider identity diverges from the
+	 * session-file id. Subagent spawns use it to inherit pinned OAuth accounts.
+	 */
+	getProviderSessionId?: () => string | null;
 	/** Get Hindsight runtime state for this agent session. */
 	getHindsightSessionState?: () => HindsightSessionState | undefined;
 	/** Get Mnemopi runtime state for this agent session. */

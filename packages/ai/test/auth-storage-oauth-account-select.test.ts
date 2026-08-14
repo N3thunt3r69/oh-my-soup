@@ -201,4 +201,83 @@ describe("AuthStorage OAuth account selection", () => {
 		// Target-only: no sibling credential was refreshed/rotated on the failure path.
 		expect(seen).toEqual(["access-b"]);
 	});
+
+	test("inheritPinnedSessionOAuthAccount copies an explicit pin onto a child session", async () => {
+		const storage = authStorage;
+		if (!storage) throw new Error("test setup failed");
+		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
+			const credential = credentials[provider];
+			return credential ? { newCredentials: credential, apiKey: credential.access } : null;
+		});
+		await storage.set(PROVIDER, [oauthCredential("a"), oauthCredential("b"), oauthCredential("c")]);
+		const target = storage.listOAuthAccounts(PROVIDER)[1];
+		if (!target) throw new Error("expected second OAuth account");
+
+		expect(storage.pinSessionOAuthAccount(PROVIDER, "session-parent", target.credentialId)).toBe(true);
+		expect(storage.getSessionOAuthStickyInfo(PROVIDER, "session-parent")?.pinned).toBe(true);
+
+		expect(storage.inheritPinnedSessionOAuthAccount(PROVIDER, "session-parent", "session-child")).toBe(true);
+		expect(storage.getSessionOAuthStickyInfo(PROVIDER, "session-child")).toMatchObject({
+			credentialId: target.credentialId,
+			pinned: true,
+		});
+		expect(
+			await withOAuthAccess(storage, PROVIDER, access => Promise.resolve(access.email), {
+				sessionId: "session-child",
+			}),
+		).toBe("b@example.com");
+	});
+
+	test("inheritPinnedSessionOAuthAccount ignores implicit stickies and existing child stickies", async () => {
+		const storage = authStorage;
+		if (!storage) throw new Error("test setup failed");
+		await storage.set(PROVIDER, [oauthCredential("a"), oauthCredential("b"), oauthCredential("c")]);
+		const accounts = storage.listOAuthAccounts(PROVIDER);
+		const [first, second, third] = accounts;
+		if (!first || !second || !third) throw new Error("expected three OAuth accounts");
+
+		// Implicit sticky (session-file "last served" restore) must not propagate.
+		expect(
+			storage.pinSessionOAuthAccount(PROVIDER, "session-implicit", second.credentialId, { explicit: false }),
+		).toBe(true);
+		expect(storage.getSessionOAuthStickyInfo(PROVIDER, "session-implicit")?.pinned).toBe(false);
+		expect(storage.inheritPinnedSessionOAuthAccount(PROVIDER, "session-implicit", "session-child-a")).toBe(false);
+		expect(storage.getSessionOAuthStickyInfo(PROVIDER, "session-child-a")).toBeUndefined();
+
+		// A child with its own sticky is never clobbered.
+		expect(storage.pinSessionOAuthAccount(PROVIDER, "session-parent", second.credentialId)).toBe(true);
+		expect(storage.pinSessionOAuthAccount(PROVIDER, "session-child-b", third.credentialId)).toBe(true);
+		expect(storage.inheritPinnedSessionOAuthAccount(PROVIDER, "session-parent", "session-child-b")).toBe(false);
+		expect(storage.getSessionOAuthStickyInfo(PROVIDER, "session-child-b")?.credentialId).toBe(third.credentialId);
+	});
+
+	test("pinned-ness survives implicit re-records and a fresh AuthStorage over the same store", async () => {
+		const storage = authStorage;
+		const credentialStore = store;
+		if (!storage || !credentialStore) throw new Error("test setup failed");
+		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
+			const credential = credentials[provider];
+			return credential ? { newCredentials: credential, apiKey: credential.access } : null;
+		});
+		await storage.set(PROVIDER, [oauthCredential("a"), oauthCredential("b")]);
+		const target = storage.listOAuthAccounts(PROVIDER)[1];
+		if (!target) throw new Error("expected second OAuth account");
+		expect(storage.pinSessionOAuthAccount(PROVIDER, "session-parent", target.credentialId)).toBe(true);
+
+		// Normal request traffic re-records the same credential implicitly; the pin must hold.
+		await withOAuthAccess(storage, PROVIDER, access => Promise.resolve(access.email), {
+			sessionId: "session-parent",
+		});
+		expect(storage.getSessionOAuthStickyInfo(PROVIDER, "session-parent")?.pinned).toBe(true);
+
+		// Fresh process over the same store: pin round-trips through the KV cache row.
+		const restored = new AuthStorage(credentialStore);
+		await restored.reload();
+		expect(restored.getSessionOAuthStickyInfo(PROVIDER, "session-parent")).toMatchObject({
+			credentialId: target.credentialId,
+			pinned: true,
+		});
+		expect(restored.inheritPinnedSessionOAuthAccount(PROVIDER, "session-parent", "session-child")).toBe(true);
+		expect(restored.getSessionOAuthStickyInfo(PROVIDER, "session-child")?.pinned).toBe(true);
+	});
 });

@@ -2,7 +2,12 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { TempDir } from "@oh-my-soup/pi-utils";
 import { AuthStorage, SqliteAuthCredentialStore } from "../src/session/auth-storage";
-import { credentialPinHash, recordCredentialPin, seedCredentialPins } from "../src/session/credential-pin";
+import {
+	credentialPinHash,
+	inheritPinnedCredentials,
+	recordCredentialPin,
+	seedCredentialPins,
+} from "../src/session/credential-pin";
 import { SessionManager } from "../src/session/session-manager";
 
 const ANTHROPIC_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"] as const;
@@ -181,5 +186,65 @@ describe("credential pins", () => {
 		expect(entries).toHaveLength(1);
 		const identity = storage.getOAuthAccountIdentity("anthropic", sessionId);
 		expect(manager.getCredentialPins().get("anthropic")?.hash).toBe(credentialPinHash("anthropic", identity!));
+	});
+
+	test("recording persists pinned-ness and re-records when only the flag changes", () => {
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const sessionId = manager.getSessionId();
+		const accountA = storage.listOAuthAccounts("anthropic").find(account => account.accountId === "account-a");
+		if (!accountA) throw new Error("expected stored account-a");
+
+		// Explicit user pin (/rotateaccount) → pin entry carries pinned: true.
+		expect(storage.pinSessionOAuthAccount("anthropic", sessionId, accountA.credentialId)).toBe(true);
+		recordCredentialPin(storage, manager, sessionId, "anthropic");
+		recordCredentialPin(storage, manager, sessionId, "anthropic");
+		let pinEntries = manager.getBranch().filter(entry => entry.type === "credential_pin");
+		expect(pinEntries).toHaveLength(1);
+		expect(manager.getCredentialPins().get("anthropic")?.pinned).toBe(true);
+
+		// Same account, explicitness dropped (implicit restore): flag change alone re-records.
+		storage.releaseSessionCredentialForReselection("anthropic", sessionId);
+		expect(storage.pinSessionOAuthAccount("anthropic", sessionId, accountA.credentialId, { explicit: false })).toBe(
+			true,
+		);
+		recordCredentialPin(storage, manager, sessionId, "anthropic");
+		pinEntries = manager.getBranch().filter(entry => entry.type === "credential_pin");
+		expect(pinEntries).toHaveLength(2);
+		expect(manager.getCredentialPins().get("anthropic")?.pinned).toBe(false);
+	});
+
+	test("seeding restores explicit pins as pinned stickies; implicit pins stay implicit", () => {
+		const managerA = SessionManager.create(tempDir.path(), tempDir.path());
+		const sessionA = managerA.getSessionId();
+		const hash = credentialPinHash("anthropic", { accountId: "account-b", email: "b@example.com" });
+		if (!hash) throw new Error("expected a pin hash");
+		managerA.appendCredentialPin("anthropic", hash, true);
+		seedCredentialPins(storage, managerA, sessionA);
+		expect(storage.getSessionOAuthStickyInfo("anthropic", sessionA)?.pinned).toBe(true);
+
+		const managerB = SessionManager.create(tempDir.path(), tempDir.path());
+		const sessionB = managerB.getSessionId();
+		managerB.appendCredentialPin("anthropic", hash);
+		seedCredentialPins(storage, managerB, sessionB);
+		expect(storage.getSessionOAuthStickyInfo("anthropic", sessionB)?.pinned).toBe(false);
+	});
+
+	test("subagents inherit the parent's explicitly pinned account, not implicit stickies", () => {
+		const accountB = storage.listOAuthAccounts("anthropic").find(account => account.accountId === "account-b");
+		if (!accountB) throw new Error("expected stored account-b");
+
+		// /rotateaccount pinned account-b on the parent → child routes to it.
+		expect(storage.pinSessionOAuthAccount("anthropic", "parent-session", accountB.credentialId)).toBe(true);
+		inheritPinnedCredentials(storage, "parent-session", "child-session");
+		const childActive = storage.listOAuthAccounts("anthropic", "child-session").find(account => account.active);
+		expect(childActive?.accountId).toBe("account-b");
+		expect(storage.getSessionOAuthStickyInfo("anthropic", "child-session")?.pinned).toBe(true);
+
+		// Implicit parent sticky: children keep ranking freedom.
+		expect(
+			storage.pinSessionOAuthAccount("anthropic", "parent-implicit", accountB.credentialId, { explicit: false }),
+		).toBe(true);
+		inheritPinnedCredentials(storage, "parent-implicit", "child-implicit");
+		expect(storage.getSessionOAuthStickyInfo("anthropic", "child-implicit")).toBeUndefined();
 	});
 });

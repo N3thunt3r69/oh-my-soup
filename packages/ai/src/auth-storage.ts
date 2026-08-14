@@ -1253,7 +1253,7 @@ export class AuthStorage {
 	/** Tracks the last used credential per provider for a session (used for rate-limit switching). */
 	#sessionLastCredential: Map<
 		string,
-		Map<string, { type: AuthCredential["type"]; index: number; lastUsedAtMs?: number }>
+		Map<string, { type: AuthCredential["type"]; index: number; lastUsedAtMs?: number; pinned?: boolean }>
 	> = new Map();
 	/** Recent bearer fingerprints resolved for each durable OAuth row; used only for delayed usage-limit attribution. */
 	#oauthBearerFingerprints: Map<string, Map<number, string[]>> = new Map();
@@ -1888,6 +1888,12 @@ export class AuthStorage {
 	 * Records which credential was used for a session (for rate-limit switching).
 	 * `lastUsedAtMs` backdates the sticky (session-file pin restores on resume);
 	 * it defaults to now for live selections.
+	 *
+	 * `pinned` marks an explicit user account selection (`/rotateaccount`,
+	 * account picker) as opposed to an implicit "last used" record. Re-recording
+	 * the same credential (normal per-request refresh traffic) preserves an
+	 * existing pin; recording a *different* credential clears it — usage-limit
+	 * rotation or a type switch is a real departure from the user's choice.
 	 */
 	#recordSessionCredential(
 		provider: string,
@@ -1895,18 +1901,28 @@ export class AuthStorage {
 		type: AuthCredential["type"],
 		index: number,
 		lastUsedAtMs?: number,
+		pinned?: boolean,
 	): void {
 		if (!sessionId) return;
 		const nowMs = lastUsedAtMs ?? Date.now();
 		const sessionMap = this.#sessionLastCredential.get(provider) ?? new Map();
-		sessionMap.set(sessionId, { type, index, lastUsedAtMs: nowMs });
+		const previous = sessionMap.get(sessionId);
+		const effectivePinned =
+			pinned ?? (previous?.pinned === true && previous.type === type && previous.index === index);
+		sessionMap.set(sessionId, { type, index, lastUsedAtMs: nowMs, pinned: effectivePinned });
 		this.#sessionLastCredential.set(provider, sessionMap);
 
 		try {
 			const credentialId = this.#getStoredCredentials(provider)[index]?.id;
 			if (credentialId !== undefined) {
 				const cacheKey = `${SESSION_STICKY_CACHE_PREFIX}${provider}:${sessionId}`;
-				const cacheValue = JSON.stringify({ type, index, credentialId, lastUsedAtMs: nowMs });
+				const cacheValue = JSON.stringify({
+					type,
+					index,
+					credentialId,
+					lastUsedAtMs: nowMs,
+					pinned: effectivePinned,
+				});
 				// Expires in 30 days
 				const expiresAtSec = Math.floor(nowMs / 1000) + 30 * 24 * 60 * 60;
 				this.#store.setCache(cacheKey, cacheValue, expiresAtSec);
@@ -1920,7 +1936,7 @@ export class AuthStorage {
 	#getSessionCredential(
 		provider: string,
 		sessionId: string | undefined,
-	): { type: AuthCredential["type"]; index: number; lastUsedAtMs?: number } | undefined {
+	): { type: AuthCredential["type"]; index: number; lastUsedAtMs?: number; pinned?: boolean } | undefined {
 		if (!sessionId) return undefined;
 		let sessionMap = this.#sessionLastCredential.get(provider);
 		if (sessionMap?.has(sessionId)) {
@@ -1935,6 +1951,7 @@ export class AuthStorage {
 					index: number;
 					credentialId?: number;
 					lastUsedAtMs?: number;
+					pinned?: boolean;
 				};
 
 				if (val.credentialId !== undefined) {
@@ -1955,7 +1972,12 @@ export class AuthStorage {
 					sessionMap = new Map();
 					this.#sessionLastCredential.set(provider, sessionMap);
 				}
-				const sessionVal = { type: val.type, index: val.index, lastUsedAtMs: val.lastUsedAtMs };
+				const sessionVal = {
+					type: val.type,
+					index: val.index,
+					lastUsedAtMs: val.lastUsedAtMs,
+					pinned: val.pinned === true,
+				};
 				sessionMap.set(sessionId, sessionVal);
 				return sessionVal;
 			}
@@ -5500,12 +5522,17 @@ export class AuthStorage {
 	 * restored from a persisted session keeps the provider's warm-window
 	 * semantics: a resume inside the prompt-cache TTL reuses the account, a
 	 * stale resume still re-ranks.
+	 *
+	 * `options.explicit` (default `true`) marks the sticky as a deliberate user
+	 * account choice; child sessions inherit only explicit pins (see
+	 * {@link AuthStorage.inheritPinnedSessionOAuthAccount}). Pass `false` when
+	 * restoring an implicit "last served" record from a session file.
 	 */
 	pinSessionOAuthAccount(
 		provider: string,
 		sessionId: string,
 		credentialId: number,
-		options?: { lastUsedAtMs?: number },
+		options?: { lastUsedAtMs?: number; explicit?: boolean },
 	): boolean {
 		if (!sessionId || this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider)) {
 			return false;
@@ -5514,7 +5541,53 @@ export class AuthStorage {
 		const index = stored.findIndex(entry => entry.id === credentialId);
 		const target = stored[index];
 		if (target?.credential.type !== "oauth") return false;
-		this.#recordSessionCredential(provider, sessionId, "oauth", index, options?.lastUsedAtMs);
+		this.#recordSessionCredential(
+			provider,
+			sessionId,
+			"oauth",
+			index,
+			options?.lastUsedAtMs,
+			options?.explicit ?? true,
+		);
+		return true;
+	}
+
+	/**
+	 * Read this session's OAuth sticky for `provider` without resolving or
+	 * refreshing anything. `pinned` reports whether the sticky is an explicit
+	 * user account choice (`/rotateaccount`, account picker) rather than an
+	 * implicit "last served" record.
+	 */
+	getSessionOAuthStickyInfo(
+		provider: string,
+		sessionId: string,
+	): { credentialId: number; pinned: boolean; lastUsedAtMs?: number } | undefined {
+		if (this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider)) return undefined;
+		const sticky = this.#getSessionCredential(provider, sessionId);
+		if (sticky?.type !== "oauth") return undefined;
+		const credentialId = this.#getStoredCredentials(provider)[sticky.index]?.id;
+		if (credentialId === undefined) return undefined;
+		return { credentialId, pinned: sticky.pinned === true, lastUsedAtMs: sticky.lastUsedAtMs };
+	}
+
+	/**
+	 * Copy `fromSessionId`'s explicitly pinned OAuth account onto
+	 * `toSessionId`, so a child session (task subagent) routes to the account
+	 * the user pinned in the parent instead of re-ranking by usage headroom —
+	 * ranking is biased *away* from the pinned account precisely because the
+	 * parent is burning it.
+	 *
+	 * Implicit stickies are NOT inherited: multi-account fan-outs deliberately
+	 * spread load unless the user chose an account. Never clobbers an existing
+	 * sticky on the target session. Returns whether a pin was copied.
+	 */
+	inheritPinnedSessionOAuthAccount(provider: string, fromSessionId: string, toSessionId: string): boolean {
+		if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) return false;
+		if (this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider)) return false;
+		const source = this.#getSessionCredential(provider, fromSessionId);
+		if (source?.type !== "oauth" || source.pinned !== true) return false;
+		if (this.#getSessionCredential(provider, toSessionId)) return false;
+		this.#recordSessionCredential(provider, toSessionId, "oauth", source.index, source.lastUsedAtMs, true);
 		return true;
 	}
 

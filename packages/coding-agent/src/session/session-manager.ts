@@ -2252,12 +2252,13 @@ export class SessionManager {
 	}
 
 	/** Append a credential pin recording which OAuth account served `provider`. */
-	appendCredentialPin(provider: string, hash: string): string {
+	appendCredentialPin(provider: string, hash: string, pinned?: boolean): string {
 		const entry: CredentialPinEntry = {
 			type: "credential_pin",
 			...this.#freshEntryFields(),
 			provider,
 			hash,
+			...(pinned ? { pinned: true } : {}),
 		};
 		this.#recordEntry(entry);
 		return entry.id;
@@ -2273,11 +2274,15 @@ export class SessionManager {
 	 * account, so its timestamp advances `lastUsedAt` — a resume seconds after
 	 * the last turn seeds a warm sticky instead of a stale one.
 	 */
-	getCredentialPins(): Map<string, { hash: string; lastUsedAt: number }> {
-		const pins = new Map<string, { hash: string; lastUsedAt: number }>();
+	getCredentialPins(): Map<string, { hash: string; lastUsedAt: number; pinned?: boolean }> {
+		const pins = new Map<string, { hash: string; lastUsedAt: number; pinned?: boolean }>();
 		for (const entry of this.getBranch()) {
 			if (entry.type === "credential_pin") {
-				pins.set(entry.provider, { hash: entry.hash, lastUsedAt: new Date(entry.timestamp).getTime() });
+				pins.set(entry.provider, {
+					hash: entry.hash,
+					lastUsedAt: new Date(entry.timestamp).getTime(),
+					pinned: entry.pinned === true,
+				});
 			} else if (entry.type === "message" && entry.message.role === "assistant") {
 				const pin = pins.get(entry.message.provider);
 				if (pin) pin.lastUsedAt = Math.max(pin.lastUsedAt, entry.message.timestamp);

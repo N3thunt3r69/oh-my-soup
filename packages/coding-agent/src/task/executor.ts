@@ -45,6 +45,7 @@ import type { AgentSession, AgentSessionEvent, Prewalk } from "../session/agent-
 import type { ArtifactManager } from "../session/artifacts";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
+import { inheritPinnedCredentials } from "../session/credential-pin";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../session/messages";
 import { SessionManager } from "../session/session-manager";
 import { truncateTail } from "../session/streaming-output";
@@ -342,6 +343,12 @@ export interface ExecutorOptions {
 	additionalDirectories?: string[];
 	/** Exact provider credential resolver inherited from the parent session. */
 	getApiKey?: CreateAgentSessionOptions["getApiKey"];
+	/**
+	 * Parent's provider-facing session id (AgentSession.sessionId). Used to
+	 * inherit the parent's explicitly pinned OAuth account (`/rotateaccount`,
+	 * account picker) onto the child session's auth stickiness.
+	 */
+	parentProviderSessionId?: string;
 	worktree?: string;
 	agent: AgentDefinition;
 	task: string;
@@ -3175,6 +3182,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 			sessionCreatedAt = performance.now();
 
+			// Route the child to the parent's explicitly pinned OAuth account
+			// (/rotateaccount, account picker) before its first request; without
+			// this, account ranking re-ranks by usage headroom — biased away from
+			// the pinned account precisely because the parent is burning it.
+			if (options.parentProviderSessionId) {
+				inheritPinnedCredentials(authStorage, options.parentProviderSessionId, session.sessionId);
+			}
+
 			monitor.setActiveSession(session);
 			installRegistryStatusSync(session);
 			if (sessionFile !== null && worktree === undefined) {
@@ -3194,6 +3209,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					);
 					installRegistryStatusSync(revived);
 					installIrcWakeTurnMonitor(revived);
+					if (options.parentProviderSessionId) {
+						inheritPinnedCredentials(authStorage, options.parentProviderSessionId, revived.sessionId);
+					}
 					return revived;
 				};
 			}

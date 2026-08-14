@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Session-sticky OAuth records now distinguish explicit user pins from implicit "last served" routing: `pinSessionOAuthAccount` accepts `options.explicit` (default `true`), the flag round-trips through the persistent sticky cache and survives same-credential re-records, `getSessionOAuthStickyInfo` reads a session's sticky without refreshing, and `inheritPinnedSessionOAuthAccount` copies an explicit pin onto a child session without clobbering existing stickies — so task subagents can follow `/rotateaccount`.
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
