@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+## [17.3.1] - 2026-08-14
 
 ### Added
 
@@ -11,6 +12,7 @@
 
 - Fixed Rust lifetimes blinding the delimiter-balance scanner. `'` entered string state to end-of-line, so `&'static str {` hid its opening brace; a replacement range swallowing such a signature line looked balance-neutral and the mid-block advisory never fired, silently deleting the signature. Single-quote lexing is now language-aware: on `.rs` targets, `'` opens a literal only when it lexes as a real char literal (`'a'`, `'\n'`, `'\u{7FFF}'`), and lifetimes stay ordinary characters — apostrophes are never paired across lifetimes, which would swallow the delimiters between them (`<'a>(x: &'a str)`).
 - Fixed hashline reads exposing a terminal newline as an editable blank row. `splitAddressableFileLines` now removes that sentinel before consumers build line anchors while retaining genuine blank lines.
+
 ## [17.3.0] - 2026-08-13
 
 ### Fixed

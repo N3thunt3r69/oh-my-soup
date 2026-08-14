@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.1] - 2026-08-14
+
 ### Added
 
 - Session-sticky OAuth records now distinguish explicit user pins from implicit "last served" routing: `pinSessionOAuthAccount` accepts `options.explicit` (default `true`), the flag round-trips through the persistent sticky cache and survives same-credential re-records, `getSessionOAuthStickyInfo` reads a session's sticky without refreshing, and `inheritPinnedSessionOAuthAccount` copies an explicit pin onto a child session without clobbering existing stickies — so task subagents can follow `/rotateaccount`.
@@ -46,6 +48,7 @@
 ### Added
 
 - Added `forceReasoningOff` and `disableReasoning` options to disable reasoning in OpenAI and Azure OpenAI models
+
 ### Fixed
 
 - Fixed `AWS_BEDROCK_SKIP_AUTH` failing to expose Amazon Bedrock models when AWS credential files are unavailable; the registry now recognizes the transport's explicit auth bypass without enabling the separate Bedrock Mantle provider ([#8267](https://github.com/can1357/oh-my-pi/issues/8267)).
@@ -66,9 +69,6 @@
 - Fixed DeepSeek Responses targets (opencode-go) rejecting a thinking-mode continuation with `400 The reasoning_text in the thinking mode must be passed back to the API` after a prewalk hand-off plus mid-run compaction: the Responses input builder re-encoded replayed assistant turns without a reasoning item, so the request enabled reasoning but shipped no `reasoning_text`. The encoder now synthesizes a `reasoning_text` reasoning item for every replayed assistant turn when the target requires reasoning replay in thinking mode (`requiresReasoningContentForAllAssistantTurns` / `requiresReasoningContentForToolCalls`), mirroring the chat-completions `reasoning_content` safety net ([#8248](https://github.com/can1357/oh-my-pi/issues/8248)).
 - Fixed OpenAI GPT-5.6 and Daybreak `off` thinking requests serializing as `low`; every first-party alias with explicit wire-level off support now sends `reasoning.effort: "none"`.
 - Standardized first-party outbound User-Agent headers on `oms/<version>` via the shared `USER_AGENT` utility.
-
-### Fixed
-
 - Fixed the Amazon Bedrock and Cursor transports ignoring `StreamOptions.headers`; both built their request headers from scratch, so caller-supplied tracing or attribution headers were silently dropped while working on every other provider ([#8107](https://github.com/can1357/oh-my-pi/pull/8107) by [@svperfecta](https://github.com/svperfecta)).
 - Fixed Antigravity Flash turns hanging after successful response headers when the endpoint never emitted an SSE event; the provider now cancels the stalled body and fails over after 60 seconds while retaining the longer allowance for Pro reasoning starts.
 - Fixed Cursor exec-bridge bash/grep calls failing ArkType validation when the server omitted optional frame fields: synthesized and executed tool args now drop `undefined` keys (`cwd`, `case`, `skip`, `timeout`) instead of writing `optional: value || undefined`.

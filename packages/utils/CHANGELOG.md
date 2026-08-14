@@ -2,9 +2,12 @@
 
 ## [Unreleased]
 
+## [17.3.1] - 2026-08-14
+
 ### Changed
 
 - Extended parsed Server-Sent Events with optional `id` and `retry` fields, including control-only events, so reconnecting transports can retain stream cursors and server-requested retry intervals.
+
 ## [17.3.0] - 2026-08-13
 
 ### Fixed
@@ -25,13 +28,11 @@
 - Changed stale process-log retention from the newest five files globally to one newest file per completed process and day within the current and previous four local calendar days. This preserves bounded daily diagnostic coverage while continuing to remove one-use audit files.
 - Changed outbound User-Agent consumers to share the versioned `USER_AGENT` constant (`omp/<version>`).
 - Changed outbound User-Agent consumers to share the versioned `USER_AGENT` constant (`oms/<version>`).
+- Changed stale process-log retention from the newest five files globally to one newest file per completed process and day within the current and previous four local calendar days. This preserves bounded daily diagnostic coverage while continuing to remove one-use audit files.
 
 ### Fixed
 
 - Fixed Mermaid ASCII state pseudostates rendering empty boxes, miscoloring final-state borders, and inverting rounded corners in bottom-to-top diagrams.
-### Changed
-
-- Changed stale process-log retention from the newest five files globally to one newest file per completed process and day within the current and previous four local calendar days. This preserves bounded daily diagnostic coverage while continuing to remove one-use audit files.
 
 ## [17.2.11] - 2026-08-07
 

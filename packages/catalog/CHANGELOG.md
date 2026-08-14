@@ -2,11 +2,11 @@
 
 ## [Unreleased]
 
+## [17.3.1] - 2026-08-14
+
 ### Added
 
 - Added first-party OpenAI Daybreak Blue, Daybreak Red, and GPT-5.6 Cyber models with their documented API pricing, token limits, tools, and full `off`/`low`/`medium`/`high`/`xhigh`/`max` reasoning controls.
-
-### Fixed
 
 ## [17.3.0] - 2026-08-13
 
@@ -47,9 +47,6 @@
 
 - Marked `meta/muse-spark-1.2` and `muse-spark-1.2-contributor` as image-capable (`input: ["text", "image"]`) with the same Responses reasoning, thinking, and cost metadata as `muse-spark-1.1` (contributor uses its discounted 0.1/0.2 pricing), so `omp models` no longer lists them as text-only.
 - Standardized catalog discovery User-Agent headers on `oms/<version>` via the shared `USER_AGENT` utility.
-
-### Fixed
-
 - Marked `meta/muse-spark-1.2` and `muse-spark-1.2-contributor` as image-capable (`input: ["text", "image"]`) with the same Responses reasoning, thinking, and cost metadata as `muse-spark-1.1` (contributor uses its discounted 0.1/0.2 pricing), so `oms models` no longer lists them as text-only.
 - Fixed GLM-5.2 thinking levels across Baseten, CoreWeave, HuggingFace, and other uppercase-ID resellers, which were getting the generic `xhigh` effort ladder instead of the GLM-5.2-specific tiers. Also added Baseten `zai-org/GLM-5.2-Fast` and Fireworks `glm-5.2-fast` as reasoning models ([#8200](https://github.com/can1357/oh-my-pi/pull/8200) by [@jcfrancisco](https://github.com/jcfrancisco)).
 
