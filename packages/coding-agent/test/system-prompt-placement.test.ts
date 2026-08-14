@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
 import type { Context } from "@oh-my-soup/pi-ai";
-import { applySystemPromptPlacement, resolveSystemPromptPlacement } from "../src/session/system-prompt-placement";
+import { TempDir } from "@oh-my-soup/pi-utils";
+import {
+	applyModelPromptFile,
+	applySystemPromptPlacement,
+	modelPromptKey,
+	resolveSystemPromptPlacement,
+} from "../src/session/system-prompt-placement";
 
 function baseContext(): Context {
 	return {
@@ -68,5 +75,65 @@ describe("applySystemPromptPlacement", () => {
 		const first = applySystemPromptPlacement(baseContext(), { supportsSystemPrompt: false }, "auto");
 		const second = applySystemPromptPlacement(baseContext(), { supportsSystemPrompt: false }, "auto");
 		expect(JSON.stringify(first.messages[0])).toBe(JSON.stringify(second.messages[0]));
+	});
+});
+
+describe("applyModelPromptFile", () => {
+	const MODEL = { provider: "google", id: "gemma-4-31b-it" };
+
+	test("replaces the system prompt with the configured file's contents", async () => {
+		using tempDir = TempDir.createSync("@pi-prompt-file-");
+		const file = tempDir.join("gemma.md");
+		await Bun.write(file, "  File prompt body.\n");
+		const context = baseContext();
+
+		const applied = await applyModelPromptFile(context, MODEL, { [modelPromptKey(MODEL)]: file });
+
+		expect(applied.systemPrompt).toEqual(["File prompt body."]);
+		expect(applied.messages).toBe(context.messages);
+		// Original context untouched.
+		expect(context.systemPrompt).toHaveLength(2);
+	});
+
+	test("keeps the context for missing entries, unreadable files, and empty files", async () => {
+		using tempDir = TempDir.createSync("@pi-prompt-file-bad-");
+		await Bun.write(tempDir.join("empty.md"), "   \n");
+		const context = baseContext();
+
+		expect(await applyModelPromptFile(context, MODEL, {})).toBe(context);
+		expect(await applyModelPromptFile(context, MODEL, { [modelPromptKey(MODEL)]: tempDir.join("gone.md") })).toBe(
+			context,
+		);
+		expect(await applyModelPromptFile(context, MODEL, { [modelPromptKey(MODEL)]: tempDir.join("empty.md") })).toBe(
+			context,
+		);
+		expect(await applyModelPromptFile(context, { provider: "other", id: "model" }, { x: 1 })).toBe(context);
+	});
+
+	test("picks up edits to the prompt file", async () => {
+		using tempDir = TempDir.createSync("@pi-prompt-file-edit-");
+		const file = tempDir.join("prompt.md");
+		await Bun.write(file, "first version");
+		const files = { [modelPromptKey(MODEL)]: file };
+
+		expect((await applyModelPromptFile(baseContext(), MODEL, files)).systemPrompt).toEqual(["first version"]);
+		await Bun.write(file, "second version");
+		// Deterministic mtime bump instead of sleeping for filesystem clock resolution.
+		const bumped = new Date(Date.now() + 5000);
+		await fs.utimes(file, bumped, bumped);
+		expect((await applyModelPromptFile(baseContext(), MODEL, files)).systemPrompt).toEqual(["second version"]);
+	});
+
+	test("composes with placement: file prompt lands in the first user turn for flagged models", async () => {
+		using tempDir = TempDir.createSync("@pi-prompt-file-compose-");
+		const file = tempDir.join("prompt.md");
+		await Bun.write(file, "composed prompt");
+		const flagged = { ...MODEL, supportsSystemPrompt: false };
+
+		const withFile = await applyModelPromptFile(baseContext(), flagged, { [modelPromptKey(flagged)]: file });
+		const placed = applySystemPromptPlacement(withFile, flagged, "auto");
+
+		expect(placed.systemPrompt).toBeUndefined();
+		expect(placed.messages[0]).toMatchObject({ role: "user", content: "composed prompt", synthetic: true });
 	});
 });

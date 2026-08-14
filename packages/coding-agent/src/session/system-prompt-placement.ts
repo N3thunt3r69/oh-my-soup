@@ -54,3 +54,49 @@ export function applySystemPromptPlacement(
 	};
 	return { ...context, systemPrompt: undefined, messages: [opener, ...context.messages] };
 }
+
+/** Stable settings key for a model's per-model prompt file entry. */
+export function modelPromptKey(model: Pick<Model, "provider" | "id">): string {
+	return `${model.provider}/${model.id}`;
+}
+
+/** mtime-keyed cache so per-request application does not re-read unchanged prompt files. */
+const promptFileCache = new Map<string, { mtimeMs: number; text: string }>();
+
+/**
+ * Read a configured prompt file, trimmed. Returns `undefined` for unreadable
+ * or empty files — the caller keeps the session's existing prompt rather than
+ * sending a blank one.
+ */
+export async function loadModelPromptFile(filePath: string): Promise<string | undefined> {
+	try {
+		const file = Bun.file(filePath);
+		const mtimeMs = file.lastModified;
+		const cached = promptFileCache.get(filePath);
+		if (cached && cached.mtimeMs === mtimeMs) return cached.text || undefined;
+		const text = (await file.text()).trim();
+		promptFileCache.set(filePath, { mtimeMs, text });
+		return text || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Replace `context.systemPrompt` with the model's configured prompt file
+ * (`systemPromptFiles`, managed via /sprompt). Runs before
+ * {@link applySystemPromptPlacement}, so the replacement still follows the
+ * model's placement (system channel vs first user turn). No entry, an
+ * unreadable file, or an empty file leaves the context untouched.
+ */
+export async function applyModelPromptFile(
+	context: Context,
+	model: Pick<Model, "provider" | "id">,
+	files: Record<string, unknown>,
+): Promise<Context> {
+	const configured = files[modelPromptKey(model)];
+	if (typeof configured !== "string" || configured.length === 0) return context;
+	const text = await loadModelPromptFile(configured);
+	if (!text) return context;
+	return { ...context, systemPrompt: [text] };
+}

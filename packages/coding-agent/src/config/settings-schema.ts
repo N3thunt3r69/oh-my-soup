@@ -1273,6 +1273,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	systemPromptFiles: {
+		type: "record",
+		default: {},
+		ui: {
+			tab: "model",
+			group: "Prompt",
+			label: "Per-Model Prompt Files",
+			description:
+				"Map of `provider/model-id` to a prompt file path. When the active model has an entry, the file's contents replace the system prompt for requests to that model; `systemPromptPlacement` still decides whether it travels via the system channel or the first user turn. Managed live via /sprompt.",
+		},
+	},
+
 	includeWorkspaceTree: {
 		type: "boolean",
 		default: false,

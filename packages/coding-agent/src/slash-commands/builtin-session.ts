@@ -1,7 +1,13 @@
+import * as path from "node:path";
 import { getOAuthProviders } from "@oh-my-soup/pi-ai/oauth";
 import { settings } from "../config/settings";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionOAuthAccountList } from "../session/agent-session-types";
+import {
+	modelPromptKey,
+	resolveSystemPromptPlacement,
+	type SystemPromptPlacementSetting,
+} from "../session/system-prompt-placement";
 import {
 	getChangelogPath,
 	parseChangelog,
@@ -153,6 +159,103 @@ function resolveRotateAccountProvider(input: string): { id: string; name: string
 	const id = matched.storeCredentialsAs ?? matched.id;
 	const storageProvider = providers.find(provider => provider.id === id);
 	return { id, name: storageProvider?.name ?? matched.name };
+}
+
+const PLACEMENT_LABELS: Record<"system" | "first-turn", string> = {
+	system: "system prompt",
+	"first-turn": "first user turn",
+};
+
+/**
+ * `/sprompt` — per-model prompt files.
+ *
+ * Bare: list configured models with their prompt file and the channel the
+ * prompt travels on under the current `systemPromptPlacement` policy.
+ * `set <file>`: bind a prompt file to the session's active model.
+ * `clear`: remove the active model's binding.
+ */
+async function handleSpromptCommand(
+	arg: string,
+	session: AgentSession,
+	output: SlashCommandRuntime["output"],
+): Promise<void> {
+	const sessionSettings = session.settings;
+	const files = (sessionSettings.get("systemPromptFiles") ?? {}) as Record<string, unknown>;
+	const placementSetting = sessionSettings.get("systemPromptPlacement") as SystemPromptPlacementSetting;
+	const model = session.model;
+	const currentKey = model ? modelPromptKey(model) : undefined;
+	const trimmed = arg.trim();
+
+	if (!trimmed) {
+		const entries = Object.entries(files).filter(
+			(entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0,
+		);
+		if (entries.length === 0) {
+			await output(
+				"No per-model prompt files configured. Use /sprompt set <file> to bind one to the current model.",
+			);
+			return;
+		}
+		const available = session.modelRegistry.getAvailable();
+		const lines = [`Per-model prompt files (systemPromptPlacement: ${placementSetting}):`];
+		for (const [key, file] of entries) {
+			const known = available.find(candidate => modelPromptKey(candidate) === key);
+			const channel = known
+				? PLACEMENT_LABELS[resolveSystemPromptPlacement(placementSetting, known)]
+				: "placement unknown (model not loaded)";
+			const exists = await Bun.file(file).exists();
+			const marker = key === currentKey ? "* " : "  ";
+			lines.push(`${marker}${key} -> ${file}${exists ? "" : " (file missing)"} [${channel}]`);
+		}
+		if (entries.some(([key]) => key === currentKey)) lines.push("* = current model");
+		await output(lines.join("\n"));
+		return;
+	}
+
+	const { verb, rest } = parseSubcommand(trimmed);
+	if (verb === "set") {
+		if (!model || !currentKey) {
+			await output("No active model to bind a prompt file to.");
+			return;
+		}
+		const fileArg = rest.trim();
+		if (!fileArg) {
+			await output("Usage: /sprompt set <file>");
+			return;
+		}
+		const absolute = path.resolve(session.sessionManager.getCwd(), fileArg);
+		let text = "";
+		try {
+			text = (await Bun.file(absolute).text()).trim();
+		} catch {
+			await output(`Cannot read prompt file: ${absolute}`);
+			return;
+		}
+		if (!text) {
+			await output(`Prompt file is empty: ${absolute}`);
+			return;
+		}
+		sessionSettings.set("systemPromptFiles", { ...files, [currentKey]: absolute });
+		const channel = PLACEMENT_LABELS[resolveSystemPromptPlacement(placementSetting, model)];
+		await output(`Saved prompt file for ${currentKey}: ${absolute}. Delivered as ${channel} on this model.`);
+		return;
+	}
+	if (verb === "clear") {
+		if (!currentKey) {
+			await output("No active model.");
+			return;
+		}
+		if (!(currentKey in files)) {
+			await output(`No prompt file configured for ${currentKey}.`);
+			return;
+		}
+		const next = { ...files };
+		delete next[currentKey];
+		sessionSettings.set("systemPromptFiles", next);
+		await output(`Removed prompt file for ${currentKey}.`);
+		return;
+	}
+	await output("Usage: /sprompt [set <file> | clear]");
 }
 
 async function handleRotateAccountCommand(
@@ -637,6 +740,21 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		allowArgs: true,
 		handle: async (command, runtime) => {
 			await handleRotateAccountCommand(command.args, runtime.session, runtime.output);
+			return commandConsumed();
+		},
+	},
+	{
+		name: "sprompt",
+		description: "Per-model prompt files: list bindings or bind a prompt file to the current model",
+		acpDescription: "Manage per-model prompt files",
+		inlineHint: "[set <file> | clear]",
+		subcommands: [
+			{ name: "set", description: "Bind a prompt file to the current model", usage: "<file>" },
+			{ name: "clear", description: "Remove the current model's prompt file binding" },
+		],
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			await handleSpromptCommand(command.args, runtime.session, runtime.output);
 			return commandConsumed();
 		},
 	},

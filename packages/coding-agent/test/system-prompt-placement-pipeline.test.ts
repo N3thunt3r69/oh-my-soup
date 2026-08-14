@@ -28,6 +28,7 @@ const MARKER_PROMPT = "PLACEMENT-MARKER: you are the placement probe.";
 async function captureProviderContext(options: {
 	supportsSystemPrompt?: boolean;
 	placement?: "auto" | "system" | "first-turn";
+	promptFile?: string;
 }): Promise<{ context: Context; dispose: () => Promise<void> }> {
 	const api = `test-placement-${Math.random().toString(36).slice(2)}`;
 	const contexts: Context[] = [];
@@ -67,6 +68,9 @@ async function captureProviderContext(options: {
 		settings: Settings.isolated({
 			"compaction.enabled": false,
 			...(options.placement ? { systemPromptPlacement: options.placement } : {}),
+			...(options.promptFile
+				? { systemPromptFiles: { "managed-primary/placement-probe": options.promptFile } }
+				: {}),
 		}),
 		model,
 		systemPrompt: [MARKER_PROMPT],
@@ -96,7 +100,7 @@ async function captureProviderContext(options: {
 
 function firstMessageText(context: Context): string {
 	const first = context.messages[0];
-	if (!first || first.role !== "user") throw new Error("Expected a leading user message");
+	if (first?.role !== "user") throw new Error("Expected a leading user message");
 	if (typeof first.content === "string") return first.content;
 	return first.content
 		.map(part => (part.type === "text" ? part.text : ""))
@@ -153,6 +157,37 @@ describe("systemPromptPlacement provider wiring", () => {
 			expect(firstMessageText(context)).not.toContain(MARKER_PROMPT);
 		} finally {
 			await dispose();
+		}
+	});
+});
+
+describe("systemPromptFiles provider wiring (/sprompt)", () => {
+	afterEach(() => {
+		clearCustomApis();
+	});
+
+	it("delivers the configured prompt file instead of the session prompt, honoring placement", async () => {
+		using promptDir = TempDir.createSync("@pi-placement-file-");
+		const promptFile = promptDir.join("model-prompt.md");
+		await Bun.write(promptFile, "FILE-PROMPT: bound via /sprompt.");
+
+		// Capable model: file text travels on the system channel.
+		const capable = await captureProviderContext({ promptFile });
+		try {
+			expect(capable.context.systemPrompt).toEqual(["FILE-PROMPT: bound via /sprompt."]);
+			expect(firstMessageText(capable.context)).not.toContain("FILE-PROMPT");
+		} finally {
+			await capable.dispose();
+		}
+
+		// Flagged model: same file text lands in the synthetic first user turn.
+		const flagged = await captureProviderContext({ promptFile, supportsSystemPrompt: false });
+		try {
+			expect(flagged.context.systemPrompt ?? []).toHaveLength(0);
+			expect(firstMessageText(flagged.context)).toContain("FILE-PROMPT: bound via /sprompt.");
+			expect(firstMessageText(flagged.context)).not.toContain(MARKER_PROMPT);
+		} finally {
+			await flagged.dispose();
 		}
 	});
 });

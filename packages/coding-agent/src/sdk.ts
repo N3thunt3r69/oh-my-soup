@@ -158,7 +158,7 @@ import { collectMountedMCPToolRoutes, projectMountedMCPXdevGuidance } from "./se
 import { createSettingsAwareStreamFn } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
-import { applySystemPromptPlacement } from "./session/system-prompt-placement";
+import { applyModelPromptFile, applySystemPromptPlacement } from "./session/system-prompt-placement";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
 import {
@@ -3145,7 +3145,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Placement runs FIRST so a relocated prompt flows through the same
 		// obfuscation/imaging/clamping pipeline as any other user message.
 		const transformProviderContext = async (context: Context, transformModel: Model): Promise<Context> => {
-			let transformed = applySystemPromptPlacement(context, transformModel, settings.get("systemPromptPlacement"));
+			// Per-model prompt file first (it defines the prompt), then placement
+			// (it picks the channel), then the shared redaction/imaging pipeline.
+			let transformed = await applyModelPromptFile(context, transformModel, settings.get("systemPromptFiles"));
+			transformed = applySystemPromptPlacement(transformed, transformModel, settings.get("systemPromptPlacement"));
 			transformed = obfuscator ? obfuscateProviderContext(obfuscator, transformed) : transformed;
 			if (snapcompactInline) transformed = await snapcompactInline.transform(transformed, transformModel);
 			transformed = clampProviderContextImages(transformed, transformModel);
@@ -3788,8 +3791,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					convertToLlm: convertToLlmFinal,
 					transformContext: async messages => wrapSteeringForModel(messages),
 					transformProviderContext: async (context, transformModel) => {
-						let transformed = applySystemPromptPlacement(
+						let transformed = await applyModelPromptFile(
 							context,
+							transformModel,
+							settings.get("systemPromptFiles"),
+						);
+						transformed = applySystemPromptPlacement(
+							transformed,
 							transformModel,
 							settings.get("systemPromptPlacement"),
 						);
