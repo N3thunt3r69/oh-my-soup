@@ -158,6 +158,7 @@ import { collectMountedMCPToolRoutes, projectMountedMCPXdevGuidance } from "./se
 import { createSettingsAwareStreamFn } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
+import { applySystemPromptPlacement } from "./session/system-prompt-placement";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
 import {
@@ -3141,8 +3142,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						createSnapcompactSavingsRecorder(() => sessionManager.getSessionFile() ?? null),
 					)
 				: undefined;
+		// Placement runs FIRST so a relocated prompt flows through the same
+		// obfuscation/imaging/clamping pipeline as any other user message.
 		const transformProviderContext = async (context: Context, transformModel: Model): Promise<Context> => {
-			let transformed = obfuscator ? obfuscateProviderContext(obfuscator, context) : context;
+			let transformed = applySystemPromptPlacement(context, transformModel, settings.get("systemPromptPlacement"));
+			transformed = obfuscator ? obfuscateProviderContext(obfuscator, transformed) : transformed;
 			if (snapcompactInline) transformed = await snapcompactInline.transform(transformed, transformModel);
 			transformed = clampProviderContextImages(transformed, transformModel);
 			return await normalizeProviderContextImagesForModel(transformed, transformModel);
@@ -3784,7 +3788,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					convertToLlm: convertToLlmFinal,
 					transformContext: async messages => wrapSteeringForModel(messages),
 					transformProviderContext: async (context, transformModel) => {
-						let transformed = obfuscator ? obfuscateProviderContext(obfuscator, context) : context;
+						let transformed = applySystemPromptPlacement(
+							context,
+							transformModel,
+							settings.get("systemPromptPlacement"),
+						);
+						transformed = obfuscator ? obfuscateProviderContext(obfuscator, transformed) : transformed;
 						transformed = clampProviderContextImages(transformed, transformModel);
 						return await normalizeProviderContextImagesForModel(transformed, transformModel);
 					},

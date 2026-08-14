@@ -1242,6 +1242,37 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	systemPromptPlacement: {
+		type: "enum",
+		values: ["auto", "system", "first-turn"] as const,
+		default: "auto",
+		ui: {
+			tab: "model",
+			group: "Prompt",
+			label: "System Prompt Placement",
+			description:
+				"Where the effective system prompt travels on the wire. Auto keeps the provider's system channel unless the model is flagged `supportsSystemPrompt: false`, in which case the prompt is relocated into a synthetic first user turn; first-turn forces relocation for every model; system always uses the provider channel.",
+			options: [
+				{
+					value: "auto",
+					label: "Auto",
+					description:
+						"System channel when supported; first user turn for models flagged without system-prompt support",
+				},
+				{
+					value: "system",
+					label: "System",
+					description: "Always send via the provider's system/developer channel",
+				},
+				{
+					value: "first-turn",
+					label: "First Turn",
+					description: "Always relocate the system prompt into a synthetic first user message",
+				},
+			],
+		},
+	},
+
 	includeWorkspaceTree: {
 		type: "boolean",
 		default: false,

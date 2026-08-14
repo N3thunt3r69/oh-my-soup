@@ -869,6 +869,13 @@ export interface Model<TApi extends Api = Api> {
 	 * reports that native tool calling is unsupported.
 	 */
 	supportsTools?: boolean;
+	/**
+	 * Whether the model's provider channel accepts system/developer
+	 * instructions. `false` is the only meaningful value: the harness then
+	 * relocates the effective system prompt into a synthetic first user turn
+	 * (see `systemPromptPlacement`). Unset means supported.
+	 */
+	supportsSystemPrompt?: boolean;
 	/** Whether this model accepts the GA OpenAI Responses `{ type: "computer" }` native tool. */
 	supportsComputerUse?: boolean;
 	/** Verbatim explicit computer-use support from the spec; undefined when `buildModel` inferred the runtime value. */
