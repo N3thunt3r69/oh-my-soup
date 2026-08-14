@@ -105,10 +105,30 @@ if (!globalThis.__oms_js_prelude_loaded__) {
 			opts,
 			rest,
 			["agent", "label", "schema", "isolated", "apply", "merge", "schemaMode"],
-			"{ agent, label, schema, isolated, apply, merge, schemaMode, handle }",
+			"{ agent, label, schema, isolated, apply, merge, schemaMode, handle, detach }",
 		);
-		const { handle, ...callArgs } = o;
-		const res = await globalThis.__oms_call_tool__("__agent__", { prompt, ...callArgs, handle: Boolean(handle) });
+		const { handle, detach, ...callArgs } = o;
+		const res = await globalThis.__oms_call_tool__("__agent__", {
+			prompt,
+			...callArgs,
+			handle: Boolean(handle),
+			...(detach ? { detach: true } : {}),
+		});
+		if (detach) {
+			// Admission-time return: the child runs as a background job; its
+			// result auto-delivers and stays readable at agent://<id>.
+			const details = res && typeof res === "object" && res.details && typeof res.details === "object" ? res.details : {};
+			const id = details.id ?? null;
+			return {
+				id,
+				handle: id ? `agent://${id}` : null,
+				label: details.label ?? null,
+				agent: details.agent ?? null,
+				jobId: details.jobId ?? null,
+				detached: true,
+				text: res && typeof res === "object" ? res.text : res,
+			};
+		}
 		const text = res && typeof res === "object" ? res.text : res;
 		const hasData = res && typeof res === "object" && hasOwn(res, "data");
 		const parsed = hasData ? res.data : hasOwn(callArgs, "schema") ? JSON.parse(text) : text;
@@ -206,6 +226,17 @@ if (!globalThis.__oms_js_prelude_loaded__) {
 		hard: async () => Boolean((await __budgetSnap()).hard),
 	};
 
+	const __compactCall = async payload => {
+		const r = await globalThis.__oms_call_tool__("__compact__", payload);
+		return r && typeof r === "object" ? r : {};
+	};
+
+	const compact = {
+		status: async () => await __compactCall({ op: "status" }),
+		run: async instructions =>
+			await __compactCall(instructions === undefined ? { op: "run" } : { op: "run", instructions: String(instructions) }),
+	};
+
 	const display = value => {
 		globalThis.__oms_display__(value);
 	};
@@ -287,6 +318,7 @@ if (!globalThis.__oms_js_prelude_loaded__) {
 	globalThis.log = log;
 	globalThis.phase = phase;
 	globalThis.budget = budget;
+	globalThis.compact = compact;
 	globalThis.__pool = __pool;
 	globalThis.read = read;
 	globalThis.write = write;

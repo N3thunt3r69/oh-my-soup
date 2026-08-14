@@ -349,22 +349,6 @@ export function boundaryVariantRepairWarning(startLine: number, kept: number, dr
 /**
  * The applied result no longer parses while the pre-edit content did: the
  * patch introduced a syntax error. Advisory, never a rejection — the applier
- * honors the authored edit — but the breakage is machine-confirmed by
- * tree-sitter and surfaced in the same response instead of waiting for a
- * compiler pass.
- */
-export function editBrokeParseWarning(firstChangedLine: number | undefined): string {
-	const at = firstChangedLine === undefined ? "" : ` near line ${firstChangedLine}`;
-	return (
-		`This edit introduced a syntax error${at}: the file parsed before the patch and no longer does. ` +
-		`It was applied exactly as written, so a line number or range endpoint is likely wrong — ` +
-		`re-read the touched region and re-issue a correcting edit.`
-	);
-}
-
-/**
- * The applied result no longer parses while the pre-edit content did: the
- * patch introduced a syntax error. Advisory, never a rejection — the applier
  * honors the authored edit — but the breakage is machine-confirmed (the
  * tree-sitter probe parsed the original and rejects the result), so it is
  * surfaced in the same response instead of waiting for a compiler pass. The

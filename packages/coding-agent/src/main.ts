@@ -29,7 +29,6 @@ import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
-import { getLatestRelease } from "./cli/update-cli";
 import { findConfigFile } from "./config";
 import { ModelRegistry } from "./config/model-registry";
 import {
@@ -96,6 +95,7 @@ import { concreteThinkingLevel, parseConfiguredThinkingLevel } from "./thinking"
 import type { LspStartupServerInfo } from "./tools";
 import { getChangelogPath, resolveStartupChangelogForDisplay, type StartupChangelogSelection } from "./utils/changelog";
 import { EventBus } from "./utils/event-bus";
+import { fetchLatestRelease } from "./utils/latest-release";
 
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<void>;
@@ -115,8 +115,8 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 		return;
 	}
 	try {
-		const release = await getLatestRelease({ timeoutMs: 5_000 });
-		return Bun.semver.order(release.version, currentVersion) > 0 ? release.version : undefined;
+		const { version } = await fetchLatestRelease(5_000);
+		return Bun.semver.order(version, currentVersion) > 0 ? version : undefined;
 	} catch {
 		return undefined;
 	}

@@ -486,7 +486,7 @@ describe("update-cli release binary integrity", () => {
 		});
 
 		expect(await Bun.file(targetPath).text()).toBe(content);
-		expect((await fs.stat(targetPath)).mode & 0o777).toBe(0o755);
+		if (process.platform !== "win32") expect((await fs.stat(targetPath)).mode & 0o777).toBe(0o755);
 	});
 
 	it("aborts the response stream as soon as it exceeds the expected size", async () => {
@@ -610,7 +610,7 @@ describe("update-cli release binary integrity", () => {
 			).rejects.toThrow("digest mismatch");
 			expect(metadataAuthorizations).toEqual(["Bearer test-token"]);
 			expect(await Bun.file(targetPath).text()).toBe(installed);
-			expect((await fs.stat(targetPath)).mode & 0o777).toBe(0o755);
+			if (process.platform !== "win32") expect((await fs.stat(targetPath)).mode & 0o777).toBe(0o755);
 			expect(await Bun.file(`${targetPath}.new`).exists()).toBe(false);
 		} finally {
 			if (previousGitHubToken === undefined) delete Bun.env.GITHUB_TOKEN;
