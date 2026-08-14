@@ -1,3 +1,5 @@
+/// <reference path="./camoufox-assets.d.ts" />
+
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { getCamoufoxDir, getPuppeteerDir, logger } from "@oh-my-soup/pi-utils";
