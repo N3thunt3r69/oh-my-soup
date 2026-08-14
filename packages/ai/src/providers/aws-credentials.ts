@@ -626,11 +626,13 @@ function isBatchScript(executable: string): boolean {
 
 /** POSIX-shell-style tokenizer used by the AWS CLI for `credential_process`.
  *
- * Outside quotes a backslash escapes the next character. Inside single quotes
- * everything is literal (no escapes, cannot contain `'`). Inside double quotes
- * a backslash only escapes `$`, `` ` ``, `"`, and `\` — every other backslash
- * is preserved verbatim, which is what makes Windows paths like
- * `"C:\Program Files\tool\auth.exe"` survive tokenization. */
+ * Outside quotes a backslash escapes whitespace, quotes, `$`, `` ` ``, and
+ * `\`; before any ordinary character it is preserved verbatim so bare
+ * Windows paths like `C:\Users\me\auth.exe` keep their separators. Inside
+ * single quotes everything is literal (no escapes, cannot contain `'`).
+ * Inside double quotes a backslash only escapes `$`, `` ` ``, `"`, and `\` —
+ * every other backslash is preserved verbatim, which is what makes Windows
+ * paths like `"C:\Program Files\tool\auth.exe"` survive tokenization. */
 export function tokenizeCredentialProcessCommand(cmd: string): string[] {
 	const tokens: string[] = [];
 	let current = "";
@@ -650,7 +652,24 @@ export function tokenizeCredentialProcessCommand(cmd: string): string[] {
 				continue;
 			}
 			if (ch === "\\" && i + 1 < cmd.length) {
-				current += cmd[++i];
+				const next = cmd[i + 1];
+				if (
+					next === " " ||
+					next === "\t" ||
+					next === "\n" ||
+					next === "\r" ||
+					next === "'" ||
+					next === '"' ||
+					next === "\\" ||
+					next === "$" ||
+					next === "`"
+				) {
+					current += next;
+					i++;
+				} else {
+					// Preserve literal backslash for bare Windows paths.
+					current += ch;
+				}
 				hasToken = true;
 				continue;
 			}
