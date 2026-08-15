@@ -43,7 +43,8 @@ import { DEFAULT_TTS_VOICE } from "./models";
 import { SpeakableStream } from "./speakable";
 import { BlockAccumulator, type SpeechEnhancer } from "./speech-enhancer";
 import { createStreamingPlayer, DUCK_GAIN } from "./streaming-player";
-import { type TtsStreamHandle, ttsClient } from "./tts-client";
+import type * as ttsClientModule from "./tts-client";
+import type { TtsStreamHandle, TtsStreamOptions } from "./tts-client";
 
 /** Quiet time on the delta stream before the buffered partial is spoken. */
 const IDLE_FLUSH_MS = 1000;
@@ -51,6 +52,53 @@ const IDLE_FLUSH_MS = 1000;
 const COALESCE_MIN_CHARS = 400;
 /** Bounded rewrite concurrency across utterances. */
 const MAX_REWRITES_IN_FLIGHT = 2;
+
+/**
+ * Lazy-load the synthesis client: `tts-client.ts` pulls the whole subprocess
+ * worker stack (worker-client, tiny title IPC env), and the vocalizer is
+ * imported by interactive startup — so the client loads only when the first
+ * speakable segment opens a session. Deferral is the point; specifier fixed.
+ */
+type TtsClientModule = typeof ttsClientModule;
+let loadedTtsClient: TtsClientModule | undefined;
+async function loadTtsClient(): Promise<TtsClientModule> {
+	loadedTtsClient ??= await import("./tts-client");
+	return loadedTtsClient;
+}
+
+/**
+ * Synchronous facade over a lazily-loaded synthesis stream. `push`/`end`
+ * buffer until the client module resolves, then replay in order onto the real
+ * handle; `chunks` waits for it. Keeps the session-opening path sync.
+ * An abort that fires before the module resolves is honored by
+ * `synthesizeStream` itself (an aborted signal yields a closed channel).
+ */
+function openLazyStream(modelKey: string, options: TtsStreamOptions): TtsStreamHandle {
+	const buffered: string[] = [];
+	let ended = false;
+	let real: TtsStreamHandle | null = null;
+	const ready = loadTtsClient().then(module => {
+		const handle = module.ttsClient.synthesizeStream(modelKey, options);
+		for (const text of buffered) handle.push(text);
+		buffered.length = 0;
+		if (ended) handle.end();
+		real = handle;
+		return handle;
+	});
+	return {
+		push(text: string): void {
+			if (real) real.push(text);
+			else buffered.push(text);
+		},
+		end(): void {
+			if (real) real.end();
+			else ended = true;
+		},
+		chunks: (async function* () {
+			yield* (await ready).chunks;
+		})(),
+	};
+}
 
 export interface VocalizerPlayer {
 	start(sampleRate: number): void;
@@ -353,7 +401,7 @@ export class Vocalizer {
 	#openSession(abort: AbortController): TtsStreamHandle {
 		const modelKey = settings.get("tts.localModel");
 		const voice = settings.get("speech.voice") || DEFAULT_TTS_VOICE;
-		const handle = ttsClient.synthesizeStream(modelKey, { voice, signal: abort.signal });
+		const handle = openLazyStream(modelKey, { voice, signal: abort.signal });
 		const player = this.#createPlayer();
 		player.setGain(this.#ducked ? DUCK_GAIN : 1);
 		this.#liveAborts.add(abort);

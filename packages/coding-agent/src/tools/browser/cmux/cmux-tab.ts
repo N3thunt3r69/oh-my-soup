@@ -19,7 +19,7 @@ import {
 	withBrowserPromiseCombinatorTracking,
 } from "../../run-scope";
 import { ToolAbortError, ToolError, throwIfAborted } from "../../tool-errors";
-import { type AriaSnapshotOptions, assertSelectorString, buildAriaSnapshotScript } from "../aria/aria-snapshot";
+import { type AriaSnapshotOptions, assertSelectorString } from "../aria/selectors";
 import { DEFAULT_VIEWPORT } from "../launch";
 import { extractReadableFromHtml, type ReadableFormat } from "../readable";
 import { cloneSafe, RunOutput } from "../run-output";
@@ -438,6 +438,9 @@ export class CmuxTab {
 
 	async ariaSnapshot(selector?: string, opts?: AriaSnapshotOptions): Promise<string> {
 		const timeoutMs = Math.min(this.#runContext?.timeoutMs ?? 30_000, 30_000);
+		// aria-snapshot.ts embeds the generated Playwright bundle; load it on the
+		// first snapshot instead of at boot. Fixed specifier; deferral is the point.
+		const { buildAriaSnapshotScript } = await import("../aria/aria-snapshot");
 		const result = (await this.#request(
 			"browser.eval",
 			{ script: buildAriaSnapshotScript(selector, opts) },

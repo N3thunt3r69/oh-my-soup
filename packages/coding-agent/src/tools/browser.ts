@@ -32,11 +32,10 @@ import { ToolAbortError, ToolError, throwIfAborted } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout } from "./tool-timeouts";
 
-export {
-	type AriaSnapshotOptions,
-	buildAriaSnapshotScript,
-	parseAriaRefSelector,
-} from "./browser/aria/aria-snapshot";
+// `buildAriaSnapshotScript` is deliberately NOT re-exported here: it lives in
+// `./browser/aria/aria-snapshot`, which embeds the generated Playwright bundle
+// and must stay out of the eager tool-table graph (import it deep instead).
+export { type AriaSnapshotOptions, parseAriaRefSelector } from "./browser/aria/selectors";
 export { cmuxSnapshotToObservation, mapWaitUntil, resolveCmuxKind, serializeEval } from "./browser/cmux/rpc";
 export { CmuxSocketClient } from "./browser/cmux/socket-client";
 export { extractReadableFromHtml, type ReadableFormat, type ReadableResult } from "./browser/readable";

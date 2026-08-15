@@ -12,7 +12,6 @@ import { settings } from "../config/settings";
 import type { CustomTool, CustomToolContext } from "../extensibility/custom-tools/types";
 import { resolveXAIHttpCredentials } from "../lib/xai-http";
 import { DEFAULT_TTS_LOCAL_MODEL_KEY, DEFAULT_TTS_VOICE, isTtsLocalModelKey, KOKORO_VOICES } from "../tts/models";
-import { ttsClient } from "../tts/tts-client";
 import { encodeWav } from "../tts/wav";
 import { formatPathRelativeToCwd, resolveToCwd } from "./path-utils";
 
@@ -195,6 +194,11 @@ async function synthesizeLocal(
 	outputPath: string,
 	signal: AbortSignal | undefined,
 ): Promise<AgentToolResult<TtsToolDetails, TtsSchemaType>> {
+	// The tts-client pulls the whole subprocess worker stack (worker-client,
+	// title-client IPC env); load it only when local synthesis actually runs so
+	// the tool table stays off the startup path. Fixed specifier; deferral is
+	// the point.
+	const { ttsClient } = await import("../tts/tts-client");
 	const modelSetting = readStringSetting("tts.localModel");
 	const modelKey = modelSetting && isTtsLocalModelKey(modelSetting) ? modelSetting : DEFAULT_TTS_LOCAL_MODEL_KEY;
 	const voice = readStringSetting("tts.localVoice") || DEFAULT_TTS_VOICE;

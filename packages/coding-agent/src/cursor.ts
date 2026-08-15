@@ -26,7 +26,7 @@ import {
 	piLsPath,
 	piReadPath,
 	piTimeout,
-} from "@oh-my-soup/pi-ai/providers/cursor/exec-modern";
+} from "@oh-my-soup/pi-ai/providers/cursor-pi-args";
 import { sanitizeText } from "@oh-my-soup/pi-utils";
 import type { MCPResourceReadResult } from "./mcp/types";
 import type { ApprovalMode } from "./tools/approval";
