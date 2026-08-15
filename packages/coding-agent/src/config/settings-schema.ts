@@ -2360,7 +2360,10 @@ export const SETTINGS_SCHEMA = {
 	// every session look explicitly configured.
 	"compaction.reserveTokens": { type: "number", default: undefined },
 
-	"compaction.keepRecentTokens": { type: "number", default: 20000 },
+	// -1 = auto: scale the kept-verbatim tail with the model window (see
+	// resolveKeepRecentTokens). A stored explicit value — including the old
+	// materialized 20000 default — is honored unchanged.
+	"compaction.keepRecentTokens": { type: "number", default: -1 },
 
 	"compaction.autoContinue": { type: "boolean", default: true },
 

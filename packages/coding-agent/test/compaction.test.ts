@@ -12,9 +12,13 @@ import {
 	getLastAssistantUsage,
 	hasContextTokenUsage,
 	prepareCompaction,
+	resolveKeepRecentTokens,
 	resolveThresholdTokens,
+	SUMMARY_INPUT_ELISION_MARKER,
 	shouldCompact,
+	trimSummarizationInput,
 } from "@oh-my-soup/pi-agent-core/compaction/compaction";
+import { countTokens } from "@oh-my-soup/pi-agent-core/tokenizer";
 import * as ai from "@oh-my-soup/pi-ai";
 import { encodeTextSignatureV1 } from "@oh-my-soup/pi-ai/providers/openai-shared";
 import type { AssistantMessage, Model, ProviderPayload, Usage } from "@oh-my-soup/pi-ai/types";
@@ -369,6 +373,59 @@ describe("compactionContextTokens", () => {
 		expect(shouldCompact(20_000, 100_000, settings)).toBe(false);
 		// Floored by the real stored-conversation estimate (95k) it correctly compacts.
 		expect(shouldCompact(compactionContextTokens(20_000, 95_000), 100_000, settings)).toBe(true);
+	});
+});
+
+describe("resolveKeepRecentTokens", () => {
+	// DEFAULT_COMPACTION_SETTINGS carries the -1 auto sentinel.
+	const autoSettings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS };
+
+	it("honors explicit values unchanged — including the old 20000 default", () => {
+		const storedDefault: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 20_000 };
+		expect(resolveKeepRecentTokens(1_000_000, storedDefault)).toBe(20_000);
+		const custom: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 123_456 };
+		expect(resolveKeepRecentTokens(128_000, custom)).toBe(123_456);
+	});
+
+	it("auto keeps the 20000 floor up to 200k windows", () => {
+		expect(resolveKeepRecentTokens(128_000, autoSettings)).toBe(20_000);
+		// 10% only overtakes the floor past 200k.
+		expect(resolveKeepRecentTokens(200_000, autoSettings)).toBe(20_000);
+	});
+
+	it("auto scales to 10% of larger windows", () => {
+		expect(resolveKeepRecentTokens(400_000, autoSettings)).toBe(40_000);
+	});
+
+	it("auto caps at 65536 on very large windows", () => {
+		expect(resolveKeepRecentTokens(1_000_000, autoSettings)).toBe(65_536);
+	});
+
+	it("auto falls back to 20000 when no window is known", () => {
+		expect(resolveKeepRecentTokens(undefined, autoSettings)).toBe(20_000);
+		expect(resolveKeepRecentTokens(0, autoSettings)).toBe(20_000);
+	});
+});
+
+describe("trimSummarizationInput", () => {
+	it("returns the input untouched when it fits the budget", () => {
+		const text = "short conversation";
+		expect(trimSummarizationInput(text, 1_000)).toBe(text);
+	});
+
+	it("truncates the OLDEST content, keeps the newest tail, and flags the cut", () => {
+		const lines = Array.from({ length: 400 }, (_, i) => `line-${i} lorem ipsum dolor sit amet`).join("\n");
+		const budget = 500;
+		const trimmed = trimSummarizationInput(lines, budget);
+		expect(trimmed.startsWith(SUMMARY_INPUT_ELISION_MARKER)).toBe(true);
+		// Newest content survives verbatim; the oldest is gone.
+		expect(trimmed.endsWith("line-399 lorem ipsum dolor sit amet")).toBe(true);
+		expect(trimmed.includes("line-0 ")).toBe(false);
+		expect(countTokens(trimmed)).toBeLessThanOrEqual(budget);
+	});
+
+	it("degrades to the bare marker when the budget cannot fit any content", () => {
+		expect(trimSummarizationInput("anything at all", 0)).toBe(SUMMARY_INPUT_ELISION_MARKER);
 	});
 });
 
@@ -1385,7 +1442,12 @@ describe("buildSessionContext", () => {
 describe("Large session fixture", () => {
 	it("should find cut point in large session", async () => {
 		const entries = await loadLargeSessionEntries();
-		const result = findCutPoint(entries, 0, entries.length, DEFAULT_COMPACTION_SETTINGS.keepRecentTokens);
+		const result = findCutPoint(
+			entries,
+			0,
+			entries.length,
+			resolveKeepRecentTokens(undefined, DEFAULT_COMPACTION_SETTINGS),
+		);
 
 		// Cut point should be at a message entry (user or assistant)
 		expect(entries[result.firstKeptEntryIndex].type).toBe("message");

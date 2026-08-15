@@ -177,6 +177,12 @@ export interface CompactionSettings {
 	 * explicit value — even one equal to the default — is always honored.
 	 */
 	reserveTokens?: number;
+	/**
+	 * Verbatim recent-history tail kept out of the summary. Any value <= 0 is
+	 * the "auto" sentinel: scale with the active model's window via
+	 * {@link resolveKeepRecentTokens}. Explicit positive values — including one
+	 * equal to the historical 20000 default — are honored unchanged.
+	 */
 	keepRecentTokens: number;
 	autoContinue?: boolean;
 	remoteEnabled?: boolean;
@@ -200,6 +206,30 @@ export const DEFAULT_RESERVE_TOKENS = 16384;
  */
 export const MAX_SUMMARY_TOKENS = DEFAULT_RESERVE_TOKENS;
 
+/** Kept-verbatim tail applied when `keepRecentTokens` is the auto sentinel and no window is known. */
+export const DEFAULT_KEEP_RECENT_TOKENS = 20000;
+
+/**
+ * Ceiling for the auto-scaled kept-verbatim tail. 10% of a 1M window would keep
+ * 100k tokens verbatim — at that point compaction stops compacting — so the
+ * auto scale is capped at 64k while explicit user values remain unbounded.
+ */
+export const MAX_AUTO_KEEP_RECENT_TOKENS = 65536;
+
+/**
+ * Effective kept-verbatim tail. The auto sentinel (<= 0) scales with the
+ * window — `max(20000, 10% of contextWindow)` capped at
+ * {@link MAX_AUTO_KEEP_RECENT_TOKENS} — so large-window models keep
+ * proportionally more recent history verbatim instead of the flat 20k tuned
+ * for 128k-class windows. A stored explicit value (even 20000) wins as-is.
+ */
+export function resolveKeepRecentTokens(contextWindow: number | undefined, settings: CompactionSettings): number {
+	const configured = settings.keepRecentTokens;
+	if (Number.isFinite(configured) && configured > 0) return configured;
+	if (!contextWindow || contextWindow <= 0) return DEFAULT_KEEP_RECENT_TOKENS;
+	return Math.min(Math.max(DEFAULT_KEEP_RECENT_TOKENS, Math.floor(contextWindow * 0.1)), MAX_AUTO_KEEP_RECENT_TOKENS);
+}
+
 // reserveTokens is deliberately absent: an unset reserve is what marks it as
 // defaulted, which resolveBudgetReserveTokens needs to distinguish "user never
 // chose a reserve" from "user explicitly configured the default value".
@@ -209,7 +239,7 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	thresholdPercent: -1,
 	thresholdTokens: -1,
 	midTurnEnabled: true,
-	keepRecentTokens: 20000,
+	keepRecentTokens: -1,
 	autoContinue: true,
 	remoteEnabled: true,
 	remoteStreamingV2Enabled: true,
@@ -831,6 +861,13 @@ export interface SummaryOptions {
 		ctx: Context,
 		options: SimpleStreamOptions,
 	) => Promise<AssistantMessage>;
+	/**
+	 * Fired once per successful local summarization oneshot with the
+	 * provider-reported usage, so callers can aggregate compaction token/cost
+	 * spend (e.g. onto `auto_compaction_end`). Remote compaction transports
+	 * report no usage and never fire this.
+	 */
+	onUsage?: (usage: Usage) => void;
 }
 
 function localCodexCompaction(options: SummaryOptions | undefined) {
@@ -861,6 +898,40 @@ function createSnapcompactArchiveMigrationMessage(archiveText: string): Message 
 	};
 }
 
+/** One-line head marker inserted when the summarization input had to be truncated. */
+export const SUMMARY_INPUT_ELISION_MARKER =
+	"[earlier conversation omitted: summarization input exceeded the summarizer's context window]";
+
+/**
+ * Fit a serialized conversation into the summarizer's usable input window.
+ *
+ * The remote V2 path already guards its request via
+ * `trimRemoteCompactionInputToContextWindow`; this is the local-path
+ * equivalent. Oldest content is dropped first — the newest tail is what the
+ * summary must render most faithfully — and the cut is flagged with
+ * {@link SUMMARY_INPUT_ELISION_MARKER} so the summarizer knows earlier
+ * history is missing rather than silently absent.
+ */
+export function trimSummarizationInput(conversationText: string, maxInputTokens: number): string {
+	if (maxInputTokens <= 0) return SUMMARY_INPUT_ELISION_MARKER;
+	let tokens = countTokens(conversationText);
+	if (tokens <= maxInputTokens) return conversationText;
+	const budget = Math.max(0, maxInputTokens - countTokens(`${SUMMARY_INPUT_ELISION_MARKER}\n`));
+	let kept = conversationText;
+	while (tokens > budget && kept.length > 0) {
+		// Proportional head cut; re-count and shrink again until it fits. The
+		// keep length strictly decreases, so this terminates.
+		const keepChars = Math.min(kept.length - 1, Math.floor((kept.length * budget) / tokens));
+		if (keepChars <= 0) {
+			kept = "";
+			break;
+		}
+		kept = kept.slice(kept.length - keepChars);
+		tokens = countTokens(kept);
+	}
+	return kept.length > 0 ? `${SUMMARY_INPUT_ELISION_MARKER}\n${kept}` : SUMMARY_INPUT_ELISION_MARKER;
+}
+
 export async function generateSummary(
 	currentMessages: AgentMessage[],
 	model: Model,
@@ -885,7 +956,23 @@ export async function generateSummary(
 	// Serialize conversation to text so model doesn't try to continue it
 	// Convert to LLM messages first (handles custom app messages when caller provides a transformer).
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(currentMessages);
-	const conversationText = serializeConversationForSummary(llmMessages, preferredDialect(model.id));
+	const serializedConversation = serializeConversationForSummary(llmMessages, preferredDialect(model.id));
+	// The local request must itself fit the summarizer's window: window minus
+	// the reserve and the summary output budget bounds the serialized input.
+	const summarizerWindow = model.contextWindow ?? 0;
+	const usableInputTokens =
+		summarizerWindow > 0 ? summarizerWindow - reserveTokens - maxTokens : Number.POSITIVE_INFINITY;
+	const conversationText = Number.isFinite(usableInputTokens)
+		? trimSummarizationInput(serializedConversation, usableInputTokens)
+		: serializedConversation;
+	if (conversationText !== serializedConversation) {
+		logger.info("Truncated oversized local compaction input", {
+			model: model.id,
+			provider: model.provider,
+			contextWindow: model.contextWindow,
+			usableInputTokens,
+		});
+	}
 
 	// Build the prompt with conversation wrapped in tags
 	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
@@ -941,6 +1028,7 @@ export async function generateSummary(
 	if (response.stopReason === "error") {
 		throw createSummarizationError("Summarization failed", response);
 	}
+	if (response.usage) options?.onUsage?.(response.usage);
 
 	const textContent = response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -1149,6 +1237,7 @@ async function generateShortSummary(
 	if (response.stopReason === "error") {
 		throw createSummarizationError("Short summary failed", response);
 	}
+	if (response.usage) options?.onUsage?.(response.usage);
 
 	return response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -1239,7 +1328,7 @@ export function prepareCompaction(
 
 	const lastUsage = getLastAssistantUsage(pathEntries);
 	const tokensBefore = lastUsage ? calculateContextTokens(lastUsage) : 0;
-	let keepRecentTokens = settings.keepRecentTokens;
+	let keepRecentTokens = resolveKeepRecentTokens(activeModel?.contextWindow ?? undefined, settings);
 	if (lastUsage) {
 		const estimatedTokens = estimateEntriesTokens(pathEntries, boundaryStart, boundaryEnd);
 		const promptTokens = calculatePromptTokens(lastUsage);
@@ -1442,6 +1531,7 @@ export async function compact(
 		tools: options?.tools,
 		fetch: options?.fetch,
 		completeImpl: options?.completeImpl,
+		onUsage: options?.onUsage,
 	};
 
 	const previousSnapcompactArchive = snapcompact.getPreservedArchive(previousPreserveData);
@@ -1725,6 +1815,7 @@ async function generateTurnPrefixSummary(
 	if (response.stopReason === "error") {
 		throw createSummarizationError("Turn prefix summarization failed", response);
 	}
+	if (response.usage) options?.onUsage?.(response.usage);
 
 	return response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
