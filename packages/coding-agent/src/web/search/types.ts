@@ -8,7 +8,17 @@ export const SEARCH_PROVIDER_OPTIONS = [
 	{
 		value: "auto",
 		label: "Auto",
-		description: "Automatically uses the first configured web-search provider",
+		description: "Uses configured order; defaults to Google, then DuckDuckGo, then remaining providers",
+	},
+	{
+		value: "google",
+		label: "Google",
+		description: "Credential-free direct Google results in the session's Camoufox browser; may be challenged",
+	},
+	{
+		value: "duckduckgo",
+		label: "DuckDuckGo",
+		description: "Credential-free best-effort fallback; may be bot-challenged on datacenter/shared-egress IPs",
 	},
 	{
 		value: "perplexity",
@@ -63,19 +73,9 @@ export const SEARCH_PROVIDER_OPTIONS = [
 		description: "Credential-free scrape of Startpage (Google-backed) results; may be bot-challenged",
 	},
 	{
-		value: "duckduckgo",
-		label: "DuckDuckGo",
-		description: "Credential-free best-effort fallback; may be bot-challenged on datacenter/shared-egress IPs",
-	},
-	{
 		value: "ecosia",
 		label: "Ecosia",
 		description: "Credential-free browser-backed scrape of Ecosia (Google-backed) results",
-	},
-	{
-		value: "google",
-		label: "Google",
-		description: "Credential-free direct Google results in the session's Camoufox browser; may be challenged",
 	},
 	{
 		value: "yandex",
