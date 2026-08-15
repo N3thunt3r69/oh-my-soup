@@ -14,7 +14,7 @@ import * as jj from "../../../utils/jj";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { calculateTokensPerSecond } from "../../../utils/token-rate";
 import { sanitizeStatusText } from "../../shared";
-import { theme } from "../../theme/theme";
+import { getThemeEpoch, theme } from "../../theme/theme";
 import {
 	type CodexResetFireworksEvent,
 	type CodexResetUsageSnapshot,
@@ -22,7 +22,7 @@ import {
 } from "../codex-reset-fireworks";
 import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
 import { getPreset } from "./presets";
-import { renderSegment, type SegmentContext } from "./segments";
+import { defaultPathMaxLength, renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
 import type {
 	CollabStatus,
@@ -295,6 +295,18 @@ export class StatusLineComponent implements Component {
 	#widthEpochRevision = 0;
 	#settings: StatusLineSettings = {};
 	#effectiveSettings: EffectiveStatusLineSettings | undefined;
+	// Single-entry output memo for the assembled status bar. Segment contents
+	// still render on every #buildStatusLine call (they read live clocks and
+	// TTL-gated caches, and keep background git/usage refreshes armed); only
+	// the assembly — the repeated `visibleWidth` scans, powerline joins, the
+	// path-shrink loop, and the gap fill — is skipped while nothing that can
+	// change the output bytes changed.
+	#barMemoKey: string | undefined;
+	#barMemoValue = "";
+	// Last getTopBorder result; `visibleWidth` over the whole bar is the
+	// priciest part of a top-border probe, so reuse the measurement while the
+	// bar bytes are unchanged. Callers treat the object as read-only.
+	#topBorderMemo: { content: string; width: number; revision: number } | undefined;
 	#cachedBranch: string | null | undefined = undefined;
 	#cachedBranchRepoId: string | null | undefined = undefined;
 	#cachedBranchCwd: string | undefined = undefined;
@@ -1756,6 +1768,16 @@ export class StatusLineComponent implements Component {
 		if (subagentBadge) {
 			rightParts.unshift(subagentBadge);
 		}
+		const sessionName =
+			effectiveSettings.sessionAccent !== false ? this.session.sessionManager?.getSessionName() : undefined;
+		// Single-entry output memo. Everything the assembly below consumes is
+		// captured here: the rendered segment contents (left/right parts, plus
+		// leftSegIds for path-shrink targeting), the width budget, the theme
+		// epoch (colors, caps, border glyphs), separator/transparency settings,
+		// the focus dim, and the session accent. Equal key ⇒ the assembly is a
+		// pure function of these ⇒ byte-identical output.
+		const barKey = `${width}|${getThemeEpoch()}|${this.#focusedAgentId ?? ""}|${effectiveSettings.separator ?? ""}|${transparentBg ? 1 : 0}|${sessionName ?? ""}|${leftSegIds.join(",")}|${leftParts.join("\u001f")}\u001e${rightParts.join("\u001f")}`;
+		if (barKey === this.#barMemoKey) return this.#barMemoValue;
 		const topFillWidth = Math.max(0, width);
 		const left = [...leftParts];
 		const right = [...rightParts];
@@ -1792,7 +1814,7 @@ export class StatusLineComponent implements Component {
 				const shrinkable = currentPathVW - minPathVW;
 				if (shrinkable > 0) {
 					const shrinkBy = Math.min(shrinkable, overflow);
-					const currentMaxLen = ctx.options.path?.maxLength ?? 40;
+					const currentMaxLen = ctx.options.path?.maxLength ?? defaultPathMaxLength(width);
 					let newMaxLen = Math.max(4, Math.min(currentMaxLen, currentPathVW) - shrinkBy);
 					const pathCtx = (maxLen: number): SegmentContext => ({
 						...ctx,
@@ -1859,21 +1881,23 @@ export class StatusLineComponent implements Component {
 
 		const leftGroup = renderGroup(left, "left");
 		const rightGroup = renderGroup(right, "right");
-		if (!leftGroup && !rightGroup) return "";
-
-		if (topFillWidth === 0 || left.length === 0 || right.length === 0) {
-			return leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup;
+		let bar: string;
+		if (!leftGroup && !rightGroup) {
+			bar = "";
+		} else if (topFillWidth === 0 || left.length === 0 || right.length === 0) {
+			bar = leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup;
+		} else {
+			const gapWidth = Math.max(1, topFillWidth - leftWidth - rightWidth);
+			const accentHex = sessionName
+				? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
+				: undefined;
+			const gapColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("border");
+			const gapFill = `${gapColor}${theme.boxRound.horizontal.repeat(gapWidth)}\x1b[39m`;
+			bar = leftGroup + gapFill + rightGroup;
 		}
-
-		const gapWidth = Math.max(1, topFillWidth - leftWidth - rightWidth);
-		const sessionName =
-			effectiveSettings.sessionAccent !== false ? this.session.sessionManager?.getSessionName() : undefined;
-		const accentHex = sessionName
-			? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
-			: undefined;
-		const gapColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("border");
-		const gapFill = `${gapColor}${theme.boxRound.horizontal.repeat(gapWidth)}\x1b[39m`;
-		return leftGroup + gapFill + rightGroup;
+		this.#barMemoKey = barKey;
+		this.#barMemoValue = bar;
+		return bar;
 	}
 
 	getTopBorder(width: number): { content: string; width: number; revision: number } {
@@ -1883,11 +1907,11 @@ export class StatusLineComponent implements Component {
 			// `\x1b[0m` resets that would cancel faint mid-bar, so re-open it after each.
 			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
 		}
-		return {
-			content,
-			width: visibleWidth(content),
-			revision: this.#widthEpochRevision,
-		};
+		const memo = this.#topBorderMemo;
+		if (memo !== undefined && memo.content === content && memo.revision === this.#widthEpochRevision) return memo;
+		const result = { content, width: visibleWidth(content), revision: this.#widthEpochRevision };
+		this.#topBorderMemo = result;
+		return result;
 	}
 
 	render(width: number): readonly string[] {

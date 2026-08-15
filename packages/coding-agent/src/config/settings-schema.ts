@@ -1877,6 +1877,16 @@ export const SETTINGS_SCHEMA = {
 			description: "Check for oms updates on startup",
 		},
 	},
+	"update.auto": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "interaction",
+			group: "Startup & Updates",
+			label: "Auto Update",
+			description: "Download and install new oms releases in the background at startup; a restart applies them",
+		},
+	},
 
 	"marketplace.autoUpdate": {
 		type: "enum",

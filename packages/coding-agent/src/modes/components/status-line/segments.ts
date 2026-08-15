@@ -27,12 +27,57 @@ function withIcon(icon: string, text: string): string {
 	return icon ? `${icon} ${text}` : text;
 }
 
-/** Left-truncate a path/label to `maxLen`, prefixing an ellipsis when clipped. */
-function clampPathLength(pwd: string, maxLen: number): string {
+/**
+ * Root token worth preserving when a path is middle-elided: a Windows drive
+ * (`D:`), the home shorthand (`~`), or the POSIX root (empty first segment,
+ * rendered as a bare leading separator). `undefined` for relative paths.
+ */
+const pathRootToken = (segments: readonly string[]): string | undefined => {
+	const first = segments[0];
+	if (first === undefined) return undefined;
+	if (/^[A-Za-z]:$/.test(first)) return first;
+	if (first === "~" || first === "") return first;
+	return undefined;
+};
+
+/**
+ * Clamp a path to `maxLen` by eliding MIDDLE directory segments at separator
+ * boundaries: the root token (drive letter, `~`, or `/`) and the deepest
+ * directories survive (`D:\…\oh-my-soup\packages\coding-agent`, never
+ * `…ojects\oh-my-soup\…`). Drops the root only when even the rootless tail
+ * overflows, and falls back to a character slice only when the basename
+ * alone overflows.
+ */
+const clampPathLength = (pwd: string, maxLen: number): string => {
 	if (pwd.length <= maxLen) return pwd;
-	const ellipsis = "…";
-	return `${ellipsis}${pwd.slice(-Math.max(0, maxLen - ellipsis.length))}`;
-}
+	const separator = pwd.includes("\\") ? "\\" : "/";
+	const segments = pwd.split(separator);
+	const root = pathRootToken(segments);
+	if (root !== undefined) {
+		for (let start = 2; start < segments.length; start++) {
+			const candidate = `${root}${separator}…${separator}${segments.slice(start).join(separator)}`;
+			if (candidate.length <= maxLen) return candidate;
+		}
+	}
+	for (let start = 1; start < segments.length; start++) {
+		const tail = `…${separator}${segments.slice(start).join(separator)}`;
+		if (tail.length <= maxLen) return tail;
+	}
+	const basename = segments[segments.length - 1] ?? pwd;
+	return `…${basename.slice(-Math.max(0, maxLen - 1))}`;
+};
+
+/**
+ * Default clamp for the path segment when the user set no explicit
+ * `maxLength`: scale with the bar so wide terminals show the full path and
+ * never pay an ellipsis they have room to avoid. The floor keeps narrow bars
+ * at the historical 40; genuine overflow is handled by the assembler's
+ * elastic path shrink, which re-renders through {@link clampPathLength}.
+ *
+ * @param width - Status bar content width in terminal columns.
+ * @returns Maximum path text length in characters.
+ */
+export const defaultPathMaxLength = (width: number): number => Math.max(40, Math.floor(width * 0.45));
 
 /**
  * Leading glyph of a thinking-level display string (e.g. "◉ xhigh" → "◉").
@@ -288,7 +333,10 @@ const pathSegment: StatusLineSegment = {
 		if (stripPrefix && ctx.worktree) {
 			const { projectName, worktreeName } = ctx.worktree;
 			const label = ctx.git.branch === worktreeName ? projectName : `${projectName}/${worktreeName}`;
-			const text = fileHyperlink(getProjectDir(), clampPathLength(label, opts.maxLength ?? 40));
+			const text = fileHyperlink(
+				getProjectDir(),
+				clampPathLength(label, opts.maxLength ?? defaultPathMaxLength(ctx.width)),
+			);
 			const content = withIcon(theme.icon.worktree, text);
 			return { content: theme.fg("statusLinePath", content), visible: true };
 		}
@@ -309,7 +357,7 @@ const pathSegment: StatusLineSegment = {
 			pwd = shortenPath(pwd);
 		}
 
-		pwd = clampPathLength(pwd, opts.maxLength ?? 40);
+		pwd = clampPathLength(pwd, opts.maxLength ?? defaultPathMaxLength(ctx.width));
 
 		const showScratchIcon = scratch && stripPrefix;
 		const icon = showScratchIcon ? theme.icon.scratchFolder : theme.icon.folder;
