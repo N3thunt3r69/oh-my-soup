@@ -110,7 +110,7 @@ export class BtwPanelComponent extends Container {
 
 	#rebuild(): void {
 		this.clear();
-		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
+		this.addChild(new DynamicBorder(str => theme.fg("borderMuted", str)));
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("accent", replaceTabs(this.#question)), 1, 0));
 		this.addChild(new Spacer(1));
@@ -118,7 +118,7 @@ export class BtwPanelComponent extends Container {
 		this.addChild(new Spacer(1));
 		this.addChild(new BtwFooter(() => this.#footerLine()));
 		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
+		this.addChild(new DynamicBorder(str => theme.fg("borderMuted", str)));
 		// Component-scoped: a rebuild replaces only this panel's own children
 		// (streaming deltas arrive per token, and a full compose would re-walk
 		// the whole transcript each time). Before the panel is mounted the TUI

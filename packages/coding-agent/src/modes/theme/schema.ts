@@ -9,6 +9,14 @@ export type ColorValue = string | number;
 
 const themeColorsSchema = type({
 	accent: "string | number",
+	"welcomeGradientStart?": "string | number",
+	"welcomeGradientEnd?": "string | number",
+	"welcomeLogoBowl?": "string | number",
+	"welcomeLogoSpeckle?": "string | number",
+	"welcomeLogoRim?": "string | number",
+	"welcomeLogoOh?": "string | number",
+	"welcomeLogoMy?": "string | number",
+	"welcomeLogoMyAlt?": "string | number",
 	border: "string | number",
 	borderAccent: "string | number",
 	borderMuted: "string | number",
@@ -120,6 +128,14 @@ export type ThemeJson = typeof themeJsonSchema.infer;
 
 export type ThemeColor =
 	| "accent"
+	| "welcomeGradientStart"
+	| "welcomeGradientEnd"
+	| "welcomeLogoBowl"
+	| "welcomeLogoSpeckle"
+	| "welcomeLogoRim"
+	| "welcomeLogoOh"
+	| "welcomeLogoMy"
+	| "welcomeLogoMyAlt"
 	| "border"
 	| "borderAccent"
 	| "borderMuted"
@@ -183,6 +199,14 @@ export type ThemeColor =
 /** Set of all valid ThemeColor string values for runtime validation */
 const THEME_COLOR_RECORD = {
 	accent: true,
+	welcomeGradientStart: true,
+	welcomeGradientEnd: true,
+	welcomeLogoBowl: true,
+	welcomeLogoSpeckle: true,
+	welcomeLogoRim: true,
+	welcomeLogoOh: true,
+	welcomeLogoMy: true,
+	welcomeLogoMyAlt: true,
 	border: true,
 	borderAccent: true,
 	borderMuted: true,
@@ -250,6 +274,33 @@ const VALID_THEME_COLORS: ReadonlySet<string> = new Set(Object.keys(THEME_COLOR_
 export function isValidThemeColor(color: string): color is ThemeColor {
 	return VALID_THEME_COLORS.has(color);
 }
+
+/**
+ * Defaults for the optional welcome-splash gradient endpoints (the diagonal
+ * logo gradient and the "NEW!" tip tag). Themes that omit the keys — every
+ * bundled theme except dark.json — inherit these, so the stock pink→mint look
+ * is unchanged. Applied by `createTheme` after var resolution.
+ */
+export const WELCOME_GRADIENT_DEFAULTS = {
+	welcomeGradientStart: "#ff5cc8",
+	welcomeGradientEnd: "#78ffdc",
+} as const;
+
+/**
+ * Defaults for the optional soup pixel-logo palette. Brand colors sampled
+ * from the logo art: golden bowl with dark speckle and a shaded rim, navy
+ * "OH", red-to-pink "MY". Themes that omit the keys inherit these, so the
+ * logo stays on-brand everywhere; applied by `createTheme` after var
+ * resolution.
+ */
+export const SOUP_LOGO_DEFAULTS = {
+	welcomeLogoBowl: "#e9a83b",
+	welcomeLogoSpeckle: "#6e4f14",
+	welcomeLogoRim: "#8c6a1f",
+	welcomeLogoOh: "#23407c",
+	welcomeLogoMy: "#c43a2c",
+	welcomeLogoMyAlt: "#f2adb0",
+} as const;
 
 export type ThemeBg =
 	| "selectedBg"

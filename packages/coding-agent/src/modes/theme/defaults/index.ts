@@ -95,6 +95,7 @@ import pearl from "./pearl.json" with { type: "json" };
 import porcelain from "./porcelain.json" with { type: "json" };
 import quartz from "./quartz.json" with { type: "json" };
 import sandstone from "./sandstone.json" with { type: "json" };
+import soup from "./soup.json" with { type: "json" };
 import titanium from "./titanium.json" with { type: "json" };
 
 export const defaultThemes = {
@@ -195,5 +196,6 @@ export const defaultThemes = {
 	porcelain: porcelain,
 	quartz: quartz,
 	sandstone: sandstone,
+	soup: soup,
 	titanium: titanium,
 };

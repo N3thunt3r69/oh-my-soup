@@ -415,12 +415,13 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#editMode = resolveEditModeForTool(toolName, tool);
 
 		// Always create both - contentBox for custom tools/bash/tools with renderers, contentText for other built-ins.
-		// paddingY is 1 so background-tinted blocks (custom/extension tools and the
-		// generic fallback) get top/bottom breathing room. TranscriptContainer
-		// strips PLAIN-blank edges, so framed/minimal blocks (no bg set) drop these
-		// lines and keep their tight spacing — only tinted lines survive.
-		this.#contentBox = new Box(0, 1);
-		this.#contentText = new WidthAwareText(contentWidth => this.#renderDefaultCard(contentWidth), 1, 1);
+		// paddingY is 0: tinted rows carry bg escapes and would survive
+		// TranscriptContainer's plain-blank edge stripping, making tinted cards
+		// (custom/extension tools and the generic fallback) one row taller than
+		// framed/inline neighbors. The container's single-blank-row separation
+		// owns the vertical rhythm; horizontal padding stays.
+		this.#contentBox = new Box(0, 0);
+		this.#contentText = new WidthAwareText(contentWidth => this.#renderDefaultCard(contentWidth), 1, 0);
 
 		// Use Box for custom tools or built-in tools with rich renderers.
 		const hasCustomRenderer = !!(tool?.renderCall || tool?.renderResult);

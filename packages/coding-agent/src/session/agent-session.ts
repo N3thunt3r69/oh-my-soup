@@ -9103,7 +9103,7 @@ export class AgentSession {
 			palette: useUserThemes ? "theme" : "web",
 			themeNames: useUserThemes
 				? {
-						dark: this.settings.get("theme.dark") ?? "titanium",
+						dark: this.settings.get("theme.dark") ?? "soup",
 						light: this.settings.get("theme.light") ?? "light",
 					}
 				: undefined,

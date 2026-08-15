@@ -20,6 +20,8 @@
 	},
 	"colors": {
 		"accent": "accent",
+		"welcomeGradientStart": "#ff5cc8",
+		"welcomeGradientEnd": "#78ffdc",
 		"border": "blue",
 		"borderAccent": "cyan",
 		"borderMuted": "darkGray",

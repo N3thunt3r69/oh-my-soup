@@ -583,7 +583,7 @@ export const SETTINGS_SCHEMA = {
 	// Theme
 	"theme.dark": {
 		type: "string",
-		default: "titanium",
+		default: "soup",
 		ui: {
 			tab: "appearance",
 			group: "Theme",
