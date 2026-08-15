@@ -3,8 +3,22 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { $which, type ChildProcess, postmortem, ptree } from "@oh-my-soup/pi-utils";
 import type { DisassemblerTarget } from "../types";
-import { type BundledIdaBridgeRuntime, ensureBundledIdaBridge, resolveBundledIdaBridge } from "./bridge-runtime";
+import type * as idaBridgeRuntime from "./bridge-runtime";
+import type { BundledIdaBridgeRuntime } from "./bridge-runtime";
 import { IdaBridgeClient, type IdaBridgeClientInfo, resolveIdaBridgeUrl } from "./client";
+
+/**
+ * Lazy-import the bundled bridge runtime: `bridge-runtime.ts` embeds the
+ * ~100KB `ida-bridge.bundle.txt` artifact as text, so a static import would
+ * load it at tool-registration time. Deferral to first bridge use is the
+ * point; the specifier is fixed.
+ */
+type BridgeRuntimeModule = typeof idaBridgeRuntime;
+let bridgeRuntimeModule: BridgeRuntimeModule | undefined;
+async function loadBridgeRuntimeModule(): Promise<BridgeRuntimeModule> {
+	bridgeRuntimeModule ??= await import("./bridge-runtime");
+	return bridgeRuntimeModule;
+}
 
 const BRIDGE_PROBE_TIMEOUT_MS = 500;
 const BRIDGE_START_TIMEOUT_MS = 15_000;
@@ -89,8 +103,9 @@ export function managedIdaTargetInfo(targetId: string): ManagedIdaTargetInfo | u
 export async function ensureIdaBridge(options: IdaRuntimeOptions, signal?: AbortSignal): Promise<void> {
 	const endpoint = resolveIdaBridgeUrl(options.endpoint);
 	if (await probeBridge(endpoint, signal)) return;
-	const runtime = resolveRuntime(options, endpoint);
-	await ensureBundledIdaBridge(runtime.bridgeRuntime, runtime.env, runtime.cwd, signal);
+	const bridge = await loadBridgeRuntimeModule();
+	const runtime = resolveRuntime(bridge, options, endpoint);
+	await bridge.ensureBundledIdaBridge(runtime.bridgeRuntime, runtime.env, runtime.cwd, signal);
 	await ensureResolvedBridge(runtime, signal);
 }
 
@@ -105,8 +120,9 @@ export async function openIdaTarget(
 	let temporaryDir: string | undefined;
 	let worker: ManagedProcess | undefined;
 	try {
-		const runtime = resolveRuntime(options, endpoint);
-		await ensureBundledIdaBridge(runtime.bridgeRuntime, runtime.env, runtime.cwd, signal);
+		const bridge = await loadBridgeRuntimeModule();
+		const runtime = resolveRuntime(bridge, options, endpoint);
+		await bridge.ensureBundledIdaBridge(runtime.bridgeRuntime, runtime.env, runtime.cwd, signal);
 		await ensureResolvedBridge(runtime, signal);
 		throwIfAborted(signal);
 
@@ -192,12 +208,12 @@ export function releaseIdaRuntime(endpoint?: string): void {
 	void stopIdleBridge(key);
 }
 
-function resolveRuntime(options: IdaRuntimeOptions, endpoint: string): ResolvedIdaRuntime {
+function resolveRuntime(bridge: BridgeRuntimeModule, options: IdaRuntimeOptions, endpoint: string): ResolvedIdaRuntime {
 	const cwd = path.resolve(options.cwd?.trim() || process.cwd());
 	const basePython = resolvePython(options.python, cwd);
 	const idaDir = resolveIdaDir(options.idaDir, cwd);
 	const batchAnalyzer = idaDir && process.platform === "win32" ? resolveBatchAnalyzer(idaDir) : undefined;
-	const bridgeRuntime = resolveBundledIdaBridge(basePython);
+	const bridgeRuntime = bridge.resolveBundledIdaBridge(basePython);
 	const url = new URL(endpoint);
 	assertLocalBridgeUrl(url);
 	const host = url.hostname.replace(/^\[|\]$/g, "");

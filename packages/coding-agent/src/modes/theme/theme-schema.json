@@ -33,7 +33,7 @@
 		},
 		"colors": {
 			"type": "object",
-			"description": "Theme color definitions (all required except thinkingMax)",
+			"description": "Theme color definitions (all required except thinkingMax and the welcomeGradient* keys)",
 			"required": [
 				"accent",
 				"border",
@@ -106,6 +106,38 @@
 				"accent": {
 					"$ref": "#/$defs/colorValue",
 					"description": "Primary accent color (logo, selected items, cursor)"
+				},
+				"welcomeGradientStart": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Welcome-splash logo gradient start (optional; defaults to the stock pink #ff5cc8)"
+				},
+				"welcomeGradientEnd": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Welcome-splash logo gradient end (optional; defaults to the stock mint #78ffdc)"
+				},
+				"welcomeLogoBowl": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Soup pixel-logo bowl fill (optional; defaults to brand gold #e9a83b)"
+				},
+				"welcomeLogoSpeckle": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Soup pixel-logo speckle texture (optional; defaults to brand dark gold #6e4f14)"
+				},
+				"welcomeLogoRim": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Soup pixel-logo shaded rim (optional; defaults to brand rim gold #8c6a1f)"
+				},
+				"welcomeLogoOh": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Soup pixel-logo OH letters (optional; defaults to brand navy #23407c)"
+				},
+				"welcomeLogoMy": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Soup pixel-logo M letter (optional; defaults to brand red #c43a2c)"
+				},
+				"welcomeLogoMyAlt": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Soup pixel-logo Y letter (optional; defaults to brand pink #f2adb0)"
 				},
 				"border": {
 					"$ref": "#/$defs/colorValue",

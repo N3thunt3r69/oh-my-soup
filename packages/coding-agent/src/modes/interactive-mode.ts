@@ -79,7 +79,7 @@ import type {
 } from "../extensibility/extensions";
 import type { CompactOptions } from "../extensibility/extensions/types";
 import type { Skill } from "../extensibility/skills";
-import { loadSlashCommands } from "../extensibility/slash-commands";
+import { type FileSlashCommand, loadSlashCommands } from "../extensibility/slash-commands";
 import type { Goal, GoalModeState } from "../goals/state";
 import { copyLocalArtifacts, resolveLocalUrlToPath } from "../internal-urls";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../lsp/startup-events";
@@ -201,7 +201,7 @@ import { runProviderSetupWizard } from "./setup-wizard/lazy";
 import { interruptHint } from "./shared";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./skill-command";
 import { clearMermaidCache } from "./theme/mermaid-cache";
-import { type ShimmerPalette, shimmerEnabled, shimmerSegments, shimmerText } from "./theme/shimmer";
+import { type ShimmerPalette, shimmerEnabled, shimmerFrameKey, shimmerSegments, shimmerText } from "./theme/shimmer";
 import type { Theme } from "./theme/theme";
 import {
 	getEditorTheme,
@@ -974,25 +974,16 @@ export class InteractiveMode implements InteractiveModeContext {
 		// from a subagent whose own `Settings` is an in-memory snapshot.
 		setAutoQaConsentHandler(() => this.#promptAutoQaConsent(), Settings.instance);
 
-		await logger.time(
-			"InteractiveMode.init:slashCommands",
-			this.refreshSlashCommandState.bind(this),
-			getProjectDir(),
-		);
+		// Seed slash-command state from the set createAgentSession already
+		// discovered (sdk.ts `discoverSlashCommands` arm) instead of re-scanning
+		// the commands directories before first paint. Explicit refreshes
+		// (/reload, cwd changes, custom editor swaps) still rescan via
+		// refreshSlashCommandState.
+		this.#applySlashCommandState([...this.session.slashCommands], getProjectDir());
 
 		// Get current model info for welcome screen
 		const modelName = this.session.model?.name ?? "Unknown";
 		const providerName = this.session.model?.provider ?? "Unknown";
-
-		// Get recent sessions
-		const recentSessions = await logger.time("InteractiveMode.init:recentSessions", () =>
-			getRecentSessions(this.sessionManager.getSessionDir()).then(sessions =>
-				sessions.map(s => ({
-					name: s.name,
-					timeAgo: s.timeAgo,
-				})),
-			),
-		);
 
 		const startupQuiet = settings.get("startup.quiet");
 		this.#welcomeComponent = undefined;
@@ -1008,9 +999,23 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.#version,
 				modelName,
 				providerName,
-				recentSessions,
+				null,
 				this.#getWelcomeLspServers(),
 			);
+			// The recents scan stats and reads a slice of every session file; keep
+			// it off the first-paint path. The welcome box reserves fixed slots and
+			// swaps the results in via setRecentSessions once the scan lands.
+			void logger
+				.time("InteractiveMode.init:recentSessions", () => getRecentSessions(this.sessionManager.getSessionDir()))
+				.then(sessions => {
+					this.#welcomeComponent?.setRecentSessions(sessions.map(s => ({ name: s.name, timeAgo: s.timeAgo })));
+					this.ui.requestRender();
+				})
+				.catch(error => {
+					logger.warn("Failed to load recent sessions", { error: String(error) });
+					this.#welcomeComponent?.setRecentSessions([]);
+					this.ui.requestRender();
+				});
 
 			// Setup UI layout
 			this.ui.addChild(new Spacer(1));
@@ -1291,7 +1296,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	/** Reload slash commands and autocomplete for the provided working directory. */
 	async refreshSlashCommandState(cwd?: string): Promise<void> {
 		const basePath = cwd ?? this.sessionManager.getCwd();
-		const fileCommands = await loadSlashCommands({ cwd: basePath });
+		this.#applySlashCommandState(await loadSlashCommands({ cwd: basePath }), basePath);
+	}
+
+	/** Rebuild slash-command sets and autocomplete from an already-discovered command list. */
+	#applySlashCommandState(fileCommands: FileSlashCommand[], basePath: string): void {
 		this.fileSlashCommands = new Set(fileCommands.map(cmd => cmd.name));
 		const fileSlashCommands: SlashCommand[] = fileCommands.map(cmd => ({
 			name: cmd.name,
@@ -4490,11 +4499,17 @@ export class InteractiveMode implements InteractiveModeContext {
 			const messageColorFn = ((message: string) =>
 				renderWorkingMessage(message, this.#getWorkingMessageAccent())) as LoaderMessageColorFn & {
 				animated?: true;
+				frameKey?: () => number;
 			};
 			// Shimmer drives the 30fps redraw; when it is disabled the working
 			// message is static, so leave `animated` unset and let the loader use
 			// the spinner-only ~12.5fps cadence instead of repainting a frozen line.
-			if (shimmerEnabled()) messageColorFn.animated = true;
+			// The frame key lets the loader skip ticks whose shimmer band has not
+			// crossed a cell boundary — those frames are byte-identical.
+			if (shimmerEnabled()) {
+				messageColorFn.animated = true;
+				messageColorFn.frameKey = shimmerFrameKey;
+			}
 			this.loadingAnimation = new Loader(
 				this.ui,
 				spinner => {
@@ -4553,6 +4568,10 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	showNewVersionNotification(newVersion: string): void {
 		this.#uiHelpers.showNewVersionNotification(newVersion);
+	}
+
+	showUpdateInstalledNotification(newVersion: string): void {
+		this.#uiHelpers.showUpdateInstalledNotification(newVersion);
 	}
 
 	clearEditor(): void {

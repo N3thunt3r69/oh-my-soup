@@ -145,7 +145,7 @@ import {
 	USER_INTERRUPT_LABEL,
 	wrapSteeringForModel,
 } from "./session/messages";
-import { clampProviderContextImages } from "./session/provider-image-budget";
+import { clampProviderContextImages, createImageBudgetWatermark } from "./session/provider-image-budget";
 import {
 	expandDefaultRetryFallbackChains,
 	findRetryFallbackCandidates,
@@ -3164,6 +3164,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				: undefined;
 		// Placement runs FIRST so a relocated prompt flows through the same
 		// obfuscation/imaging/clamping pipeline as any other user message.
+		// Session-identity seam for the image-drop frontier: the per-request
+		// transform has no session handle of its own, so the watermark lives in
+		// this per-session closure. It keeps the oldest-image drop set monotonic
+		// across requests so the provider prompt cache survives image-heavy turns.
+		const imageBudgetWatermark = createImageBudgetWatermark();
 		const transformProviderContext = async (context: Context, transformModel: Model): Promise<Context> => {
 			// Per-model prompt file first (it defines the prompt), then placement
 			// (it picks the channel), then the shared redaction/imaging pipeline.
@@ -3171,7 +3176,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			transformed = applySystemPromptPlacement(transformed, transformModel, settings.get("systemPromptPlacement"));
 			transformed = obfuscator ? obfuscateProviderContext(obfuscator, transformed) : transformed;
 			if (snapcompactInline) transformed = await snapcompactInline.transform(transformed, transformModel);
-			transformed = clampProviderContextImages(transformed, transformModel);
+			transformed = clampProviderContextImages(transformed, transformModel, imageBudgetWatermark);
 			return await normalizeProviderContextImagesForModel(transformed, transformModel);
 		};
 		const onPayload = async (payload: unknown, model?: Model) => {
@@ -3820,6 +3825,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				const captureModel = captureOptions.initialState?.model;
 				const captureSessionId = captureOptions.sessionId;
 				if (!captureModel || !captureSessionId) throw new Error("Auto-learn capture identity is incomplete");
+				// Fresh frontier per capture agent: each capture is its own short-lived session.
+				const captureImageBudgetWatermark = createImageBudgetWatermark();
 				return new Agent({
 					...captureOptions,
 					cwd: sessionManager.getCwd(),
@@ -3838,7 +3845,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							settings.get("systemPromptPlacement"),
 						);
 						transformed = obfuscator ? obfuscateProviderContext(obfuscator, transformed) : transformed;
-						transformed = clampProviderContextImages(transformed, transformModel);
+						transformed = clampProviderContextImages(transformed, transformModel, captureImageBudgetWatermark);
 						return await normalizeProviderContextImagesForModel(transformed, transformModel);
 					},
 					thinkingBudgets: agent.thinkingBudgets,

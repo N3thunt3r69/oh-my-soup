@@ -94,7 +94,7 @@ export class OmfgPanelComponent extends Container {
 
 	#rebuild(): void {
 		this.clear();
-		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
+		this.addChild(new DynamicBorder(str => theme.fg("borderMuted", str)));
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("accent", replaceTabs(`/omfg ${this.#complaint}`)), 1, 0));
 		this.addChild(new Text(theme.fg("muted", replaceTabs(this.#status)), 1, 0));
@@ -103,7 +103,7 @@ export class OmfgPanelComponent extends Container {
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(this.#footerLine(), 1, 0));
 		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
+		this.addChild(new DynamicBorder(str => theme.fg("borderMuted", str)));
 		this.#tui.requestRender();
 	}
 

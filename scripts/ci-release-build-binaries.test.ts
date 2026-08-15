@@ -6,7 +6,7 @@ import { resolveCrossBuild } from "../packages/coding-agent/scripts/build-binary
 const repoRoot = path.join(import.meta.dir, "..");
 
 describe("Windows release binary target", () => {
-	it("builds the generic Windows release asset with the baseline runtime", async () => {
+	it("builds baseline and modern Windows release assets from the win32-x64 id", async () => {
 		const result = await $`bun scripts/ci-release-build-binaries.ts --dry-run --targets win32-x64`
 			.cwd(repoRoot)
 			.quiet()
@@ -14,12 +14,18 @@ describe("Windows release binary target", () => {
 		expect(result.exitCode).toBe(0);
 		const output = result.text();
 
+		// The generic asset name keeps the baseline runtime: pinned URLs and
+		// older installers download it on every CPU (#5172).
 		expect(output).toContain("Building packages/coding-agent/binaries/oms-windows-x64.exe...");
 		expect(output).toContain(
 			"DRY RUN Bun.build target=bun-windows-x64-baseline outfile=packages/coding-agent/binaries/oms-windows-x64.exe",
 		);
+		// The AVX2 build ships alongside it under the -modern suffix.
+		expect(output).toContain("Building packages/coding-agent/binaries/oms-windows-x64-modern.exe...");
+		expect(output).toContain(
+			"DRY RUN Bun.build target=bun-windows-x64-modern outfile=packages/coding-agent/binaries/oms-windows-x64-modern.exe",
+		);
 		expect(output).toContain("external=fastembed,onnxruntime-node");
-		expect(output).not.toContain("bun-windows-x64-modern");
 	});
 
 	it("uses the baseline runtime for local Windows cross-build aliases", () => {

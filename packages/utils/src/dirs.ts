@@ -928,10 +928,16 @@ export function getSecretPlaceholderKeyPath(): string {
 	return keyPath;
 }
 
+/** Compute the stable daemon scope key (16-hex wyhash) for a project directory. Case-folded on win32 so `D:\x` and `d:\x` share one scope. */
+export function daemonProjectKey(projectDir: string): string {
+	const resolved = path.resolve(projectDir);
+	const input = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+	return Bun.hash.wyhash(input).toString(16).padStart(16, "0");
+}
+
 /** Get the daemon runtime directory for a project (~/.oms/run/daemons/<hash>; XDG default: $XDG_STATE_HOME/oms/run/daemons/<hash>). */
 export function getDaemonRuntimeDir(projectDir: string): string {
-	const key = Bun.hash.wyhash(path.resolve(projectDir)).toString(16).padStart(16, "0");
-	return dirs.rootSubdir(path.join("run", "daemons", key), "state");
+	return dirs.rootSubdir(path.join("run", "daemons", daemonProjectKey(projectDir)), "state");
 }
 
 /** Get a profile-independent runtime directory for a machine-global daemon service. */

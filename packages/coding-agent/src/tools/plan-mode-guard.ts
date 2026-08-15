@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { HL_FILE_HASH_LENGTH, HL_FILE_HASH_SEP, HL_FILE_PREFIX, HL_FILE_SUFFIX } from "@oh-my-soup/hashline";
+import { pathIsWithin } from "@oh-my-soup/pi-utils";
 import {
 	type LocalProtocolOptions,
 	resolveLocalRoot,
@@ -39,13 +40,6 @@ function localSandboxRoot(session: ToolSession): string | null {
 	} catch {
 		return null;
 	}
-}
-
-/** True when `absolutePath` resolves inside `root` (== root or under it). */
-function isWithinRoot(absolutePath: string, root: string): boolean {
-	if (absolutePath === root) return true;
-	const sep = `${root}${path.sep}`;
-	return absolutePath.startsWith(sep);
 }
 
 /** Strip the hashline `[path#TAG]` wrapper from a write/edit target so the inner
@@ -90,15 +84,15 @@ export function targetsLocalSandbox(session: ToolSession, targetPath: string): b
 	}
 	if (!path.isAbsolute(resolved)) return false;
 	const absolute = path.resolve(resolved);
-	if (isWithinRoot(absolute, root)) return true;
+	if (pathIsWithin(root, absolute)) return true;
 	// Compare realpath-normalized forms so that `/tmp/…` vs `/private/tmp/…`
 	// (macOS) and other symlink-collapsed roots both resolve to the same
 	// sandbox identity.
 	try {
 		const realRoot = fs.realpathSync.native(root);
-		if (isWithinRoot(absolute, realRoot)) return true;
+		if (pathIsWithin(realRoot, absolute)) return true;
 		const realParent = fs.realpathSync.native(path.dirname(absolute));
-		return isWithinRoot(path.join(realParent, path.basename(absolute)), realRoot);
+		return pathIsWithin(realRoot, path.join(realParent, path.basename(absolute)));
 	} catch {
 		return false;
 	}

@@ -867,6 +867,20 @@ export class UiHelpers {
 		this.ctx.present(block);
 	}
 
+	showUpdateInstalledNotification(newVersion: string): void {
+		const block = new TranscriptBlock();
+		block.addChild(new DynamicBorder(text => theme.fg("success", text)));
+		const title = "Update Installed";
+		const body = `oms ${newVersion} was downloaded and installed in the background. Restart oms to finish.`;
+		block.addChild(
+			new Text(`${title}\n${body}`, 1, 0).setStyleFn(
+				() => `${theme.bold(theme.fg("success", title))}\n${theme.fg("muted", body)}`,
+			),
+		);
+		block.addChild(new DynamicBorder(text => theme.fg("success", text)));
+		this.ctx.present(block);
+	}
+
 	updatePendingMessagesDisplay(): void {
 		this.ctx.pendingMessagesContainer.disposeChildren();
 		const queuedMessages = this.ctx.viewSession.getQueuedMessages() as QueuedMessages;

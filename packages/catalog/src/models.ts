@@ -1,9 +1,16 @@
 import { buildModel } from "./build";
-import MODELS from "./models.json" with { type: "json" };
+import { MODEL_CHUNKS } from "./models/chunks";
+import type MODELS from "./models.json";
+import MODEL_INDEX from "./models-index.json";
 import type { Api, KnownProvider, Model, ModelSpec, TokenCost, Usage } from "./types";
 
 /**
- * Static bundled model registry loaded from `models.json`.
+ * Static bundled model registry, embedded as per-provider JSON text chunks
+ * (`models/<provider>.json.txt`) plus a tiny id index (`models-index.json`).
+ *
+ * Module evaluation is O(#providers): the bundler embeds every chunk as raw
+ * text, but a provider's body is JSON.parsed and built only on first access,
+ * so plain boot never materializes the full multi-megabyte catalog.
  *
  * This module intentionally exposes compile-time defaults only.
  * It does not include runtime discovery, stencil.so overlays, or on-disk cache state.
@@ -12,16 +19,16 @@ import type { Api, KnownProvider, Model, ModelSpec, TokenCost, Usage } from "./t
  */
 const modelRegistry = new Map<string, Map<string, Model<Api>>>();
 
-/** Build (once) and return one provider's enriched bundled models. */
+/** Parse (once) one provider's chunk and return its enriched bundled models. */
 function getProviderModels(provider: string): Map<string, Model<Api>> | undefined {
 	const cachedModels = modelRegistry.get(provider);
 	if (cachedModels !== undefined) return cachedModels;
-	if (!Object.hasOwn(MODELS, provider)) return undefined;
+	if (!Object.hasOwn(MODEL_CHUNKS, provider)) return undefined;
 
 	const providerModels = new Map<string, Model<Api>>();
-	const rawModels = MODELS[provider as keyof typeof MODELS];
+	const rawModels = JSON.parse(MODEL_CHUNKS[provider]) as Record<string, ModelSpec<Api>>;
 	for (const [id, model] of Object.entries(rawModels)) {
-		providerModels.set(id, buildModel(model as ModelSpec<Api>));
+		providerModels.set(id, buildModel(model));
 	}
 	modelRegistry.set(provider, providerModels);
 	return providerModels;
@@ -35,7 +42,13 @@ export function getBundledModel<TApi extends Api = Api>(provider: GeneratedProvi
 }
 
 export function getBundledProviders(): KnownProvider[] {
-	return Object.keys(MODELS) as KnownProvider[];
+	return Object.keys(MODEL_INDEX) as KnownProvider[];
+}
+
+/** Bundled model ids for one provider, without materializing any model bodies. */
+export function getBundledModelIds(provider: GeneratedProvider): readonly string[] {
+	const index: { readonly [provider: string]: readonly string[] } = MODEL_INDEX;
+	return Object.hasOwn(index, provider) ? index[provider] : [];
 }
 
 export function getBundledModels(provider: GeneratedProvider): Model<Api>[] {

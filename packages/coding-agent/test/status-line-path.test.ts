@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { SegmentContext } from "@oh-my-soup/pi-coding-agent/modes/components/status-line/segments";
-import { renderSegment } from "@oh-my-soup/pi-coding-agent/modes/components/status-line/segments";
+import { defaultPathMaxLength, renderSegment } from "@oh-my-soup/pi-coding-agent/modes/components/status-line/segments";
 import { initTheme, theme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 import { getProjectDir, removeSyncWithRetries, setProjectDir } from "@oh-my-soup/pi-utils";
 
@@ -237,6 +237,75 @@ describe("status line path segment", () => {
 		} finally {
 			setProjectDir(originalProjectDir);
 			removeSyncWithRetries(parentDir);
+		}
+	});
+
+	const clampFixture = (): { root: string; dir: string; segments: string[] } => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "oms-clamp-"));
+		const dir = path.join(root, "workspaces", "soup-kitchen", "packages", "long-package-name");
+		fs.mkdirSync(dir, { recursive: true });
+		return { root, dir, segments: dir.split(path.sep) };
+	};
+
+	it("clamps long paths at directory boundaries, keeping the drive and project tail visible", () => {
+		const { root, dir } = clampFixture();
+		setProjectDir(dir);
+		try {
+			const effective = getProjectDir();
+			const segments = effective.split(path.sep);
+			const ctx = createPathContext();
+			ctx.options.path = { abbreviate: false, maxLength: effective.length - 2, stripWorkPrefix: false };
+
+			const rendered = renderSegment("path", ctx);
+			expect(rendered.visible).toBe(true);
+			const plain = Bun.stripANSI(rendered.content);
+			const projectTail = segments.slice(-4).join(path.sep);
+			const driveToken = segments[0] ?? "";
+			expect(plain).toContain(`${driveToken}${path.sep}…${path.sep}`);
+			expect(plain).toContain(projectTail);
+			expect(plain).not.toMatch(/…[^\\/]/);
+		} finally {
+			setProjectDir(originalProjectDir);
+			removeSyncWithRetries(root);
+		}
+	});
+
+	it("falls back to the basename when even one parent segment overflows", () => {
+		const { root, dir } = clampFixture();
+		setProjectDir(dir);
+		try {
+			const effective = getProjectDir();
+			const basename = effective.split(path.sep).at(-1) ?? "";
+			const ctx = createPathContext();
+			ctx.options.path = { abbreviate: false, maxLength: basename.length + 2, stripWorkPrefix: false };
+
+			const rendered = renderSegment("path", ctx);
+			const plain = Bun.stripANSI(rendered.content);
+			expect(plain).toContain(`…${path.sep}${basename}`);
+		} finally {
+			setProjectDir(originalProjectDir);
+			removeSyncWithRetries(root);
+		}
+	});
+
+	it("shows the full path with no ellipsis when the bar is wide and maxLength is unset", () => {
+		const { root, dir } = clampFixture();
+		setProjectDir(dir);
+		try {
+			const effective = getProjectDir();
+			const ctx = createPathContext();
+			let width = 80;
+			while (defaultPathMaxLength(width) < effective.length + 1) width += 10;
+			ctx.width = width;
+			ctx.options.path = { abbreviate: false, stripWorkPrefix: false };
+
+			const rendered = renderSegment("path", ctx);
+			const plain = Bun.stripANSI(rendered.content);
+			expect(plain).toContain(effective);
+			expect(plain).not.toContain("…");
+		} finally {
+			setProjectDir(originalProjectDir);
+			removeSyncWithRetries(root);
 		}
 	});
 });

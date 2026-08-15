@@ -56,7 +56,8 @@ import { loadExtensions } from "./extensibility/extensions/loader";
 import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
-import { registerDaemonProjectPresence } from "./launch/presence";
+import { clearBootNotice } from "./launch/boot-notice";
+import { type DaemonProjectPresence, registerDaemonProjectPresence } from "./launch/presence";
 import type { MCPManager } from "./mcp";
 import { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
@@ -121,6 +122,27 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 		return undefined;
 	}
 }
+
+/**
+ * Apply a pending update in a detached child so the running TUI never sees
+ * updater output. The child is this same binary running `oms update`: it
+ * classifies the install kind itself and the Windows rename-aside swap works
+ * while this process keeps its old image mapped. Resolves true only when the
+ * child reports success; any failure falls back to the plain update notice.
+ */
+const runBackgroundSelfUpdate = async (): Promise<boolean> => {
+	try {
+		const child = Bun.spawn([process.execPath, "update"], {
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		return (await child.exited) === 0;
+	} catch (error) {
+		logger.warn("Background self-update failed to spawn", { error: String(error) });
+		return false;
+	}
+};
 
 // Todo settings are caller-controlled in protocol modes. Do not host-default them:
 // embedders need project-level opt-outs for reminder/prelude prompt injection.
@@ -501,13 +523,19 @@ async function runInteractiveMode(
 	// transcript above the fresh one.
 	await mode.renderInitialMessages({ preserveExistingChat: true, clearTerminalHistory: true });
 	// A resolved version check must not insert its banner into a partial transcript.
-	checkedVersionPromise.then(newVersion => {
+	checkedVersionPromise.then(async newVersion => {
 		if (!settings.get("startup.checkUpdate")) {
 			return;
 		}
-		if (newVersion) {
-			mode.showNewVersionNotification(newVersion);
+		if (!newVersion) return;
+		if (settings.get("update.auto") && $env.PI_COMPILED === "true") {
+			const applied = await runBackgroundSelfUpdate();
+			if (applied) {
+				mode.showUpdateInstalledNotification(newVersion);
+				return;
+			}
 		}
+		mode.showNewVersionNotification(newVersion);
 	});
 
 	for (const notify of notifs) {
@@ -1188,6 +1216,7 @@ export async function runRootCommand(
 	rawArgs: string[],
 	deps: RunRootCommandDependencies = DEFAULT_RUN_ROOT_DEPENDENCIES,
 ): Promise<void> {
+	clearBootNotice();
 	logger.startTiming();
 	startStartupWatchdog();
 
@@ -1527,7 +1556,14 @@ export async function runRootCommand(
 
 	await pluginPreloadPromise;
 	if (deps === DEFAULT_RUN_ROOT_DEPENDENCIES) {
-		await logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd);
+		// Presence is bookkeeping for daemon lifetimes; startup must never die on it
+		// (e.g. unwritable runtime dirs on locked-down Windows profiles).
+		await logger
+			.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd)
+			.catch((error: unknown): DaemonProjectPresence => {
+				logger.warn("daemon presence registration failed", { error: String(error) });
+				return { close: async () => {} };
+			});
 	}
 
 	scheduleMarketplaceAutoUpdate({

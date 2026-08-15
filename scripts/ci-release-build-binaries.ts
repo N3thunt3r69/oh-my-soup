@@ -78,6 +78,19 @@ const targets: BinaryTarget[] = [
 		target: "bun-windows-x64-baseline",
 		outfile: "packages/coding-agent/binaries/oms-windows-x64.exe",
 	},
+	// AVX2 sibling of the asset above, shipped under the same selection id so
+	// the single win32-x64 CI job emits both. oms-windows-x64.exe MUST stay
+	// baseline: pinned URLs and older installers download it on every CPU
+	// back to pre-AVX2 Windows 10 machines (#5172). The installer tries the
+	// modern asset first and falls back to baseline when its smoke test
+	// cannot launch.
+	{
+		id: "win32-x64",
+		platform: "win32",
+		arch: "x64",
+		target: "bun-windows-x64-modern",
+		outfile: "packages/coding-agent/binaries/oms-windows-x64-modern.exe",
+	},
 ];
 
 function parseRequestedTargets(): Set<string> | null {

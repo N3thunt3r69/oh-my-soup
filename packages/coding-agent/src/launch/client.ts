@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getGlobalDaemonRuntimeDir, isEexist, isEisdir, isEnoent, logger, postmortem } from "@oh-my-soup/pi-utils";
+import { getGlobalDaemonRuntimeDir, isEexist, isEnoent, logger, postmortem } from "@oh-my-soup/pi-utils";
 import { hostHasInheritableConsole } from "../eval/py/spawn-options";
 import { resolveWorkerSpawnCmd, workerEnvFromParent } from "../subprocess/worker-client";
 import { daemonBrokerEndpoint, daemonRuntimeDir } from "./paths";
@@ -68,9 +68,10 @@ async function canonicalProjectDir(projectDir: string): Promise<string> {
 	const resolved = path.resolve(projectDir);
 	try {
 		return await fs.realpath(resolved);
-	} catch (error) {
-		if (isEnoent(error) || isEisdir(error)) return resolved;
-		throw error;
+	} catch {
+		// Network/DFS/virtual drives throw EPERM/EINVAL/UNKNOWN; the resolved
+		// path is always a usable scope identity.
+		return resolved;
 	}
 }
 
@@ -497,7 +498,14 @@ export async function daemonClientForGlobal(service: string): Promise<DaemonBrok
 	// Canonicalize only after creation so the first caller and later callers
 	// derive the same Windows pipe key even when an ancestor is a symlink.
 	await fs.mkdir(runtimeDir, { recursive: true, mode: 0o700 });
-	const canonical = await fs.realpath(runtimeDir);
+	let canonical: string;
+	try {
+		canonical = await fs.realpath(runtimeDir);
+	} catch {
+		// Network/virtual filesystems can reject realpath; the plain path still
+		// names the same directory for every caller.
+		canonical = runtimeDir;
+	}
 	return sharedDaemonClient(`global:${canonical}`, () =>
 		createDaemonBrokerClient(canonical, {
 			runtimeDir: canonical,

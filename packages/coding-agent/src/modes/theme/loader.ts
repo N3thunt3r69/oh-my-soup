@@ -6,7 +6,15 @@ import { detectColorMode, resolveThemeColors } from "./color";
 import darkThemeJson from "./dark.json" with { type: "json" };
 import { defaultThemes } from "./defaults";
 import lightThemeJson from "./light.json" with { type: "json" };
-import { type ColorMode, type ThemeBg, type ThemeColor, type ThemeJson, themeJsonSchema } from "./schema";
+import {
+	type ColorMode,
+	SOUP_LOGO_DEFAULTS,
+	type ThemeBg,
+	type ThemeColor,
+	type ThemeJson,
+	themeJsonSchema,
+	WELCOME_GRADIENT_DEFAULTS,
+} from "./schema";
 import { normalizeSpinnerFramesOverride, type SymbolPreset } from "./symbols";
 import { Theme } from "./theme-class";
 
@@ -131,6 +139,17 @@ export function createTheme(themeJson: ThemeJson, options: CreateThemeOptions = 
 	const { mode, symbolPresetOverride, colorBlindMode } = options;
 	const colorMode = mode ?? detectColorMode();
 	const resolvedColors = resolveThemeColors(themeJson.colors, themeJson.vars);
+	// Optional keys: themes that omit the welcome-gradient endpoints inherit the
+	// stock pink→mint defaults, so the splash looks identical across themes that
+	// don't opt in.
+	resolvedColors.welcomeGradientStart ??= WELCOME_GRADIENT_DEFAULTS.welcomeGradientStart;
+	resolvedColors.welcomeGradientEnd ??= WELCOME_GRADIENT_DEFAULTS.welcomeGradientEnd;
+	resolvedColors.welcomeLogoBowl ??= SOUP_LOGO_DEFAULTS.welcomeLogoBowl;
+	resolvedColors.welcomeLogoSpeckle ??= SOUP_LOGO_DEFAULTS.welcomeLogoSpeckle;
+	resolvedColors.welcomeLogoRim ??= SOUP_LOGO_DEFAULTS.welcomeLogoRim;
+	resolvedColors.welcomeLogoOh ??= SOUP_LOGO_DEFAULTS.welcomeLogoOh;
+	resolvedColors.welcomeLogoMy ??= SOUP_LOGO_DEFAULTS.welcomeLogoMy;
+	resolvedColors.welcomeLogoMyAlt ??= SOUP_LOGO_DEFAULTS.welcomeLogoMyAlt;
 
 	if (colorBlindMode) {
 		const added = resolvedColors.toolDiffAdded;

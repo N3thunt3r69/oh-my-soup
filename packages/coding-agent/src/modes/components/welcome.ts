@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import {
 	type Component,
 	padding,
@@ -7,8 +8,12 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-soup/pi-tui";
-import { APP_NAME } from "@oh-my-soup/pi-utils";
-import { theme } from "../../modes/theme/theme";
+import { APP_NAME, hexToRgb, hsvToRgb, rgbToHsv } from "@oh-my-soup/pi-utils";
+import { getThemeEpoch, theme } from "../../modes/theme/theme";
+import { shortenPath } from "../../tools/render-utils";
+import { urlHyperlinkAlways } from "../../tui/hyperlink";
+import type { ShineConfig } from "../../types/logo";
+import { SOUP_LOGO_WIDTH, soupLogo } from "./pixel-logo";
 import tipsText from "./tips.txt" with { type: "text" };
 
 /** Tips embedded at build time, one per line; blanks dropped. */
@@ -31,13 +36,14 @@ export const WELCOME_LSP_SLOTS = 4;
 
 /** Trailing marker that flags a tip as a "what's new" callout. Stripped before
  *  wrapping (with any preceding whitespace) and replaced by {@link NEW_TAG_TEXT}
- *  painted as a shimmering rainbow. Non-global so `.test` stays stateless. */
+ *  painted as a shimmering sweep of the theme's welcome gradient. Non-global so
+ *  `.test` stays stateless. */
 const NEW_TIP_MARKER = /\s*\[NEW\]\s*$/;
 
 /** Visible text rendered in place of {@link NEW_TIP_MARKER}. */
 const NEW_TAG_TEXT = "NEW!";
 
-/** Milliseconds for one full hue rotation of the rainbow "NEW!" tag. */
+/** Milliseconds for one full gradient rotation of the "NEW!" tag. */
 const NEW_GLOW_PERIOD_MS = 1500;
 
 /** Selection weight for "[NEW]" tips; ordinary tips weigh 1, so a freshly added
@@ -59,12 +65,11 @@ export function pickWeightedTip(tips: readonly string[], r: number): string {
 	return tips[tips.length - 1] ?? "";
 }
 
-type ColorEncoding = "ansi-16m" | "ansi-256";
-
-/** Paint each glyph of {@link NEW_TAG_TEXT} on a moving HSL rainbow. `phase`
- *  rotates the hue offset cyclically; successive renders with increasing phase
- *  shimmer, while a fixed phase yields a still rainbow. */
-function renderNewTag(phase: number, encoding: ColorEncoding): string {
+/** Paint each glyph of {@link NEW_TAG_TEXT} along the theme's welcome gradient
+ *  (same palette as the splash logo). `phase` rotates the sampling offset
+ *  cyclically; successive renders with increasing phase shimmer, while a fixed
+ *  phase yields a still gradient. */
+function renderNewTag(phase: number): string {
 	const bold = "\x1b[1m";
 	const reset = "\x1b[0m";
 	const wrapped = ((phase % 1) + 1) % 1;
@@ -72,8 +77,7 @@ function renderNewTag(phase: number, encoding: ColorEncoding): string {
 	let out = bold;
 	let prev = "";
 	for (let i = 0; i < chars.length; i++) {
-		const hue = Math.round(((i / chars.length + wrapped) % 1) * 360);
-		const color = Bun.color(`hsl(${hue}, 95%, 60%)`, encoding) ?? "";
+		const color = gradientEscape((i / chars.length + wrapped) % 1);
 		if (color !== prev) {
 			out += color;
 			prev = color;
@@ -107,11 +111,10 @@ export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): stri
 	});
 
 	if (isNew) {
-		// Append the rainbow tag to the final body line when it fits within the
+		// Append the gradient tag to the final body line when it fits within the
 		// box; otherwise drop it onto its own indented continuation line so the
 		// styled glyphs never overflow or reflow the wrapped body.
-		const encoding: ColorEncoding = TERMINAL.trueColor ? "ansi-16m" : "ansi-256";
-		const tag = renderNewTag(phase, encoding);
+		const tag = renderNewTag(phase);
 		const tagWidth = 1 + visibleWidth(NEW_TAG_TEXT); // 1 = space separator
 		const lastLine = lines[lines.length - 1];
 		if (lastLine !== undefined && visibleWidth(lastLine) + tagWidth <= boxWidth) {
@@ -152,16 +155,13 @@ export class WelcomeComponent implements Component {
 		private readonly version: string,
 		private modelName: string,
 		private providerName: string,
-		private recentSessions: RecentSession[] = [],
+		/** Recent-session rows; `null` while the async recents scan is still running. */
+		private recentSessions: RecentSession[] | null = [],
 		private lspServers: LspServerInfo[] = [],
 	) {}
 	get tip(): string | undefined {
 		if (this.#selectedTip === undefined) {
-			if (theme.getSymbolPreset() === "unicode" && Math.random() < 0.1) {
-				this.#selectedTip = "Please use nerdfont 😭.";
-			} else {
-				this.#selectedTip = pickWeightedTip(TIPS, Math.random());
-			}
+			this.#selectedTip = pickWeightedTip(TIPS, Math.random());
 		}
 		return this.#selectedTip || undefined;
 	}
@@ -240,7 +240,7 @@ export class WelcomeComponent implements Component {
 		}
 		const dualContentWidth = boxWidth - 3; // 3 = │ + │ + │
 		const preferredLeftCol = 26;
-		const minLeftCol = 12; // logo width
+		const minLeftCol = SOUP_LOGO_WIDTH;
 		const minRightCol = 20;
 		const leftMinContentWidth = Math.max(
 			minLeftCol,
@@ -262,23 +262,29 @@ export class WelcomeComponent implements Component {
 		const logoColored = this.#currentLogoFrame();
 
 		// Left column - centered content
+		const steam = this.#steamFrame().map(row => this.#centerText(theme.fg("dim", row), leftCol));
 		const leftLines = [
 			"",
-			this.#centerText(theme.bold("Welcome back!"), leftCol),
-			"",
+			this.#centerText(theme.bold("Welcome back! 🍜"), leftCol),
+			...steam,
 			...logoColored.map(l => this.#centerText(l, leftCol)),
 			"",
 			this.#centerText(theme.fg("muted", this.modelName), leftCol),
 			this.#centerText(theme.fg("borderMuted", this.providerName), leftCol),
 		];
 
+		const projectDir = process.cwd();
+		const projectLine = ` ${theme.fg("muted", path.basename(projectDir))}  ${theme.fg("dim", shortenPath(projectDir))}`;
+
 		// Right column separator
 		const separatorWidth = Math.max(0, rightCol - 2); // padding on each side
-		const separator = ` ${theme.fg("dim", theme.boxRound.horizontal.repeat(separatorWidth))}`;
+		const separator = ` ${theme.fg("borderMuted", theme.boxRound.horizontal.repeat(separatorWidth))}`;
 
 		// Recent sessions content
 		const sessionLines: string[] = [];
-		if (this.recentSessions.length === 0) {
+		if (this.recentSessions === null) {
+			sessionLines.push(` ${theme.fg("dim", "Loading…")}`);
+		} else if (this.recentSessions.length === 0) {
 			sessionLines.push(` ${theme.fg("dim", "No recent sessions")}`);
 		} else {
 			// Reserve width for the bullet prefix (" • ") and the trailing " (timeAgo)"
@@ -333,6 +339,9 @@ export class WelcomeComponent implements Component {
 			` ${theme.fg("dim", "!")}${theme.fg("muted", " to run bash")}`,
 			` ${theme.fg("dim", "$")}${theme.fg("muted", " to run python")}`,
 			separator,
+			` ${theme.bold(theme.fg("accent", "Project"))}`,
+			projectLine,
+			separator,
 			` ${theme.bold(theme.fg("accent", "LSP Servers"))}`,
 			...lspLines,
 			separator,
@@ -341,28 +350,37 @@ export class WelcomeComponent implements Component {
 			"",
 		];
 
-		// Border characters (dim)
+		// Border characters — borderMuted, the same weight the editor frame uses.
 		const hChar = theme.boxRound.horizontal;
-		const h = theme.fg("dim", hChar);
-		const v = theme.fg("dim", theme.boxRound.vertical);
-		const tl = theme.fg("dim", theme.boxRound.topLeft);
-		const tr = theme.fg("dim", theme.boxRound.topRight);
-		const bl = theme.fg("dim", theme.boxRound.bottomLeft);
-		const br = theme.fg("dim", theme.boxRound.bottomRight);
+		const h = theme.fg("borderMuted", hChar);
+		const v = theme.fg("borderMuted", theme.boxRound.vertical);
+		const tl = theme.fg("borderMuted", theme.boxRound.topLeft);
+		const tr = theme.fg("borderMuted", theme.boxRound.topRight);
+		const bl = theme.fg("borderMuted", theme.boxRound.bottomLeft);
+		const br = theme.fg("borderMuted", theme.boxRound.bottomRight);
 
 		const lines: string[] = [];
 
 		// Top border with embedded title
 		const title = ` ${APP_NAME} v${this.version} `;
 		const titlePrefixRaw = hChar.repeat(3);
-		const titleStyled = theme.fg("dim", titlePrefixRaw) + theme.fg("muted", title);
 		const titleVisLen = visibleWidth(titlePrefixRaw) + visibleWidth(title);
 		const titleSpace = boxWidth - 2;
 		if (titleVisLen >= titleSpace) {
-			lines.push(tl + truncateToWidth(titleStyled, titleSpace) + tr);
+			lines.push(
+				tl + truncateToWidth(theme.fg("borderMuted", titlePrefixRaw) + theme.fg("muted", title), titleSpace) + tr,
+			);
 		} else {
+			const releaseUrl = `https://github.com/pickpocket/oh-my-soup/releases/tag/v${this.version}`;
+			const linkedTitle = urlHyperlinkAlways(releaseUrl, theme.fg("muted", title));
 			const afterTitle = titleSpace - titleVisLen;
-			lines.push(tl + titleStyled + theme.fg("dim", hChar.repeat(afterTitle)) + tr);
+			lines.push(
+				tl +
+					theme.fg("borderMuted", titlePrefixRaw) +
+					linkedTitle +
+					theme.fg("borderMuted", hChar.repeat(afterTitle)) +
+					tr,
+			);
 		}
 
 		// Content rows
@@ -378,7 +396,7 @@ export class WelcomeComponent implements Component {
 		}
 		// Bottom border
 		if (showRightColumn) {
-			lines.push(bl + h.repeat(leftCol) + theme.fg("dim", theme.boxRound.teeUp) + h.repeat(rightCol) + br);
+			lines.push(bl + h.repeat(leftCol) + theme.fg("borderMuted", theme.boxRound.teeUp) + h.repeat(rightCol) + br);
 		} else {
 			lines.push(bl + h.repeat(leftCol) + br);
 		}
@@ -397,9 +415,9 @@ export class WelcomeComponent implements Component {
 	#renderTip(boxWidth: number): string[] {
 		const tip = this.tip;
 		if (!tip) return [];
-		// A trailing "[NEW]" marker paints an animated rainbow "NEW!" tag. Derive
-		// its hue phase from wall-clock time so it shimmers across the welcome
-		// intro's re-render frames, then settles into a still rainbow once the box
+		// A trailing "[NEW]" marker paints an animated gradient "NEW!" tag. Derive
+		// its sampling phase from wall-clock time so it shimmers across the welcome
+		// intro's re-render frames, then settles into a still gradient once the box
 		// caches its resting frame. Non-"[NEW]" tips ignore the phase entirely.
 		const phase = NEW_TIP_MARKER.test(tip) ? performance.now() / NEW_GLOW_PERIOD_MS : 0;
 		return renderWelcomeTip(tip, boxWidth, phase);
@@ -442,59 +460,114 @@ export class WelcomeComponent implements Component {
 	}
 
 	/** Pick the logo frame for the current intro phase, or the resting frame. */
-	#currentLogoFrame(): readonly string[] {
-		if (this.#animStart == null) return REST_FRAME;
+	#currentLogoFrame = (): readonly string[] => {
+		if (this.#animStart === null) return soupLogo();
 		const elapsed = performance.now() - this.#animStart;
-		if (elapsed >= INTRO_MS) return REST_FRAME;
-		return introLogoFrame(elapsed / INTRO_MS);
-	}
+		if (elapsed >= INTRO_MS) return soupLogo();
+		return soupLogo({ shine: introShine(elapsed / INTRO_MS) });
+	};
+
+	/** Steam curls above the bowl: alternating frames during the intro, still afterward. */
+	#steamFrame = (): readonly string[] => {
+		if (this.#animStart === null) return STEAM_FRAMES[0] ?? [];
+		const tick = Math.floor((performance.now() - this.#animStart) / STEAM_SWAP_MS);
+		return STEAM_FRAMES[tick % STEAM_FRAMES.length] ?? [];
+	};
 }
 
-export const PI_LOGO = ["▀██████████▀", " ╘██    ██  ", "  ██    ██  ", "  ██    ██  ", " ▄██▄  ▄██▄ "];
-
-/** Multi-stop palette for the diagonal gradient. */
-const GRADIENT_STOPS: ReadonlyArray<readonly [number, number, number]> = [
-	[255, 92, 200], // hot pink
-	[200, 110, 255], // violet
-	[120, 130, 255], // periwinkle
-	[60, 200, 255], // bright cyan
-	[120, 255, 220], // mint
+/** Steam curl frames drawn above the bowl; all rows share one width so the
+ *  intro swap never shifts the centered column. */
+const STEAM_FRAMES: ReadonlyArray<readonly string[]> = [
+	["(   )   ( ", " )   (   )"],
+	[" )   (   )", "(   )   ( "],
 ];
 
-/** 256-color ramp fallback when truecolor isn't available. */
-const GRADIENT_RAMP_256 = [199, 171, 135, 99, 75, 51, 87];
+/** Milliseconds between steam frame swaps during the intro animation. */
+const STEAM_SWAP_MS = 300;
+
+/**
+ * Shape of the multi-stop diagonal gradient, expressed relative to the theme's
+ * `welcomeGradientStart` → `welcomeGradientEnd` endpoints in HSV space: `hue`
+ * places each stop along the shortest start→end hue arc, `sat` offsets its
+ * saturation from the endpoint lerp. The offsets keep the hand-tuned widened
+ * mid-range and punchy cyan that a naive two-stop lerp washes out; with the
+ * default pink→mint endpoints this reconstructs the previous hardcoded stops
+ * exactly.
+ */
+const GRADIENT_SHAPE: ReadonlyArray<{ hue: number; sat: number }> = [
+	{ hue: 0, sat: 0 },
+	{ hue: 0.276, sat: -0.043 },
+	{ hue: 0.544, sat: -0.055 },
+	{ hue: 0.792, sat: 0.208 },
+	{ hue: 1, sat: 0 },
+];
+
+/** Slots in the 256-color fallback ramp, sampled evenly along the gradient. */
+const GRADIENT_RAMP_SLOTS = 7;
+
+interface GradientPalette {
+	/** Interpolation stops as RGB triples, derived from the theme endpoints. */
+	stops: ReadonlyArray<readonly [number, number, number]>;
+	/** 256-color SGR escapes for terminals without truecolor. */
+	ramp: readonly string[];
+}
+
+/** Palette derived from the active theme, rebuilt when the theme epoch moves. */
+let cachedPalette: { epoch: number; palette: GradientPalette } | undefined;
+
+/** Linear RGB interpolation across `stops` at normalized position `t`. */
+function paletteRgbAt(stops: GradientPalette["stops"], t: number): [number, number, number] {
+	const seg = t * (stops.length - 1);
+	const i = Math.min(stops.length - 2, Math.floor(seg));
+	const f = seg - i;
+	const a = stops[i];
+	const b = stops[i + 1];
+	return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+function themePalette(): GradientPalette {
+	const epoch = getThemeEpoch();
+	if (cachedPalette?.epoch === epoch) return cachedPalette.palette;
+	const start = rgbToHsv(hexToRgb(theme.getColorHex("welcomeGradientStart")));
+	const end = rgbToHsv(hexToRgb(theme.getColorHex("welcomeGradientEnd")));
+	// Signed shortest hue arc, so any endpoint pair sweeps the narrow way round.
+	const arc = ((end.h - start.h + 540) % 360) - 180;
+	const stops = GRADIENT_SHAPE.map((shape, index) => {
+		const t = index / (GRADIENT_SHAPE.length - 1);
+		const rgb = hsvToRgb({
+			h: start.h + arc * shape.hue,
+			s: Math.min(1, Math.max(0, start.s + (end.s - start.s) * t + shape.sat)),
+			v: Math.min(1, Math.max(0, start.v + (end.v - start.v) * t)),
+		});
+		return [rgb.r, rgb.g, rgb.b] as const;
+	});
+	const ramp: string[] = [];
+	for (let i = 0; i < GRADIENT_RAMP_SLOTS; i++) {
+		const [r, g, b] = paletteRgbAt(stops, i / (GRADIENT_RAMP_SLOTS - 1));
+		ramp.push(Bun.color({ r: Math.round(r), g: Math.round(g), b: Math.round(b) }, "ansi-256") ?? "");
+	}
+	const palette: GradientPalette = { stops, ramp };
+	cachedPalette = { epoch, palette };
+	return palette;
+}
 
 /** Half-width of the shine highlight band, expressed in gradient-t units. */
 const SHINE_HALF_WIDTH = 0.18;
 
-export interface ShineConfig {
-	/** Overall opacity of the shine overlay, in [0, 1]. */
-	strength: number;
-	/** Center of the shine band along the diagonal, in [0, 1]. */
-	pos: number;
-}
-
 /**
  * Resolve the gradient SGR foreground escape for a normalized position `t`
  * (0..1) along the diagonal, compositing the optional sliding shine highlight.
- * Shared by {@link gradientLogo} and the setup splash so both stay
- * color-identical (truecolor when available, 256-color ramp otherwise).
+ * Colors derive from the active theme's `welcomeGradientStart`/`End` endpoints
+ * via {@link GRADIENT_SHAPE}. Shared by {@link gradientLogo} and the setup
+ * splash so both stay color-identical (truecolor when available, 256-color
+ * ramp otherwise).
  */
 export function gradientEscape(t: number, shine?: ShineConfig): string {
 	const shineStrength = shine && shine.strength > 0 ? shine.strength : 0;
 	const shinePos = shine ? shine.pos : 0;
+	const { stops, ramp } = themePalette();
 	if (TERMINAL.trueColor) {
-		// 5-stop palette widens the visible color range and avoids the
-		// deep-blue valley a naive HSL lerp falls into.
-		const stops = GRADIENT_STOPS;
-		const seg = t * (stops.length - 1);
-		const i = Math.min(stops.length - 2, Math.floor(seg));
-		const f = seg - i;
-		const a = stops[i];
-		const b = stops[i + 1];
-		let r = a[0] + (b[0] - a[0]) * f;
-		let g = a[1] + (b[1] - a[1]) * f;
-		let bl = a[2] + (b[2] - a[2]) * f;
+		let [r, g, bl] = paletteRgbAt(stops, t);
 		if (shineStrength > 0) {
 			const dist = Math.abs(t - shinePos);
 			const intensity = Math.max(0, 1 - dist / SHINE_HALF_WIDTH) * shineStrength;
@@ -504,9 +577,8 @@ export function gradientEscape(t: number, shine?: ShineConfig): string {
 				bl += (255 - bl) * intensity;
 			}
 		}
-		return `\x1b[38;2;${Math.round(r)};${Math.round(g)};${Math.round(bl)}m`;
+		return Bun.color({ r: Math.round(r), g: Math.round(g), b: Math.round(bl) }, "ansi-16m") ?? "";
 	}
-	const ramp = GRADIENT_RAMP_256;
 	let idx = Math.min(ramp.length - 1, Math.max(0, Math.floor(t * (ramp.length - 1) + 0.5)));
 	if (shineStrength > 0) {
 		const dist = Math.abs(t - shinePos);
@@ -514,65 +586,25 @@ export function gradientEscape(t: number, shine?: ShineConfig): string {
 		// Promote to the brightest ramp slot when the shine band peaks here.
 		if (intensity > 0.5) idx = ramp.length - 1;
 	}
-	return `\x1b[38;5;${ramp[idx]}m`;
+	return ramp[idx] ?? "";
 }
-
-/**
- * Apply a multi-stop diagonal gradient (bottom-left → top-right) plus an
- * optional sliding shine band across multi-line art. `phase` (0..1) shifts the
- * gradient along the diagonal, wrapping at 1. When `shine` is provided, a soft
- * white highlight is composited on top, centered at `shine.pos`.
- */
-export function gradientLogo(lines: readonly string[], phase = 0, shine?: ShineConfig): string[] {
-	const reset = "\x1b[0m";
-	const rows = lines.length;
-	const cols = Math.max(...lines.map(l => l.length));
-	// span+1 so `base` stays strictly < 1: avoids the wrap-around at the
-	// far corner mapping back to t=0 (hot pink) on the resting frame.
-	const span = Math.max(1, cols + rows - 1);
-	return lines.map((line, y) => {
-		let result = "";
-		for (let x = 0; x < line.length; x++) {
-			const char = line[x];
-			if (char === " ") {
-				result += char;
-				continue;
-			}
-			// Diagonal: bottom-left (x=0, y=rows-1) → top-right (x=cols-1, y=0)
-			const base = (x + (rows - 1 - y)) / span;
-			const t = (((base + phase) % 1) + 1) % 1;
-			result += gradientEscape(t, shine) + char + reset;
-		}
-		return result;
-	});
-}
-
 /** Total length of the intro animation. */
-const INTRO_MS = 3000;
+const INTRO_MS = 1200;
 /** Render cadence during the intro (~30fps). */
 const INTRO_TICK_MS = 33;
-/** Number of full gradient rotations the sweep performs before settling. */
-const INTRO_SWEEPS = 2.5;
-/** Number of times the shine highlight crosses the diagonal across the intro. */
-const INTRO_SHINE_TRAVERSALS = 3;
+/** Number of times the shine highlight crosses the bowl across the intro. */
+const INTRO_SHINE_TRAVERSALS = 2;
 
 /**
- * Logo frame for a normalized intro progress in [0, 1).
+ * Shine overlay for a normalized intro progress in [0, 1).
  *
- * Ease-out cubic so the spin decelerates into the resting state. The gradient
- * sweeps backward through INTRO_SWEEPS full rotations (`eased == 1` → phase =
- * 0 = resting frame) while the shine traverses the diagonal at a steady pace,
- * decoupled from the gradient phase so the two layers parallax; its strength
- * fades with the same ease-out curve so the highlight is gone by the resting
- * frame.
+ * The highlight sweeps the bowl at a steady pace while its strength fades on
+ * an ease-out cubic, so the sparkle is gone by the resting frame.
+ *
+ * @param progress - Normalized intro progress in [0, 1).
+ * @returns Shine strength and band position for {@link soupLogo}.
  */
-function introLogoFrame(progress: number): string[] {
+const introShine = (progress: number): ShineConfig => {
 	const eased = 1 - (1 - progress) ** 3;
-	const phase = ((((1 - eased) * INTRO_SWEEPS) % 1) + 1) % 1;
-	const shinePos = (((progress * INTRO_SHINE_TRAVERSALS) % 1) + 1) % 1;
-	const shineStrength = (1 - eased) ** 1.5;
-	return gradientLogo(PI_LOGO, phase, { strength: shineStrength, pos: shinePos });
-}
-
-/** Resting gradient frame, cached for re-renders outside of the intro. */
-const REST_FRAME = gradientLogo(PI_LOGO, 0);
+	return { strength: (1 - eased) ** 1.5, pos: (progress * INTRO_SHINE_TRAVERSALS) % 1 };
+};

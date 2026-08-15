@@ -300,6 +300,16 @@ function formatContext(model: Model): string {
 	return `${formatNumber(ctx).toLowerCase()} ${theme.icon.context.replace(/:$/, "")}`;
 }
 
+/**
+ * Compact capability badges shown as a right-aligned row column: `R` when the
+ * model reasons, `V` when it accepts image input. Empty for neither.
+ */
+const formatBadges = (model: Model): string => {
+	const reasoning = model.reasoning ? "R" : "";
+	const vision = model.input.includes("image") ? "V" : "";
+	return `${reasoning}${vision}`;
+};
+
 /** `118t/s` average output speed; one decimal below 10 t/s. */
 function formatTps(tps: number): string {
 	const value = tps >= 10 ? String(Math.round(tps)) : tps.toFixed(1);
@@ -725,10 +735,12 @@ export class ModelBrowser implements Component {
 		costWidth: number,
 		perfWidth: number,
 		perfMode: PerfMode,
+		badgeWidth: number,
 	): string {
 		if (item.id === "separator") {
-			const dashCount = Math.max(0, width - 4);
-			const line = theme.fg("muted", "─".repeat(dashCount));
+			const label = " more models ";
+			const dashCount = Math.max(0, width - 4 - visibleWidth(label));
+			const line = theme.fg("muted", `─${label}${"─".repeat(dashCount)}`);
 			return `  ${line}  `;
 		}
 		const overContext = this.isOverContext(item);
@@ -749,8 +761,11 @@ export class ModelBrowser implements Component {
 		// Perf column collapses entirely when no visible row has measurements.
 		const perfCol =
 			perfWidth > 0 ? `${theme.fg("dim", padLeftVisible(this.#perfCell(item, perfMode), perfWidth))}  ` : "";
-		const meta = `${perfCol}${theme.fg("dim", padLeftVisible(formatContext(item.model), ctxWidth))}  ${theme.fg("dim", padLeftVisible(formatCostPair(item.model), costWidth))}`;
-		const metaWidth = ctxWidth + costWidth + 2 + (perfWidth > 0 ? perfWidth + 2 : 0);
+		const badgeCol =
+			badgeWidth > 0 ? `${theme.fg("dim", padLeftVisible(formatBadges(item.model), badgeWidth))}  ` : "";
+		const meta = `${perfCol}${badgeCol}${theme.fg("dim", padLeftVisible(formatContext(item.model), ctxWidth))}  ${theme.fg("dim", padLeftVisible(formatCostPair(item.model), costWidth))}`;
+		const metaWidth =
+			ctxWidth + costWidth + 2 + (perfWidth > 0 ? perfWidth + 2 : 0) + (badgeWidth > 0 ? badgeWidth + 2 : 0);
 		const available = Math.max(1, width - metaWidth - 1);
 		left = truncateToWidth(left, available);
 		const gap = Math.max(0, available - visibleWidth(left));
@@ -841,12 +856,14 @@ export class ModelBrowser implements Component {
 			let costWidth = 0;
 			const perfMode: PerfMode = width >= PERF_FULL_MIN_WIDTH ? "full" : width >= PERF_TPS_MIN_WIDTH ? "tps" : "off";
 			let perfWidth = 0;
+			let badgeWidth = 0;
 			for (let i = startIndex; i < endIndex; i++) {
 				const item = this.#visibleItems[i];
 				if (!item) continue;
 				ctxWidth = Math.max(ctxWidth, visibleWidth(formatContext(item.model)));
 				costWidth = Math.max(costWidth, visibleWidth(formatCostPair(item.model)));
 				perfWidth = Math.max(perfWidth, visibleWidth(this.#perfCell(item, perfMode)));
+				badgeWidth = Math.max(badgeWidth, visibleWidth(formatBadges(item.model)));
 			}
 
 			const rows: string[] = [];
@@ -863,6 +880,7 @@ export class ModelBrowser implements Component {
 						costWidth,
 						perfWidth,
 						perfMode,
+						badgeWidth,
 					),
 				);
 			}

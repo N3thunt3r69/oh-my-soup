@@ -114,32 +114,43 @@ export const disasmToolRenderer = {
 		const outputBlock = new CachedOutputBlock();
 		return markFramedBlockComponent({
 			render(width: number): readonly string[] {
-				const action = args?.action ?? result.details?.action ?? "request";
-				const success = !options.isPartial && !result.isError;
-				const statusIcon = success
-					? theme.styledSymbol("tool.debug", "accent")
-					: formatStatusIcon(options.isPartial ? "running" : "error", theme, options.spinnerFrame);
-				const backend = result.details?.backend ? ` (${result.details.backend})` : "";
-				const header = `${statusIcon} Disasm ${action}${backend}`;
-				const text = result.content.find(block => block.type === "text")?.text ?? "No output";
-				const rawLines = replaceTabs(text).split("\n");
-				const previewLimit = options.expanded ? PREVIEW_LIMITS.EXPANDED_LINES : PREVIEW_LIMITS.COLLAPSED_LINES;
-				const displayedLines = rawLines
-					.slice(0, previewLimit)
-					.map(line => truncateToWidth(line, TRUNCATE_LENGTHS.LINE));
-				const remaining = rawLines.length - displayedLines.length;
-				if (remaining > 0) {
-					displayedLines.push(
-						theme.fg("muted", `… ${remaining} more lines ${formatExpandHint(theme, options.expanded, true)}`),
-					);
-				}
+				// Static per component instance: expanded/isPartial/spinnerFrame
+				// changes recreate the tool block (and this cache) — revision 0.
 				return outputBlock.render(
-					{
-						header,
-						state: result.isError ? "error" : "success",
-						sections: [{ label: theme.fg("toolTitle", "Output"), lines: displayedLines }],
-						width,
-						applyBg: false,
+					width,
+					0,
+					() => {
+						const action = args?.action ?? result.details?.action ?? "request";
+						const success = !options.isPartial && !result.isError;
+						const statusIcon = success
+							? theme.styledSymbol("tool.debug", "accent")
+							: formatStatusIcon(options.isPartial ? "running" : "error", theme, options.spinnerFrame);
+						const backend = result.details?.backend ? ` (${result.details.backend})` : "";
+						const header = `${statusIcon} Disasm ${action}${backend}`;
+						const text = result.content.find(block => block.type === "text")?.text ?? "No output";
+						const rawLines = replaceTabs(text).split("\n");
+						const previewLimit = options.expanded
+							? PREVIEW_LIMITS.EXPANDED_LINES
+							: PREVIEW_LIMITS.COLLAPSED_LINES;
+						const displayedLines = rawLines
+							.slice(0, previewLimit)
+							.map(line => truncateToWidth(line, TRUNCATE_LENGTHS.LINE));
+						const remaining = rawLines.length - displayedLines.length;
+						if (remaining > 0) {
+							displayedLines.push(
+								theme.fg(
+									"muted",
+									`… ${remaining} more lines ${formatExpandHint(theme, options.expanded, true)}`,
+								),
+							);
+						}
+						return {
+							header,
+							state: result.isError ? "error" : "success",
+							sections: [{ label: theme.fg("toolTitle", "Output"), lines: displayedLines }],
+							width,
+							applyBg: false,
+						};
 					},
 					theme,
 				);

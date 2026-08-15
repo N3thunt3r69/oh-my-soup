@@ -46,10 +46,19 @@ export interface NonMessageTokenSource {
 	readonly systemPrompt?: string[];
 	readonly agent?: {
 		readonly state?: {
+			readonly systemPrompt?: string[];
 			readonly tools?: ReadonlyArray<Pick<Tool, "name" | "description" | "parameters">>;
 		};
 	};
 	readonly skills?: readonly Skill[];
+}
+
+// The advisor maintenance path holds its prompt on `agent.state` rather than a
+// session-level field; resolve both shapes through one helper so the cache key
+// (`systemPromptRef`) and the token computation always read the same array —
+// three call sites in lockstep.
+function resolveSystemPromptParts(session: NonMessageTokenSource): string[] {
+	return session.systemPrompt ?? session.agent?.state?.systemPrompt ?? EMPTY_STRING_PARTS;
 }
 
 const EMPTY_STRING_PARTS: string[] = [];
@@ -146,7 +155,7 @@ interface CachedNonMessageTokenSource extends NonMessageTokenSource {
 
 function nonMessageTokenCacheEntry(session: NonMessageTokenSource): NonMessageTokenCache {
 	const cachedSession: CachedNonMessageTokenSource = session;
-	const systemPromptRef = session.systemPrompt ?? EMPTY_STRING_PARTS;
+	const systemPromptRef = resolveSystemPromptParts(session);
 	const toolsRef = session.agent?.state?.tools ?? EMPTY_TOOLS;
 	const skillsRef = session.skills ?? EMPTY_SKILLS;
 	let entry = cachedSession[NON_MESSAGE_TOKEN_CACHE];
@@ -166,7 +175,7 @@ function nonMessageTokenCacheEntry(session: NonMessageTokenSource): NonMessageTo
 export function computeNonMessageTokens(session: NonMessageTokenSource): number {
 	const entry = nonMessageTokenCacheEntry(session);
 	if (entry.tokens !== undefined) return entry.tokens;
-	const systemPromptParts = session.systemPrompt ?? EMPTY_STRING_PARTS;
+	const systemPromptParts = resolveSystemPromptParts(session);
 	const tools = session.agent?.state?.tools ?? EMPTY_TOOLS;
 	const tokens = countTokens(systemPromptParts) + estimateToolSchemaTokens(tools);
 	entry.tokens = tokens;
@@ -190,7 +199,7 @@ export function computeNonMessageBreakdown(session: NonMessageTokenSource): {
 	const tools = session.agent?.state?.tools ?? EMPTY_TOOLS;
 	const skillsTokens = estimateSkillsTokens(renderedSkills(session.skills ?? EMPTY_SKILLS, tools));
 	const toolsTokens = estimateToolSchemaTokens(tools);
-	const systemPromptParts = session.systemPrompt ?? EMPTY_STRING_PARTS;
+	const systemPromptParts = resolveSystemPromptParts(session);
 	const systemContextTokens = countTokens(systemPromptParts.slice(1));
 	const systemPromptTokens = Math.max(0, countTokens(systemPromptParts[0] ?? "") - skillsTokens);
 	const breakdown = { skillsTokens, toolsTokens, systemContextTokens, systemPromptTokens };

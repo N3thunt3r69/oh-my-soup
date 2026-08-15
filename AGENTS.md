@@ -173,7 +173,7 @@ Manual reader loops only when the protocol requires it (SSE, streaming JSON-RPC)
 
 ## Generated Files
 
-**NEVER edit `packages/catalog/src/models.json` directly.** It is generated from upstream sources (stencil.so, provider catalog discovery, OpenCode docs) by `packages/catalog/scripts/generate-models.ts` and the descriptors/resolvers in `packages/catalog/src/provider-models/`. Hand-edits get overwritten on the next regen.
+**NEVER edit `packages/catalog/src/models.json` directly.** It is generated from upstream sources (stencil.so, provider catalog discovery, OpenCode docs) by `packages/catalog/scripts/generate-models.ts` and the descriptors/resolvers in `packages/catalog/src/provider-models/`. The same run derives the lazy runtime artifacts `src/models-index.json` and `src/models/` (per-provider `*.json.txt` chunks + `chunks.ts`). Hand-edits get overwritten on the next regen.
 
 To change an entry, fix the source:
 
@@ -182,7 +182,7 @@ To change an entry, fix the source:
 - **Generator-level fixups** (premium multipliers, codex pricing fallback, fallback models, post-processing) → `packages/catalog/scripts/generate-models.ts`.
 - **Thinking metadata / generated policies** → `packages/catalog/src/model-thinking.ts` (`applyGeneratedModelPolicies`); model-id classification (family/version parsing) lives in `packages/catalog/src/identity/classify.ts`.
 
-Regenerate with `bun run gen:models` and commit `models.json` alongside the source change. Add a regression test against the **resolver/descriptor**, not the bundled JSON, so it survives upstream metadata shifts.
+Regenerate with `bun run gen:models` and commit `models.json`, `models-index.json`, and `src/models/` alongside the source change. Add a regression test against the **resolver/descriptor**, not the bundled JSON, so it survives upstream metadata shifts.
 
 ## Logging and CLI Output
 

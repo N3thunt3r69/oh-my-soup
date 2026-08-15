@@ -105,7 +105,7 @@ export interface ModelHubOptions {
 
 interface SidebarEntry {
 	id: string;
-	kind: "recent" | "roles" | "all" | "separator" | "provider";
+	kind: "recent" | "roles" | "all" | "separator" | "provider" | "moreLocked";
 	label: string;
 	providerId?: string;
 	locked?: boolean;
@@ -154,6 +154,8 @@ const RECENT_LIMIT = 15;
 const SIDEBAR_MIN_WIDTH = 18;
 const SIDEBAR_MAX_WIDTH = 26;
 
+/** Locked providers shown before the sidebar collapses the rest behind "… N more". */
+const LOCKED_COLLAPSED_COUNT = 6;
 /**
  * Providers already auto-refreshed this process. Selecting a provider fetches
  * its live model list at most once per application lifetime (surviving hub
@@ -192,6 +194,8 @@ export class ModelHubComponent implements Component {
 	/** Fuzzy match totals while searching: recent-scope hits and overall hits. */
 	#recentSearchCount = 0;
 	#searchTotal = 0;
+	/** Whether the collapsed tail of locked providers has been revealed. */
+	#lockedExpanded = false;
 	#activeEntryId = "all";
 	#sidebarScroll = 0;
 	/** Snap the sidebar viewport to the active entry on the next render; wheel panning leaves it free. */
@@ -417,8 +421,14 @@ export class ModelHubComponent implements Component {
 		];
 
 		this.#fixedEntries = fixed;
+		const hasModels = (provider: string): boolean => (availableCounts.get(provider) ?? 0) > 0;
 		this.#unlockedProviderEntries = [...unlocked]
-			.sort((a, b) => a.localeCompare(b))
+			.sort((a, b) => {
+				const aPopulated = hasModels(a);
+				const bPopulated = hasModels(b);
+				if (aPopulated !== bPopulated) return aPopulated ? -1 : 1;
+				return a.localeCompare(b);
+			})
 			.map(provider => providerEntry(provider, false));
 		this.#lockedProviderEntries = [...locked]
 			.sort((a, b) => a.localeCompare(b))
@@ -446,10 +456,25 @@ export class ModelHubComponent implements Component {
 
 		const entries: SidebarEntry[] = [...this.#fixedEntries];
 		if (providers.length > 0) {
-			entries.push({ id: "sep:providers", kind: "separator", label: "" }, ...providers);
+			entries.push({ id: "sep:providers", kind: "separator", label: "ready" }, ...providers);
 		}
 		if (this.#lockedProviderEntries.length > 0) {
-			entries.push({ id: "sep:locked", kind: "separator", label: "" }, ...this.#lockedProviderEntries);
+			const lockedTotal = this.#lockedProviderEntries.length;
+			entries.push({
+				id: "sep:locked",
+				kind: "separator",
+				label: `more providers · ${lockedTotal}`,
+			});
+			const collapsed = !this.#lockedExpanded && !counts && lockedTotal > LOCKED_COLLAPSED_COUNT;
+			if (collapsed) {
+				entries.push(...this.#lockedProviderEntries.slice(0, LOCKED_COLLAPSED_COUNT), {
+					id: "more-locked",
+					kind: "moreLocked",
+					label: `… ${lockedTotal - LOCKED_COLLAPSED_COUNT} more`,
+				});
+			} else {
+				entries.push(...this.#lockedProviderEntries);
+			}
 		}
 
 		this.#entries = entries;
@@ -464,6 +489,13 @@ export class ModelHubComponent implements Component {
 	}
 
 	#setActiveEntry(id: string): void {
+		if (id === "more-locked") {
+			this.#lockedExpanded = true;
+			const revealed = this.#lockedProviderEntries[LOCKED_COLLAPSED_COUNT]?.id;
+			this.#composeEntries();
+			if (revealed !== undefined) this.#setActiveEntry(revealed);
+			return;
+		}
 		if (!this.#entries.some(entry => entry.id === id)) return;
 		this.#activeEntryId = id;
 		this.#sidebarFollowActive = true;
@@ -1573,7 +1605,22 @@ export class ModelHubComponent implements Component {
 			const entry = this.#entries[i];
 			if (!entry) continue;
 			if (entry.kind === "separator") {
-				lines.push(theme.fg("border", "─".repeat(width)));
+				if (entry.label === "") {
+					lines.push(theme.fg("border", "─".repeat(width)));
+					continue;
+				}
+				const label = ` ${entry.label} `;
+				const labelWidth = visibleWidth(label);
+				const tail = Math.max(0, width - 1 - labelWidth);
+				lines.push(theme.fg("border", "─") + theme.fg("muted", label) + theme.fg("border", "─".repeat(tail)));
+				continue;
+			}
+			if (entry.kind === "moreLocked") {
+				const active = entry.id === this.#activeEntryId;
+				const cursor = active && this.#focus === "scope" ? theme.fg("accent", theme.nav.cursor) : " ";
+				const styled = active ? theme.fg("accent", entry.label) : theme.fg("dim", entry.label);
+				const row = truncateToWidth(`${cursor}   ${styled}`, width);
+				lines.push(row + " ".repeat(Math.max(0, width - visibleWidth(row))));
 				continue;
 			}
 			const active = entry.id === this.#activeEntryId;

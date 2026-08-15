@@ -347,7 +347,36 @@ function snapshotToolResultProviderMetadata(value: unknown): {
 	};
 }
 
-function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantContentBlock {
+type ToolCallArgsSnapshotMode = "fresh" | "shared";
+
+const TOOL_CALL_ARGS_CLONES = new WeakMap<object, unknown>();
+
+/**
+ * Clone toolCall arguments for a snapshot. `shared` mode reuses one clone per
+ * arguments-object identity: the provider's partial-JSON parser mints a new
+ * arguments object at most once per ~256B parse throttle and never mutates one
+ * in place, and every message_update consumer treats snapshots as read-only,
+ * so successive per-delta snapshots may safely share the clone instead of
+ * deep-cloning identical arguments on every delta.
+ * Final done-path snapshots MUST use `fresh`: the finalized message's
+ * arguments are mutated afterwards (transformAssistantMessage, beforeToolCall
+ * arg revision), and a shared clone would leak those mutations into views
+ * already handed to consumers.
+ */
+function snapshotToolCallArguments<T>(args: T, mode: ToolCallArgsSnapshotMode): T {
+	if (mode === "fresh" || typeof args !== "object" || args === null) return structuredCloneJSON(args);
+	let clone = TOOL_CALL_ARGS_CLONES.get(args) as T | undefined;
+	if (clone === undefined) {
+		clone = structuredCloneJSON(args);
+		TOOL_CALL_ARGS_CLONES.set(args, clone);
+	}
+	return clone;
+}
+
+function snapshotAssistantContentBlock(
+	block: AssistantContentBlock,
+	argsMode: ToolCallArgsSnapshotMode = "fresh",
+): AssistantContentBlock {
 	switch (block.type) {
 		case "text":
 		case "image":
@@ -363,7 +392,7 @@ function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantC
 		case "toolCall": {
 			const snap = {
 				...block,
-				arguments: structuredCloneJSON(block.arguments),
+				arguments: snapshotToolCallArguments(block.arguments, argsMode),
 				providerMetadata: snapshotToolCallProviderMetadata(block.providerMetadata),
 			};
 			// Object spread copies enumerable symbols in Bun, but the Cursor
@@ -375,10 +404,13 @@ function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantC
 	}
 }
 
-function snapshotAssistantMessage(message: AssistantMessage): AssistantMessage {
+function snapshotAssistantMessage(
+	message: AssistantMessage,
+	argsMode: ToolCallArgsSnapshotMode = "fresh",
+): AssistantMessage {
 	return {
 		...message,
-		content: message.content.map(snapshotAssistantContentBlock),
+		content: message.content.map(block => snapshotAssistantContentBlock(block, argsMode)),
 		usage: {
 			...message.usage,
 			cost: { ...message.usage.cost },
@@ -400,7 +432,7 @@ function snapshotAssistantMessageEvent(
 ): AssistantMessageEvent {
 	switch (event.type) {
 		case "start":
-			return { ...event, partial: partialSnapshot ?? snapshotAssistantMessage(event.partial) };
+			return { ...event, partial: partialSnapshot ?? snapshotAssistantMessage(event.partial, "shared") };
 		case "text_start":
 		case "text_delta":
 		case "text_end":
@@ -410,12 +442,12 @@ function snapshotAssistantMessageEvent(
 		case "thinking_end":
 		case "toolcall_start":
 		case "toolcall_delta":
-			return { ...event, partial: partialSnapshot ?? snapshotAssistantMessage(event.partial) };
+			return { ...event, partial: partialSnapshot ?? snapshotAssistantMessage(event.partial, "shared") };
 		case "toolcall_end":
 			return {
 				...event,
-				toolCall: snapshotAssistantContentBlock(event.toolCall) as AssistantToolCallBlock,
-				partial: partialSnapshot ?? snapshotAssistantMessage(event.partial),
+				toolCall: snapshotAssistantContentBlock(event.toolCall, "shared") as AssistantToolCallBlock,
+				partial: partialSnapshot ?? snapshotAssistantMessage(event.partial, "shared"),
 			};
 		case "done":
 			return { ...event, message: snapshotAssistantMessage(event.message) };
@@ -1775,6 +1807,10 @@ async function streamAssistantResponse(
 								throw new HarmonyLeakInterruption(detection, removed, recovered);
 							}
 						}
+						// Default "fresh" argsMode is load-bearing here: this snapshot's
+						// toolCall arguments are mutated below (transformAssistantMessage,
+						// beforeToolCall arg revision), so it must never share the cached
+						// clone already handed to message_update consumers.
 						finalMessage = snapshotAssistantMessage(finalMessage);
 						// Expand inline macros (and any other registered rewrite) on the
 						// finalized message before it reaches the context, the UI, or tool
@@ -1822,8 +1858,10 @@ async function streamAssistantResponse(
 								// `message` and `assistantMessageEvent.partial` intentionally share one
 								// immutable snapshot of the streaming partial: every message_update
 								// consumer treats both as read-only, so cloning the identical partial
-								// twice per delta was pure waste.
-								const messageSnapshot = snapshotAssistantMessage(partialMessage);
+								// twice per delta was pure waste. The same read-only contract lets
+								// "shared" mode reuse one toolCall-arguments clone across successive
+								// per-delta snapshots while the arguments identity is unchanged.
+								const messageSnapshot = snapshotAssistantMessage(partialMessage, "shared");
 								stream.push({
 									type: "message_update",
 									assistantMessageEvent: snapshotAssistantMessageEvent(event, messageSnapshot),
@@ -1832,7 +1870,10 @@ async function streamAssistantResponse(
 							} else {
 								context.messages.push(partialMessage);
 								addedPartial = true;
-								stream.push({ type: "message_start", message: snapshotAssistantMessage(partialMessage) });
+								stream.push({
+									type: "message_start",
+									message: snapshotAssistantMessage(partialMessage, "shared"),
+								});
 							}
 							break;
 
@@ -1856,8 +1897,10 @@ async function streamAssistantResponse(
 								// `message` and `assistantMessageEvent.partial` intentionally share one
 								// immutable snapshot of the streaming partial: every message_update
 								// consumer treats both as read-only, so cloning the identical partial
-								// twice per delta was pure waste.
-								const messageSnapshot = snapshotAssistantMessage(partialMessage);
+								// twice per delta was pure waste. The same read-only contract lets
+								// "shared" mode reuse one toolCall-arguments clone across successive
+								// per-delta snapshots while the arguments identity is unchanged.
+								const messageSnapshot = snapshotAssistantMessage(partialMessage, "shared");
 								stream.push({
 									type: "message_update",
 									assistantMessageEvent: snapshotAssistantMessageEvent(event, messageSnapshot),

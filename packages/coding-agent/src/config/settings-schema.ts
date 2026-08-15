@@ -583,7 +583,7 @@ export const SETTINGS_SCHEMA = {
 	// Theme
 	"theme.dark": {
 		type: "string",
-		default: "titanium",
+		default: "soup",
 		ui: {
 			tab: "appearance",
 			group: "Theme",
@@ -689,7 +689,7 @@ export const SETTINGS_SCHEMA = {
 
 	"statusLine.transparent": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "appearance",
 			group: "Status Line",
@@ -1877,6 +1877,16 @@ export const SETTINGS_SCHEMA = {
 			description: "Check for oms updates on startup",
 		},
 	},
+	"update.auto": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "interaction",
+			group: "Startup & Updates",
+			label: "Auto Update",
+			description: "Download and install new oms releases in the background at startup; a restart applies them",
+		},
+	},
 
 	"marketplace.autoUpdate": {
 		type: "enum",
@@ -2350,7 +2360,10 @@ export const SETTINGS_SCHEMA = {
 	// every session look explicitly configured.
 	"compaction.reserveTokens": { type: "number", default: undefined },
 
-	"compaction.keepRecentTokens": { type: "number", default: 20000 },
+	// -1 = auto: scale the kept-verbatim tail with the model window (see
+	// resolveKeepRecentTokens). A stored explicit value — including the old
+	// materialized 20000 default — is honored unchanged.
+	"compaction.keepRecentTokens": { type: "number", default: -1 },
 
 	"compaction.autoContinue": { type: "boolean", default: true },
 

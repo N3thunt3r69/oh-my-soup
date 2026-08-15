@@ -1,20 +1,14 @@
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-soup/pi-tui";
-import { gradientEscape, gradientLogo, PI_LOGO, type ShineConfig } from "../../components/welcome";
+import type { ShineConfig } from "../../../types/logo";
+import { SOUP_LOGO_ROWS, SOUP_LOGO_WIDTH, soupLogo, soupLogoCells } from "../../components/pixel-logo";
+import { gradientEscape } from "../../components/welcome";
 import { theme } from "../../theme/theme";
 
 export const SETUP_SPLASH_MS = 2600;
 export const SETUP_TICK_MS = 33;
 
-/** Brand mark at 2x: every glyph doubled horizontally, every row doubled vertically. */
-const LARGE_LOGO = PI_LOGO.flatMap(line => {
-	let wide = "";
-	for (const char of line) {
-		wide += char === " " ? "  " : `${char}${char}`;
-	}
-	return [wide, wide];
-});
-const LOGO_WIDTH = Math.max(...LARGE_LOGO.map(line => visibleWidth(line)));
-const LOGO_HEIGHT = LARGE_LOGO.length;
+const LOGO_WIDTH = SOUP_LOGO_WIDTH;
+const LOGO_HEIGHT = SOUP_LOGO_ROWS;
 const RESET = "\x1b[0m";
 
 /** Full scene needs comfortable room; below this we drop to a centered mark. */
@@ -130,7 +124,7 @@ export function renderSetupSplash(width: number, height: number, elapsedMs: numb
 	const phase = progress * 1.8;
 	const shine: ShineConfig = { pos: (progress * 2.5) % 1, strength: Math.max(0, 1 - progress * 0.35) };
 
-	if (w < MIN_SCENE_WIDTH || h < MIN_SCENE_HEIGHT) return renderCompactSplash(w, h, phase, shine);
+	if (w < MIN_SCENE_WIDTH || h < MIN_SCENE_HEIGHT) return renderCompactSplash(w, h, shine);
 
 	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
 	const cx = Math.floor(w / 2);
@@ -161,19 +155,11 @@ export function renderSetupSplash(width: number, height: number, elapsedMs: numb
 			if (star) put(x, y, star);
 		}
 	}
-	// 3. hero — the brand mark with the live gradient + shine sweep
-	LARGE_LOGO.forEach((line, row) => {
-		let col = 0;
-		for (const ch of line) {
-			if (ch !== " ") {
-				put(
-					hx + col,
-					hy + row,
-					gradientEscape(screenGradientT(hx + col, hy + row, w, h, phase), shine) + ch + RESET,
-				);
-			}
-			col++;
-		}
+	// 3. hero — the brand mark, palette-colored with the live shine sweep
+	soupLogoCells({ shine }).forEach((row, rowIndex) => {
+		row.forEach((cell, col) => {
+			if (cell !== undefined) put(hx + col, hy + rowIndex, cell);
+		});
 	});
 	// 4. skip hint on a cleared strip at the bottom so it stays legible over the water
 	const hintWidth = visibleWidth(SKIP_HINT);
@@ -187,9 +173,8 @@ export function renderSetupSplash(width: number, height: number, elapsedMs: numb
 }
 
 /** Centered fallback for windows too small to hold the full scene. */
-function renderCompactSplash(width: number, height: number, phase: number, shine: ShineConfig): string[] {
-	const art = height >= 14 ? LARGE_LOGO : PI_LOGO;
-	const content = [...gradientLogo(art, phase, shine), "", theme.bold("O h   M y   P i")];
+function renderCompactSplash(width: number, height: number, shine: ShineConfig): string[] {
+	const content = [...soupLogo({ shine }), "", theme.bold("O h   M y   S o u p")];
 	const start = Math.max(0, Math.floor((height - content.length) / 2));
 	const lines: string[] = [];
 	for (let y = 0; y < height; y++) {

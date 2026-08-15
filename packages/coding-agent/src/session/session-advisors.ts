@@ -5,7 +5,6 @@ import {
 	type AgentToolContext,
 	AppendOnlyContextManager,
 	type CompactionSummaryMessage,
-	countTokens,
 	resolveTelemetry,
 	type StreamFn,
 	ThinkingLevel,
@@ -72,7 +71,7 @@ import { serviceTierForAllFamilies, serviceTierSettingToTier } from "../config/s
 import type { Settings } from "../config/settings";
 import { CursorExecHandlers, type CursorMcpResourceAdapter } from "../cursor";
 import { bridgeToolMap } from "../cursor-bridge-tools";
-import { estimateToolSchemaTokens } from "../modes/utils/context-usage";
+import { computeNonMessageTokens } from "../modes/utils/context-usage";
 import type { PlanModeState } from "../plan-mode/state";
 import advisorSystemPrompt from "../prompts/advisor/system.md" with { type: "text" };
 import type { SecretObfuscator } from "../secrets/obfuscator";
@@ -1343,12 +1342,11 @@ export class SessionAdvisors {
 		// delta to that arm. Floor it by a full local estimate — fixed advisor system
 		// prompt, tool schemas, stored messages, and incoming delta — so provider
 		// under-reporting or payload transforms cannot suppress maintenance.
+		// computeNonMessageTokens memoizes the prompt/tool-schema arm on the
+		// advisor ref, keyed on the state array identities, so it retokenizes
+		// only when the advisor's prompt or tools actually change.
 		const providerContextTokens = this.#estimateAdvisorContextTokens(messages) + incomingTokens;
-		const localContextTokens =
-			countTokens(agent.state.systemPrompt) +
-			estimateToolSchemaTokens(agent.state.tools) +
-			storedConversationTokens +
-			incomingTokens;
+		const localContextTokens = computeNonMessageTokens(advisor) + storedConversationTokens + incomingTokens;
 		const contextTokens = compactionContextTokens(providerContextTokens, localContextTokens);
 
 		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) {

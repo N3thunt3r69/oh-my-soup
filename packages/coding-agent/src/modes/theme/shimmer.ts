@@ -10,6 +10,23 @@ import type { Theme, ThemeColor } from "./theme";
 // length. Keep ≤ the animated redraw fps (loader RENDER_INTERVAL_MS = 1000/30).
 const SHIMMER_SPEED_CELLS_PER_S = 30;
 
+// One shimmer frame per whole band cell. Quantizing the clock to the cell
+// period makes the band/head position land on exact cell indices, so every
+// intensity/tier computation — and therefore the composed ANSI string — is a
+// pure function of the integer frame index: two renders inside the same cell
+// window produce identical bytes. The loader uses {@link shimmerFrameKey} to
+// skip repaints whose output would be byte-identical to the previous tick.
+const SHIMMER_CELL_MS = 1000 / SHIMMER_SPEED_CELLS_PER_S;
+
+/**
+ * Monotonic index of the current shimmer frame (whole band cells). Equal keys
+ * guarantee {@link shimmerSegments} composes identical bytes for identical
+ * segments/theme/mode.
+ */
+export function shimmerFrameKey(): number {
+	return Math.floor(Date.now() / SHIMMER_CELL_MS);
+}
+
 // ─── Classic sweep tunables ──────────────────────────────────────────────────
 const CLASSIC_PADDING = 10;
 const CLASSIC_BAND_HALF_WIDTH = 6;
@@ -204,7 +221,7 @@ export function shimmerSegments(segments: readonly ShimmerSegment[], theme: Shim
 		return out;
 	}
 
-	const time = Date.now();
+	const time = Math.floor(Date.now() / SHIMMER_CELL_MS) * SHIMMER_CELL_MS;
 	const intensityFn = mode === "kitt" ? kittIntensity : classicIntensity;
 
 	// Fast-path window: outside `[bandLo, bandHi]` the intensity is guaranteed

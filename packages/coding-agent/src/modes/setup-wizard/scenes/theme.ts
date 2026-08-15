@@ -240,7 +240,7 @@ class ThemeSceneController implements SetupSceneController {
 
 	async #commit(value: string): Promise<void> {
 		if (value === "auto") {
-			this.host.ctx.settings.set("theme.dark", "titanium");
+			this.host.ctx.settings.set("theme.dark", "soup");
 			this.host.ctx.settings.set("theme.light", "light");
 			await this.#applyPreviewPresentation(this.#originalSymbolPreset, this.#originalColorBlindMode);
 			enableAutoTheme();

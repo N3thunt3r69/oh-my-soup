@@ -494,7 +494,10 @@ jobs:
                     platform: win32,
                     arch: x64,
                     target_id: win32-x64,
-                    binary_path: packages/coding-agent/binaries/oms-windows-x64.exe,
+                    # Glob: the win32-x64 id builds oms-windows-x64.exe
+                    # (baseline) AND oms-windows-x64-modern.exe (AVX2); the
+                    # smoke steps that consume binary_path skip win32.
+                    binary_path: packages/coding-agent/binaries/oms-windows-x64*.exe,
                     native_targets: win32-x64-baseline,
                  }
       runs-on: ${{ matrix.os }}

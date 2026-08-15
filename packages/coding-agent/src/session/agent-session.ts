@@ -4964,6 +4964,11 @@ export class AgentSession {
 		return this.#promptTemplates;
 	}
 
+	/** File-based slash commands currently used for prompt expansion. */
+	get slashCommands(): ReadonlyArray<FileSlashCommand> {
+		return this.#slashCommands;
+	}
+
 	/** Replace file-based slash commands used for prompt expansion. */
 	setSlashCommands(slashCommands: FileSlashCommand[]): void {
 		this.#slashCommands = [...slashCommands];
@@ -9103,7 +9108,7 @@ export class AgentSession {
 			palette: useUserThemes ? "theme" : "web",
 			themeNames: useUserThemes
 				? {
-						dark: this.settings.get("theme.dark") ?? "titanium",
+						dark: this.settings.get("theme.dark") ?? "soup",
 						light: this.settings.get("theme.light") ?? "light",
 					}
 				: undefined,

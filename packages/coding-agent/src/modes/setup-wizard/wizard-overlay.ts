@@ -9,7 +9,7 @@ import {
 	visibleWidth,
 } from "@oh-my-soup/pi-tui";
 import { APP_NAME } from "@oh-my-soup/pi-utils";
-import { gradientLogo, PI_LOGO } from "../components/welcome";
+import { soupLogo } from "../components/pixel-logo";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
@@ -20,6 +20,11 @@ type WizardPhase = "splash" | "transition" | "scene" | "outro" | "done";
 
 const SCENE_MARGIN_X = 4;
 const MIN_CONTENT_WIDTH = 20;
+/**
+ * Rows required before the scene header includes the 10-row pixel logo;
+ * shorter terminals keep the header compact so scene bodies stay usable.
+ */
+const WIZARD_LOGO_MIN_HEIGHT = 32;
 /** Cross-dissolve duration from the splash into the first scene. */
 const SCENE_TRANSITION_MS = 420;
 
@@ -201,7 +206,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		const title = this.#activeScene?.title ?? scene?.title ?? "Setup";
 		const subtitle = this.#activeScene?.subtitle;
 		const contentWidth = Math.max(MIN_CONTENT_WIDTH, width - SCENE_MARGIN_X * 2);
-		const logo = gradientLogo(PI_LOGO, 0);
+		const logo = height >= WIZARD_LOGO_MIN_HEIGHT ? soupLogo() : [];
 		const header = [
 			"",
 			...logo.map(line => centerLine(line, width)),

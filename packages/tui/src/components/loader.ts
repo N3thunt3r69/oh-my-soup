@@ -11,9 +11,14 @@ type ColorFn = (str: string) => string;
 /**
  * Styles Loader message fragments without changing their visible text or width.
  * Set `animated` for colorizers whose ANSI output changes over time.
+ * `frameKey` identifies the animation frame: while it returns the same value,
+ * the colorizer promises byte-identical output for the same message, letting
+ * the loader skip repaints between frames. Colorizers without a `frameKey`
+ * repaint on every animated tick, as before.
  */
 export type LoaderMessageColorFn = ColorFn & {
 	readonly animated?: true;
+	readonly frameKey?: () => number;
 };
 
 /** Animates a spinner and colorized message while asynchronous work is pending. */
@@ -27,6 +32,7 @@ export class Loader extends Text {
 	#layout?: readonly { leading: string; content: string; trailing: string }[];
 	#layoutFrames: readonly string[];
 	#layoutFrame: string;
+	#lastAnimatedFrameKey: number | undefined;
 
 	constructor(
 		ui: TUI,
@@ -135,7 +141,13 @@ export class Loader extends Text {
 				this.#lastSpinnerTick += steps * SPINNER_ADVANCE_MS;
 				this.#syncText();
 			}
-			if (shouldAdvanceSpinner || this.#ui?.synchronizedOutput === true) {
+			// An animated colorizer with a frame key repaints only when the frame
+			// actually advanced — identical frames are byte-identical, so writing
+			// them would be pure ConPTY/render cost.
+			const frameKey = this.messageColorFn.frameKey?.();
+			const animatedFrameChanged = frameKey === undefined || frameKey !== this.#lastAnimatedFrameKey;
+			if (shouldAdvanceSpinner || (this.#ui?.synchronizedOutput === true && animatedFrameChanged)) {
+				this.#lastAnimatedFrameKey = frameKey;
 				this.#requestPaint();
 			}
 

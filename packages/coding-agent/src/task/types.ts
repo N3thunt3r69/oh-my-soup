@@ -115,6 +115,7 @@ export const taskItemSchema = type({
 	"name?": "string",
 	agent: "string = 'task'",
 	task: "string",
+	"model?": "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"+": "delete",
@@ -123,6 +124,7 @@ const taskItemSchemaIsolated = type({
 	"name?": "string",
 	agent: "string = 'task'",
 	task: "string",
+	"model?": "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"isolated?": "boolean",
@@ -139,6 +141,8 @@ export interface TaskItem {
 	task?: string;
 	/** Per-spawn thinking effort: lowest/middle/highest level the resolved model supports. Overrides the agent's default selector (e.g. `auto`). */
 	effort?: TaskEffort;
+	/** Model for this spawn: `provider/model-id`, a bare model id, or a role name (e.g. `smol`). Overrides the agent's default model so a spawn can run on a different model family; unresolvable selectors fall back to the agent default. */
+	model?: string;
 	/** Caller-provided output schema; its presence overrides the selected agent's schema. */
 	outputSchema?: unknown;
 	/** Validation behavior for a caller-provided or inherited output schema. */
@@ -151,6 +155,7 @@ export const taskSchema = type({
 	"name?": "string",
 	agent: "string = 'task'",
 	task: "string",
+	"model?": "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"isolated?": "boolean",
@@ -160,6 +165,7 @@ const taskSchemaNoIsolation = type({
 	"name?": "string",
 	agent: "string = 'task'",
 	task: "string",
+	"model?": "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"+": "delete",
@@ -207,6 +213,7 @@ function createTaskSchema(options: {
 				agent,
 				task: "string",
 				...effortField,
+				"model?": "string",
 				"outputSchema?": outputSchemaInputSchema,
 				"schemaMode?": '"permissive" | "strict"',
 				"isolated?": "boolean",
@@ -223,6 +230,7 @@ function createTaskSchema(options: {
 			agent,
 			task: "string",
 			...effortField,
+			"model?": "string",
 			"outputSchema?": outputSchemaInputSchema,
 			"schemaMode?": '"permissive" | "strict"',
 			"+": "delete",
@@ -239,6 +247,7 @@ function createTaskSchema(options: {
 			agent,
 			task: "string",
 			...effortField,
+			"model?": "string",
 			"outputSchema?": outputSchemaInputSchema,
 			"schemaMode?": '"permissive" | "strict"',
 			"isolated?": "boolean",
@@ -250,6 +259,7 @@ function createTaskSchema(options: {
 		agent,
 		task: "string",
 		...effortField,
+		"model?": "string",
 		"outputSchema?": outputSchemaInputSchema,
 		"schemaMode?": '"permissive" | "strict"',
 		"+": "delete",
@@ -292,6 +302,8 @@ export interface TaskParams {
 	task?: string;
 	/** Per-spawn thinking effort (flat form): lowest/middle/highest level the resolved model supports. */
 	effort?: TaskEffort;
+	/** Model for this spawn (flat form): `provider/model-id`, a bare model id, or a role name. Overrides the agent's default model. */
+	model?: string;
 	/** Caller-provided output schema; its presence overrides the selected agent's schema. */
 	outputSchema?: unknown;
 	/** Validation behavior for a caller-provided or inherited output schema. */
