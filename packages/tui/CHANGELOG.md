@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Loader message color functions can supply an optional `frameKey`; when the key and spinner glyph are both unchanged, the animation tick skips its direct write instead of repainting identical bytes. Color functions without a `frameKey` keep the previous per-tick paint behavior.
+
 ## [17.3.0] - 2026-08-13
 
 ### Fixed

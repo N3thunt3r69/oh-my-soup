@@ -66,7 +66,13 @@ function renderSearchErrorPanel(message: string, providerLabel: string | undefin
 	const outputBlock = new CachedOutputBlock();
 	return markFramedBlockComponent({
 		render(width: number): readonly string[] {
-			return outputBlock.render({ header, state: "error", sections: [{ lines: [body] }], width }, theme);
+			// Static per component instance — revision 0.
+			return outputBlock.render(
+				width,
+				0,
+				() => ({ header, state: "error", sections: [{ lines: [body] }], width }),
+				theme,
+			);
 		},
 		invalidate() {
 			outputBlock.invalidate();
@@ -155,85 +161,92 @@ export function renderSearchResult(
 
 	return markFramedBlockComponent({
 		render(width: number): readonly string[] {
-			// Read mutable state at render time
-			const { expanded } = options;
-
-			// Answer lines: full markdown when expanded, capped markdown preview when collapsed.
-			const answerWidth = outputBlockContentWidth(width);
-			const renderedAnswer = answerMarkdown ? answerMarkdown.render(answerWidth) : [];
-			let answerLines: readonly string[];
-			if (renderedAnswer.length === 0) {
-				answerLines = [theme.fg("muted", "No answer text returned")];
-			} else if (args?.maxAnswerLines !== undefined && !expanded) {
-				// CLI compact mode (`oms q`) caps the answer; the TUI passes no cap and shows it in full.
-				// `renderedAnswer` is the Markdown component's shared cache — slice copies before appending.
-				const capped = renderedAnswer.slice(0, args.maxAnswerLines);
-				const remaining = renderedAnswer.length - capped.length;
-				if (remaining > 0) {
-					capped.push(theme.fg("muted", formatMoreItems(remaining, "line")));
-				}
-				answerLines = capped;
-			} else {
-				answerLines = renderedAnswer;
-			}
-
-			const sourceTree = renderTreeList(
-				{
-					items: sources,
-					expanded,
-					maxCollapsed: MAX_COLLAPSED_ITEMS,
-					itemType: "source",
-					renderItem: src => {
-						const titleText =
-							typeof src.title === "string" && src.title.trim()
-								? src.title
-								: typeof src.url === "string" && src.url.trim()
-									? src.url
-									: "Untitled";
-						const url = typeof src.url === "string" ? src.url : "";
-						const domain = url ? getDomain(url) : "";
-						const age =
-							formatAge(src.ageSeconds) || (typeof src.publishedDate === "string" ? src.publishedDate : "");
-						const metaParts: string[] = [];
-						if (domain) metaParts.push(theme.fg("dim", `(${domain})`));
-						if (age) metaParts.push(theme.fg("muted", age));
-						const metaSep = theme.fg("dim", theme.sep.dot);
-						const metaSuffix = metaParts.length > 0 ? ` ${metaParts.join(metaSep)}` : "";
-						// One line per source: the title links to its URL, followed by domain · age.
-						// Reserve room for the box borders, the tree branch, and the meta suffix.
-						const lineBudget = Math.max(24, width - 6);
-						const titleBudget = Math.max(12, lineBudget - Bun.stringWidth(metaSuffix));
-						const title = theme.fg("accent", truncateToWidth(titleText, titleBudget));
-						const linkedTitle = url ? urlHyperlink(url, title) : title;
-						return [`${linkedTitle}${metaSuffix}`];
-					},
-				},
-				theme,
-			);
-
+			// Static per component instance: `options.expanded` is part of the tool
+			// block's rebuild key, so a fresh component (and cache) is created
+			// whenever it changes — revision 0.
 			return outputBlock.render(
-				{
-					header,
-					state: sourceCount > 0 ? "success" : "warning",
-					sections: [
-						...(queryPreview
-							? [
-									{
-										lines: [`${theme.fg("muted", "Query:")} ${theme.fg("text", queryPreview)}`],
-									},
-								]
-							: []),
+				width,
+				0,
+				() => {
+					const { expanded } = options;
+
+					// Answer lines: full markdown when expanded, capped markdown preview when collapsed.
+					const answerWidth = outputBlockContentWidth(width);
+					const renderedAnswer = answerMarkdown ? answerMarkdown.render(answerWidth) : [];
+					let answerLines: readonly string[];
+					if (renderedAnswer.length === 0) {
+						answerLines = [theme.fg("muted", "No answer text returned")];
+					} else if (args?.maxAnswerLines !== undefined && !expanded) {
+						// CLI compact mode (`oms q`) caps the answer; the TUI passes no cap and shows it in full.
+						// `renderedAnswer` is the Markdown component's shared cache — slice copies before appending.
+						const capped = renderedAnswer.slice(0, args.maxAnswerLines);
+						const remaining = renderedAnswer.length - capped.length;
+						if (remaining > 0) {
+							capped.push(theme.fg("muted", formatMoreItems(remaining, "line")));
+						}
+						answerLines = capped;
+					} else {
+						answerLines = renderedAnswer;
+					}
+
+					const sourceTree = renderTreeList(
 						{
-							label: theme.fg("toolTitle", "Answer"),
-							lines: answerLines,
+							items: sources,
+							expanded,
+							maxCollapsed: MAX_COLLAPSED_ITEMS,
+							itemType: "source",
+							renderItem: src => {
+								const titleText =
+									typeof src.title === "string" && src.title.trim()
+										? src.title
+										: typeof src.url === "string" && src.url.trim()
+											? src.url
+											: "Untitled";
+								const url = typeof src.url === "string" ? src.url : "";
+								const domain = url ? getDomain(url) : "";
+								const age =
+									formatAge(src.ageSeconds) ||
+									(typeof src.publishedDate === "string" ? src.publishedDate : "");
+								const metaParts: string[] = [];
+								if (domain) metaParts.push(theme.fg("dim", `(${domain})`));
+								if (age) metaParts.push(theme.fg("muted", age));
+								const metaSep = theme.fg("dim", theme.sep.dot);
+								const metaSuffix = metaParts.length > 0 ? ` ${metaParts.join(metaSep)}` : "";
+								// One line per source: the title links to its URL, followed by domain · age.
+								// Reserve room for the box borders, the tree branch, and the meta suffix.
+								const lineBudget = Math.max(24, width - 6);
+								const titleBudget = Math.max(12, lineBudget - Bun.stringWidth(metaSuffix));
+								const title = theme.fg("accent", truncateToWidth(titleText, titleBudget));
+								const linkedTitle = url ? urlHyperlink(url, title) : title;
+								return [`${linkedTitle}${metaSuffix}`];
+							},
 						},
-						{
-							label: theme.fg("toolTitle", "Sources"),
-							lines: sourceTree.length > 0 ? sourceTree : [theme.fg("muted", "No sources returned")],
-						},
-						{ label: theme.fg("toolTitle", "Metadata"), lines: metaLines },
-					],
-					width,
+						theme,
+					);
+
+					return {
+						header,
+						state: sourceCount > 0 ? "success" : "warning",
+						sections: [
+							...(queryPreview
+								? [
+										{
+											lines: [`${theme.fg("muted", "Query:")} ${theme.fg("text", queryPreview)}`],
+										},
+									]
+								: []),
+							{
+								label: theme.fg("toolTitle", "Answer"),
+								lines: answerLines,
+							},
+							{
+								label: theme.fg("toolTitle", "Sources"),
+								lines: sourceTree.length > 0 ? sourceTree : [theme.fg("muted", "No sources returned")],
+							},
+							{ label: theme.fg("toolTitle", "Metadata"), lines: metaLines },
+						],
+						width,
+					};
 				},
 				theme,
 			);

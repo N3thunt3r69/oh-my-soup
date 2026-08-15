@@ -15,7 +15,7 @@ import { applyDirenvPreflight, type BashResult, executeBash } from "../exec/bash
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { InternalUrlRouter } from "../internal-urls";
 import { truncateToVisualLines } from "../modes/components/visual-truncate";
-import { highlightCode, type Theme } from "../modes/theme/theme";
+import { getThemeEpoch, highlightCode, type Theme } from "../modes/theme/theme";
 import bashDescription from "../prompts/tools/bash.md" with { type: "text" };
 import type {
 	ClientBridgeTerminalExitStatus,
@@ -24,7 +24,12 @@ import type {
 } from "../session/client-bridge";
 import { DEFAULT_MAX_BYTES, enforceInlineByteCap, streamTailUpdates, TailBuffer } from "../session/streaming-output";
 import { renderStatusLine } from "../tui";
-import { CachedOutputBlock, markFramedBlockComponent, outputBlockContentWidth } from "../tui/output-block";
+import {
+	CachedOutputBlock,
+	markFramedBlockComponent,
+	outputBlockContentWidth,
+	renderOutputBlock,
+} from "../tui/output-block";
 import { getSixelLineMask } from "../utils/sixel";
 import type { ToolSession } from ".";
 import { truncateForPrompt } from "./approval";
@@ -1577,28 +1582,33 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 			const cmdLines = formatBashCommandLines(renderArgs, uiTheme);
 			const outputBlock = new CachedOutputBlock();
 			return markFramedBlockComponent({
-				render: (width: number): readonly string[] => {
-					const header =
-						config.showHeader === false
-							? undefined
-							: renderStatusLine(
-									{
-										icon: options.spinnerFrame !== undefined ? "running" : "pending",
-										spinnerFrame: options.spinnerFrame,
-										title: config.resolveTitle(args, options),
-									},
-									uiTheme,
-								);
-					return outputBlock.render(
-						{
-							header,
-							state: options.spinnerFrame !== undefined ? "running" : "pending",
-							sections: [{ lines: capPreviewLines(cmdLines, uiTheme, { expanded: options.expanded }) }],
-							width,
+				render: (width: number): readonly string[] =>
+					// Static per component instance: expanded/spinnerFrame changes
+					// recreate the tool block (and this cache) — revision 0.
+					outputBlock.render(
+						width,
+						0,
+						() => {
+							const header =
+								config.showHeader === false
+									? undefined
+									: renderStatusLine(
+											{
+												icon: options.spinnerFrame !== undefined ? "running" : "pending",
+												spinnerFrame: options.spinnerFrame,
+												title: config.resolveTitle(args, options),
+											},
+											uiTheme,
+										);
+							return {
+								header,
+								state: options.spinnerFrame !== undefined ? "running" : "pending",
+								sections: [{ lines: capPreviewLines(cmdLines, uiTheme, { expanded: options.expanded }) }],
+								width,
+							};
 						},
 						uiTheme,
-					);
-				},
+					),
 				invalidate: () => {
 					outputBlock.invalidate();
 				},
@@ -1637,7 +1647,9 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 									},
 							uiTheme,
 						);
-			const outputBlock = new CachedOutputBlock();
+			// No CachedOutputBlock here: the memo below already caches the final
+			// framed lines keyed on every input that can change them, so a second
+			// hash-keyed cache in front of `renderOutputBlock` was pure overhead.
 
 			// Per-instance cache for the expensive inner lines computation. Mirrors
 			// the eval-renderer pattern (`eval-render.ts:709-752`): without this,
@@ -1655,6 +1667,7 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 			let cachedIsPartial: boolean | undefined;
 			let cachedLines: readonly string[] | undefined;
 			let cachedPreviewWindow: number | undefined;
+			let cachedEpoch: number | undefined;
 
 			return markFramedBlockComponent({
 				render: (width: number): readonly string[] => {
@@ -1670,6 +1683,7 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 
 					const isPartial = options.isPartial === true;
 					const previewWindow = previewWindowRows();
+					const epoch = getThemeEpoch();
 
 					if (
 						cachedLines !== undefined &&
@@ -1678,7 +1692,8 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 						cachedExpanded === expanded &&
 						cachedRawOutput === rawOutput &&
 						cachedIsPartial === isPartial &&
-						cachedPreviewWindow === previewWindow
+						cachedPreviewWindow === previewWindow &&
+						cachedEpoch === epoch
 					) {
 						return cachedLines;
 					}
@@ -1773,7 +1788,7 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 					if (timeoutLine) outputLines.push(timeoutLine);
 					if (warningLine) outputLines.push(warningLine);
 
-					const framed = outputBlock.render(
+					const framed = renderOutputBlock(
 						{
 							header,
 							state: isPartial ? "pending" : isError ? (isTimeout ? "warning" : "error") : "success",
@@ -1796,11 +1811,11 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 					cachedRawOutput = rawOutput;
 					cachedIsPartial = isPartial;
 					cachedPreviewWindow = previewWindow;
+					cachedEpoch = epoch;
 					cachedLines = framed;
 					return framed;
 				},
 				invalidate: () => {
-					outputBlock.invalidate();
 					cachedLines = undefined;
 					cachedWidth = undefined;
 					cachedPreviewLines = undefined;
@@ -1808,6 +1823,7 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 					cachedRawOutput = undefined;
 					cachedIsPartial = undefined;
 					cachedPreviewWindow = undefined;
+					cachedEpoch = undefined;
 				},
 			});
 		},

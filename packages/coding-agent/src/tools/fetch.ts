@@ -1812,7 +1812,13 @@ export function renderReadUrlResult(
 		const outputBlock = new CachedOutputBlock();
 		return markFramedBlockComponent({
 			render: (width: number) =>
-				outputBlock.render({ header, state: "error", sections: [{ lines: errorLines }], width }, uiTheme),
+				// Static per component instance — revision 0.
+				outputBlock.render(
+					width,
+					0,
+					() => ({ header, state: "error", sections: [{ lines: errorLines }], width }),
+					uiTheme,
+				),
 			invalidate: () => outputBlock.invalidate(),
 		});
 	}
@@ -1885,17 +1891,21 @@ export function renderReadUrlResult(
 				outputBlock.invalidate();
 			}
 
+			// Static per component instance (revision 0): the expanded flip above
+			// recomputes the preview and explicitly invalidates the cache.
 			return outputBlock.render(
-				{
+				width,
+				0,
+				() => ({
 					header,
 					state: truncated ? "warning" : "success",
 					sections: [
 						{ label: uiTheme.fg("toolTitle", "Metadata"), lines: metadataLines },
-						{ label: uiTheme.fg("toolTitle", "Content Preview"), lines: contentPreviewLines },
+						{ label: uiTheme.fg("toolTitle", "Content Preview"), lines: contentPreviewLines ?? [] },
 					],
 					width,
 					applyBg: false,
-				},
+				}),
 				uiTheme,
 			);
 		},

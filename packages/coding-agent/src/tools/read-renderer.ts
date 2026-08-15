@@ -142,7 +142,13 @@ export const readToolRenderer = {
 			const outputBlock = new CachedOutputBlock();
 			return markFramedBlockComponent({
 				render: (width: number) =>
-					outputBlock.render({ header, state: "error", sections: [{ lines: errorLines }], width }, uiTheme),
+					// Static per component instance — revision 0.
+					outputBlock.render(
+						width,
+						0,
+						() => ({ header, state: "error", sections: [{ lines: errorLines }], width }),
+						uiTheme,
+					),
 				invalidate: () => outputBlock.invalidate(),
 			});
 		}
@@ -196,8 +202,11 @@ export const readToolRenderer = {
 			const outputBlock = new CachedOutputBlock();
 			return markFramedBlockComponent({
 				render: (width: number) =>
+					// Static per component instance — revision 0.
 					outputBlock.render(
-						{
+						width,
+						0,
+						() => ({
 							header,
 							state: "success",
 							sections: [
@@ -207,7 +216,7 @@ export const readToolRenderer = {
 								},
 							],
 							width,
-						},
+						}),
 						uiTheme,
 					),
 				invalidate: () => outputBlock.invalidate(),

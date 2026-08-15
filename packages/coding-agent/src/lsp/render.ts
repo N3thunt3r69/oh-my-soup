@@ -139,55 +139,64 @@ export function renderResult(
 
 	return markFramedBlockComponent({
 		render(width: number): readonly string[] {
-			// Read mutable state at render time
-			const { expanded, isPartial, spinnerFrame } = options;
-
-			// Determine label, state, bodyLines based on type + current expanded
-			let label = "Result";
-			let state: "success" | "warning" | "error" = "success";
-			let bodyLines: string[] = [];
-
-			if (codeBlockMatch) {
-				label = "Hover";
-				bodyLines = renderHover(codeBlockMatch, text, lines, expanded, theme);
-			} else if (errorMatch || warningMatch || hasStatusError) {
-				label = "Diagnostics";
-				const errorCount = errorMatch ? Number.parseInt(errorMatch[1], 10) : 0;
-				const warnCount = warningMatch ? Number.parseInt(warningMatch[1], 10) : 0;
-				state = errorCount > 0 ? "error" : warnCount > 0 ? "warning" : "success";
-				bodyLines = renderDiagnostics(errorMatch, warningMatch, lines, expanded, theme);
-			} else if (refMatch) {
-				label = "References";
-				bodyLines = renderReferences(refMatch, lines, expanded, theme);
-			} else if (symbolsMatch) {
-				label = "Symbols";
-				bodyLines = renderSymbols(symbolsMatch, lines, expanded, theme);
-			} else if (result.details?.action === "diagnostics" && text === "OK") {
-				label = "Diagnostics";
-				state = "success";
-				bodyLines = [`${theme.styledSymbol("tool.lsp", "accent")} ${theme.fg("dim", "OK")}`];
-			} else {
-				label = "Response";
-				bodyLines = renderGeneric(text, lines, expanded, theme);
-			}
-
-			const actionLabel = (request?.action ?? result.details?.action ?? label.toLowerCase()).replace(/_/g, " ");
-			const isSuccess = !isPartial && !result.isError;
-			const icon = isSuccess
-				? theme.styledSymbol("tool.lsp", "accent")
-				: formatStatusIcon(isPartial ? "running" : "error", theme, spinnerFrame);
-			const header = `${icon} LSP ${actionLabel}`;
-
+			// Static per component instance: `options` fields (expanded, isPartial,
+			// spinnerFrame) are part of the tool block's rebuild key, so a fresh
+			// component (and cache) is created whenever they change — revision 0.
 			return outputBlock.render(
-				{
-					header,
-					state,
-					sections: [
-						...(requestLines.length > 0 ? [{ lines: requestLines }] : []),
-						{ label: theme.fg("toolTitle", "Response"), lines: bodyLines },
-					],
-					width,
-					applyBg: false,
+				width,
+				0,
+				() => {
+					const { expanded, isPartial, spinnerFrame } = options;
+
+					// Determine label, state, bodyLines based on type + current expanded
+					let label = "Result";
+					let state: "success" | "warning" | "error" = "success";
+					let bodyLines: string[] = [];
+
+					if (codeBlockMatch) {
+						label = "Hover";
+						bodyLines = renderHover(codeBlockMatch, text, lines, expanded, theme);
+					} else if (errorMatch || warningMatch || hasStatusError) {
+						label = "Diagnostics";
+						const errorCount = errorMatch ? Number.parseInt(errorMatch[1], 10) : 0;
+						const warnCount = warningMatch ? Number.parseInt(warningMatch[1], 10) : 0;
+						state = errorCount > 0 ? "error" : warnCount > 0 ? "warning" : "success";
+						bodyLines = renderDiagnostics(errorMatch, warningMatch, lines, expanded, theme);
+					} else if (refMatch) {
+						label = "References";
+						bodyLines = renderReferences(refMatch, lines, expanded, theme);
+					} else if (symbolsMatch) {
+						label = "Symbols";
+						bodyLines = renderSymbols(symbolsMatch, lines, expanded, theme);
+					} else if (result.details?.action === "diagnostics" && text === "OK") {
+						label = "Diagnostics";
+						state = "success";
+						bodyLines = [`${theme.styledSymbol("tool.lsp", "accent")} ${theme.fg("dim", "OK")}`];
+					} else {
+						label = "Response";
+						bodyLines = renderGeneric(text, lines, expanded, theme);
+					}
+
+					const actionLabel = (request?.action ?? result.details?.action ?? label.toLowerCase()).replace(
+						/_/g,
+						" ",
+					);
+					const isSuccess = !isPartial && !result.isError;
+					const icon = isSuccess
+						? theme.styledSymbol("tool.lsp", "accent")
+						: formatStatusIcon(isPartial ? "running" : "error", theme, spinnerFrame);
+					const header = `${icon} LSP ${actionLabel}`;
+
+					return {
+						header,
+						state,
+						sections: [
+							...(requestLines.length > 0 ? [{ lines: requestLines }] : []),
+							{ label: theme.fg("toolTitle", "Response"), lines: bodyLines },
+						],
+						width,
+						applyBg: false,
+					};
 				},
 				theme,
 			);

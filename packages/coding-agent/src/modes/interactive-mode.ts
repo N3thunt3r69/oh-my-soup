@@ -201,7 +201,7 @@ import { runProviderSetupWizard } from "./setup-wizard/lazy";
 import { interruptHint } from "./shared";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./skill-command";
 import { clearMermaidCache } from "./theme/mermaid-cache";
-import { type ShimmerPalette, shimmerEnabled, shimmerSegments, shimmerText } from "./theme/shimmer";
+import { type ShimmerPalette, shimmerEnabled, shimmerFrameKey, shimmerSegments, shimmerText } from "./theme/shimmer";
 import type { Theme } from "./theme/theme";
 import {
 	getEditorTheme,
@@ -4490,11 +4490,17 @@ export class InteractiveMode implements InteractiveModeContext {
 			const messageColorFn = ((message: string) =>
 				renderWorkingMessage(message, this.#getWorkingMessageAccent())) as LoaderMessageColorFn & {
 				animated?: true;
+				frameKey?: () => number;
 			};
 			// Shimmer drives the 30fps redraw; when it is disabled the working
 			// message is static, so leave `animated` unset and let the loader use
 			// the spinner-only ~12.5fps cadence instead of repainting a frozen line.
-			if (shimmerEnabled()) messageColorFn.animated = true;
+			// The frame key lets the loader skip ticks whose shimmer band has not
+			// crossed a cell boundary — those frames are byte-identical.
+			if (shimmerEnabled()) {
+				messageColorFn.animated = true;
+				messageColorFn.frameKey = shimmerFrameKey;
+			}
 			this.loadingAnimation = new Loader(
 				this.ui,
 				spinner => {

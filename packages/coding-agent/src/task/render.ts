@@ -1566,124 +1566,156 @@ export function renderResult(
 		theme,
 	);
 
-	return framedBlock(theme, width => {
-		const { expanded, isPartial, spinnerFrame } = options;
-		const frozen = options.renderContext?.frozen === true;
-		const nowMs = options.renderContext?.nowMs ?? Date.now();
-		const lines: string[] = [];
+	// framedBlock revision: the render clock. `renderContext.nowMs` is
+	// rebuild-stable (tool-execution refreshes it only when the display key
+	// changes), so under the TUI the block caches per instance. A host without
+	// a render context falls back to the live clock — every tick bumps the
+	// revision, matching today's semantics where elapsed/retry countdowns
+	// re-render freely.
+	return framedBlock(
+		theme,
+		width => {
+			const { expanded, isPartial, spinnerFrame } = options;
+			const frozen = options.renderContext?.frozen === true;
+			const nowMs = options.renderContext?.nowMs ?? Date.now();
+			const lines: string[] = [];
 
-		// Result rows win once any exist; progress rows for spawns without a
-		// result (a mixed call's async subset) render as a supplement below.
-		const shouldRenderProgress =
-			Boolean(details.progress && details.progress.length > 0) && details.results.length === 0;
-		if (shouldRenderProgress && details.progress) {
-			const ordered = orderProgressForDisplay(details.progress);
-			// Collapsed view keeps the live edge: finished rows sort to the top of
-			// the display order, so folding from the top keeps running/pending
-			// agents (and their current-tool lines) visible while one summary line
-			// stands in for everything above it.
-			const visible = expanded ? ordered : ordered.slice(Math.max(0, ordered.length - COLLAPSED_AGENT_LIMIT));
-			if (visible.length < ordered.length) {
-				lines.push(formatHiddenProgressLine(ordered.slice(0, ordered.length - visible.length), theme));
-			}
-			for (const progress of visible) {
+			// Result rows win once any exist; progress rows for spawns without a
+			// result (a mixed call's async subset) render as a supplement below.
+			const shouldRenderProgress =
+				Boolean(details.progress && details.progress.length > 0) && details.results.length === 0;
+			if (shouldRenderProgress && details.progress) {
+				const ordered = orderProgressForDisplay(details.progress);
+				// Collapsed view keeps the live edge: finished rows sort to the top of
+				// the display order, so folding from the top keeps running/pending
+				// agents (and their current-tool lines) visible while one summary line
+				// stands in for everything above it.
+				const visible = expanded ? ordered : ordered.slice(Math.max(0, ordered.length - COLLAPSED_AGENT_LIMIT));
+				if (visible.length < ordered.length) {
+					lines.push(formatHiddenProgressLine(ordered.slice(0, ordered.length - visible.length), theme));
+				}
+				for (const progress of visible) {
+					lines.push(
+						...renderAgentProgress(
+							progress,
+							"",
+							"  ",
+							expanded,
+							theme,
+							spinnerFrame,
+							frozen,
+							undefined,
+							0,
+							nowMs,
+						),
+					);
+				}
+			} else if (details.results && details.results.length > 0) {
+				const ordered = orderResultsForDisplay(details.results);
+				const visible = expanded ? ordered : selectCollapsedResults(ordered);
+				for (const res of visible) {
+					lines.push(...renderAgentResult(res, "", "  ", expanded, theme));
+				}
+				if (visible.length < ordered.length) {
+					const hint = formatExpandHint(theme, false, true);
+					lines.push(
+						`${theme.fg("dim", formatMoreItems(ordered.length - visible.length, "agent"))}${hint ? ` ${hint}` : ""}`,
+					);
+				}
+
+				// Mixed blocking+async call: async spawns never land in `results`
+				// (their payloads deliver through jobs) — keep their rows visible
+				// beside the finalized inline results, live while running and
+				// settled once their jobs finish.
+				const supplementalProgress = details.progress
+					? orderProgressForDisplay(
+							details.progress.filter(progress => !details.results.some(res => res.id === progress.id)),
+						)
+					: [];
+				for (const progress of supplementalProgress) {
+					lines.push(
+						...renderAgentProgress(
+							progress,
+							"",
+							"  ",
+							expanded,
+							theme,
+							spinnerFrame,
+							frozen,
+							undefined,
+							0,
+							nowMs,
+						),
+					);
+				}
+
+				const summaryParts: string[] = [];
+				if (abortedCount > 0) summaryParts.push(theme.fg("error", `${abortedCount} aborted`));
+				if (successCount > 0) summaryParts.push(theme.fg("success", `${successCount} succeeded`));
+				if (mergeFailedCount > 0) summaryParts.push(theme.fg("warning", `${mergeFailedCount} merge failed`));
+				if (failCount > 0) summaryParts.push(theme.fg("error", `${failCount} failed`));
+				const totalRequests = requestTotal;
+				if (totalRequests > 0) summaryParts.push(theme.fg("dim", `${formatNumber(totalRequests)} req`));
+				summaryParts.push(theme.fg("dim", formatDuration(details.totalDurationMs)));
+				// Wrap the run summary in the theme's bracket glyphs (dim chrome, colored
+				// counts) to match the bash tool's `[Wall: … | Exit: …]` footer.
 				lines.push(
-					...renderAgentProgress(progress, "", "  ", expanded, theme, spinnerFrame, frozen, undefined, 0, nowMs),
+					theme.fg("dim", theme.format.bracketLeft) +
+						summaryParts.join(theme.fg("dim", theme.sep.dot)) +
+						theme.fg("dim", theme.format.bracketRight),
 				);
 			}
-		} else if (details.results && details.results.length > 0) {
-			const ordered = orderResultsForDisplay(details.results);
-			const visible = expanded ? ordered : selectCollapsedResults(ordered);
-			for (const res of visible) {
-				lines.push(...renderAgentResult(res, "", "  ", expanded, theme));
+
+			const state = isPartial ? "running" : isError ? "error" : mergeFailed ? "warning" : "success";
+			const borderColor = isError ? "error" : "borderMuted";
+
+			if (lines.length === 0) {
+				const text = fallbackText.trim() ? fallbackText : "No results";
+				return {
+					header,
+					sections: [
+						...(contextSection ? [contextSection(width)] : []),
+						...(assignmentSection ? [assignmentSection(width)] : []),
+						{ separator: true, lines: [theme.fg("dim", truncateToWidth(text, width))] },
+					],
+					state,
+					borderColor,
+					width,
+				};
 			}
-			if (visible.length < ordered.length) {
-				const hint = formatExpandHint(theme, false, true);
-				lines.push(
-					`${theme.fg("dim", formatMoreItems(ordered.length - visible.length, "agent"))}${hint ? ` ${hint}` : ""}`,
+
+			if (fallbackText.trim()) {
+				const summaryLines = fallbackText.split("\n");
+				const markerIndex = summaryLines.findIndex(
+					line =>
+						line.includes("<system-notification>") ||
+						line.startsWith("Applied patches:") ||
+						line.startsWith("No changes to apply."),
 				);
+				if (markerIndex >= 0) {
+					const extra = summaryLines.slice(markerIndex);
+					for (const line of extra) {
+						if (!line.trim()) continue;
+						lines.push(theme.fg("dim", line));
+					}
+				}
 			}
 
-			// Mixed blocking+async call: async spawns never land in `results`
-			// (their payloads deliver through jobs) — keep their rows visible
-			// beside the finalized inline results, live while running and
-			// settled once their jobs finish.
-			const supplementalProgress = details.progress
-				? orderProgressForDisplay(
-						details.progress.filter(progress => !details.results.some(res => res.id === progress.id)),
-					)
-				: [];
-			for (const progress of supplementalProgress) {
-				lines.push(
-					...renderAgentProgress(progress, "", "  ", expanded, theme, spinnerFrame, frozen, undefined, 0, nowMs),
-				);
-			}
-
-			const summaryParts: string[] = [];
-			if (abortedCount > 0) summaryParts.push(theme.fg("error", `${abortedCount} aborted`));
-			if (successCount > 0) summaryParts.push(theme.fg("success", `${successCount} succeeded`));
-			if (mergeFailedCount > 0) summaryParts.push(theme.fg("warning", `${mergeFailedCount} merge failed`));
-			if (failCount > 0) summaryParts.push(theme.fg("error", `${failCount} failed`));
-			const totalRequests = requestTotal;
-			if (totalRequests > 0) summaryParts.push(theme.fg("dim", `${formatNumber(totalRequests)} req`));
-			summaryParts.push(theme.fg("dim", formatDuration(details.totalDurationMs)));
-			// Wrap the run summary in the theme's bracket glyphs (dim chrome, colored
-			// counts) to match the bash tool's `[Wall: … | Exit: …]` footer.
-			lines.push(
-				theme.fg("dim", theme.format.bracketLeft) +
-					summaryParts.join(theme.fg("dim", theme.sep.dot)) +
-					theme.fg("dim", theme.format.bracketRight),
-			);
-		}
-
-		const state = isPartial ? "running" : isError ? "error" : mergeFailed ? "warning" : "success";
-		const borderColor = isError ? "error" : "borderMuted";
-
-		if (lines.length === 0) {
-			const text = fallbackText.trim() ? fallbackText : "No results";
+			while (lines.length > 0 && lines[0].trim() === "") lines.shift();
 			return {
 				header,
 				sections: [
 					...(contextSection ? [contextSection(width)] : []),
 					...(assignmentSection ? [assignmentSection(width)] : []),
-					{ separator: true, lines: [theme.fg("dim", truncateToWidth(text, width))] },
+					...(lines.length > 0 ? [{ separator: true, lines }] : []),
 				],
 				state,
 				borderColor,
 				width,
 			};
-		}
-
-		if (fallbackText.trim()) {
-			const summaryLines = fallbackText.split("\n");
-			const markerIndex = summaryLines.findIndex(
-				line =>
-					line.includes("<system-notification>") ||
-					line.startsWith("Applied patches:") ||
-					line.startsWith("No changes to apply."),
-			);
-			if (markerIndex >= 0) {
-				const extra = summaryLines.slice(markerIndex);
-				for (const line of extra) {
-					if (!line.trim()) continue;
-					lines.push(theme.fg("dim", line));
-				}
-			}
-		}
-
-		while (lines.length > 0 && lines[0].trim() === "") lines.shift();
-		return {
-			header,
-			sections: [
-				...(contextSection ? [contextSection(width)] : []),
-				...(assignmentSection ? [assignmentSection(width)] : []),
-				...(lines.length > 0 ? [{ separator: true, lines }] : []),
-			],
-			state,
-			borderColor,
-			width,
-		};
-	});
+		},
+		() => options.renderContext?.nowMs ?? Date.now(),
+	);
 }
 
 function isTaskToolDetails(value: unknown): value is TaskToolDetails {

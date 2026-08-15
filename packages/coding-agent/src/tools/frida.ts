@@ -202,13 +202,15 @@ export const fridaToolRenderer = {
 					);
 				}
 				return outputBlock.render(
-					{
+					width,
+					0,
+					() => ({
 						header,
 						state: result.isError ? "error" : "success",
 						sections: [{ label: theme.fg("toolTitle", "Output"), lines: displayedLines }],
 						width,
 						applyBg: false,
-					},
+					}),
 					theme,
 				);
 			},

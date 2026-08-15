@@ -3,11 +3,10 @@
  */
 import type { Component } from "@oh-my-soup/pi-tui";
 import { ImageProtocol, padding, TERMINAL, visibleWidth, wrapTextWithAnsi } from "@oh-my-soup/pi-tui";
-import type { Theme, ThemeColor } from "../modes/theme/theme";
+import { getThemeEpoch, type Theme, type ThemeColor } from "../modes/theme/theme";
 import { getSixelLineMask } from "../utils/sixel";
 import type { State } from "./types";
-import type { RenderCache } from "./utils";
-import { getStateBgColor, Hasher, padToWidth, truncateToWidth } from "./utils";
+import { getStateBgColor, padToWidth, truncateToWidth } from "./utils";
 
 export interface OutputBlockOptions {
 	header?: string;
@@ -69,7 +68,9 @@ export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): st
 	const v = theme.boxRound.vertical;
 	const cap = h.repeat(3);
 	const lineWidth = Math.max(0, width);
-	// Border colors: running/pending use accent, success uses dim (gray), error/warning keep their colors
+	// Border colors: running/pending use accent, error/warning keep their state
+	// colors, and neutral/success resting frames use borderMuted — the same
+	// weight the editor frame carries.
 	const borderColor: ThemeColor =
 		options.borderColor ??
 		(state === "error"
@@ -78,7 +79,7 @@ export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): st
 				? "warning"
 				: state === "running" || state === "pending"
 					? "accent"
-					: "dim");
+					: "borderMuted");
 	const border = (text: string) => theme.fg(borderColor, text);
 	const bgFn = (() => {
 		if (!state || !applyBg) return undefined;
@@ -202,19 +203,30 @@ export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): st
 /**
  * Cached wrapper around `renderOutputBlock`.
  *
- * Since output blocks are re-rendered on every frame (via `render(width)` closures),
- * but their content rarely changes, this cache avoids redundant `visibleWidth()` and
- * `padding()` computations on ~99% of render calls.
+ * Output blocks are re-rendered on every frame (via `render(width)` closures),
+ * but their content only changes when the hosting tool block is rebuilt — the
+ * transcript recreates renderer components whenever a display input changes
+ * (result version, expanded, spinner frame, theme epoch, …). The cache is
+ * keyed on `(width, revision, theme epoch)`: the caller bumps `revision` for
+ * any content mutation that can happen *without* a rebuild, and the `build`
+ * thunk (options construction included) is skipped entirely on a hit.
  */
 export class CachedOutputBlock {
-	#cache?: RenderCache;
+	#cache?: { width: number; revision: number | string; epoch: number; lines: readonly string[] };
 
-	/** Render with caching. Returns the cached (shared, caller-immutable) lines if options haven't changed. */
-	render(options: OutputBlockOptions, theme: Theme): readonly string[] {
-		const key = this.#buildKey(options);
-		if (this.#cache?.key === key) return this.#cache.lines;
-		const lines = renderOutputBlock(options, theme);
-		this.#cache = { key, lines };
+	/**
+	 * Render with caching. Returns the cached (shared, caller-immutable) lines —
+	 * without invoking `build` — while `(width, revision, theme epoch)` is
+	 * unchanged.
+	 */
+	render(width: number, revision: number | string, build: () => OutputBlockOptions, theme: Theme): readonly string[] {
+		const epoch = getThemeEpoch();
+		const cache = this.#cache;
+		if (cache !== undefined && cache.width === width && cache.revision === revision && cache.epoch === epoch) {
+			return cache.lines;
+		}
+		const lines = renderOutputBlock(build(), theme);
+		this.#cache = { width, revision, epoch, lines };
 		return lines;
 	}
 
@@ -222,47 +234,30 @@ export class CachedOutputBlock {
 	invalidate(): void {
 		this.#cache = undefined;
 	}
-
-	#buildKey(options: OutputBlockOptions): bigint {
-		const h = new Hasher();
-		h.u32(options.width);
-		h.u32(normalizeContentPaddingLeft(options.contentPaddingLeft));
-		h.u32(
-			normalizeContentPaddingLeft(
-				options.contentPaddingRight ?? normalizeContentPaddingLeft(options.contentPaddingLeft),
-			),
-		);
-		h.optional(options.header);
-		h.optional(options.headerMeta);
-		h.optional(options.state);
-		h.optional(options.borderColor);
-		h.bool(options.applyBg ?? true);
-		if (options.sections) {
-			for (const s of options.sections) {
-				h.optional(s.label);
-				h.bool(s.separator ?? false);
-				for (const line of s.lines) {
-					h.str(line);
-				}
-			}
-		}
-		return h.digest();
-	}
 }
 
 /**
  * Build a self-framing tool component backed by a cached output block. The
  * `build` callback returns the block options for a given width; the cache
- * dedupes re-renders. Pass `borderColor: "borderMuted"` for the dim "legacy"
- * look that does not compete with the state-colored framed tools.
+ * dedupes re-renders and skips `build` entirely while `(width, revision,
+ * theme epoch)` is unchanged. Closures whose output can change without the
+ * hosting tool block being rebuilt (live clocks, module-level providers) must
+ * supply a `revision` that changes alongside those inputs; everything else
+ * is static per component instance. Pass `borderColor: "borderMuted"` for the
+ * dim "legacy" look that does not compete with the state-colored framed tools.
  */
-export function framedBlock(theme: Theme, build: (width: number) => OutputBlockOptions): Component {
+export function framedBlock(
+	theme: Theme,
+	build: (width: number) => OutputBlockOptions,
+	revision?: () => number | string,
+): Component {
 	const block = new CachedOutputBlock();
 	// Marked so the tool-execution container treats it as self-framing (renders
 	// flush, no extra padding/background) the same way `markFramedBlockComponent`
 	// blocks are treated.
 	return markFramedBlockComponent({
-		render: (width: number): readonly string[] => block.render(build(width), theme),
+		render: (width: number): readonly string[] =>
+			block.render(width, revision === undefined ? 0 : revision(), () => build(width), theme),
 		invalidate: () => block.invalidate(),
 	});
 }
