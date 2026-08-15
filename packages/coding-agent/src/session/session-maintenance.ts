@@ -2336,11 +2336,6 @@ export class SessionMaintenance {
 		const autoCompactionAbortController = new AbortController();
 		this.#autoCompactionAbortController = autoCompactionAbortController;
 		const autoCompactionSignal = autoCompactionAbortController.signal;
-		// Observability for auto_compaction_end: wall-clock span of this pass plus
-		// the aggregated summarization LLM spend (fed by compact()'s onUsage).
-		const startedAtMs = Date.now();
-		const elapsedMs = () => Date.now() - startedAtMs;
-		let compactionUsage: { inputTokens: number; outputTokens: number; costUsd?: number } | undefined;
 
 		try {
 			// Emit start AFTER the controller is installed so isCompacting is already true
@@ -2367,7 +2362,6 @@ export class SessionMaintenance {
 							result: undefined,
 							aborted: true,
 							willRetry: false,
-							durationMs: elapsedMs(),
 						});
 						return COMPACTION_CHECK_NONE;
 					}
@@ -2383,7 +2377,6 @@ export class SessionMaintenance {
 						result: undefined,
 						aborted: false,
 						willRetry: false,
-						durationMs: elapsedMs(),
 					});
 					const continuationScheduled =
 						!autoCompactionSignal.aborted &&
@@ -2407,7 +2400,6 @@ export class SessionMaintenance {
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					durationMs: elapsedMs(),
 					skipped: true,
 				});
 				return COMPACTION_CHECK_NONE;
@@ -2421,7 +2413,6 @@ export class SessionMaintenance {
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					durationMs: elapsedMs(),
 					skipped: true,
 				});
 				return COMPACTION_CHECK_NONE;
@@ -2520,7 +2511,6 @@ export class SessionMaintenance {
 						aborted: false,
 						willRetry: false,
 						skipped: frameRescueResult === undefined,
-						durationMs: elapsedMs(),
 					});
 					let continuationScheduled = false;
 					if (frameRescueCreatedHeadroom) {
@@ -2575,7 +2565,6 @@ export class SessionMaintenance {
 						result: undefined,
 						aborted: true,
 						willRetry: false,
-						durationMs: elapsedMs(),
 					});
 					return COMPACTION_CHECK_NONE;
 				}
@@ -2757,16 +2746,6 @@ export class SessionMaintenance {
 									providerSessionState: this.#host.providerSessionState,
 									preferWebsockets: this.#host.preferWebsockets,
 									codexCompaction,
-									// Aggregate token/cost spend across every summarization
-									// oneshot for the auto_compaction_end event.
-									onUsage: usage => {
-										compactionUsage ??= { inputTokens: 0, outputTokens: 0 };
-										const acc = compactionUsage;
-										acc.inputTokens += usage.input + usage.cacheRead + usage.cacheWrite;
-										acc.outputTokens += usage.output;
-										const cost = usage.cost.total;
-										if (cost > 0) acc.costUsd = (acc.costUsd ?? 0) + cost;
-									},
 								},
 							);
 							break;
@@ -2884,8 +2863,6 @@ export class SessionMaintenance {
 					result: undefined,
 					aborted: true,
 					willRetry: false,
-					durationMs: elapsedMs(),
-					usage: compactionUsage,
 				});
 				return COMPACTION_CHECK_NONE;
 			}
@@ -3030,15 +3007,7 @@ export class SessionMaintenance {
 				}
 			}
 
-			await this.#host.emitSessionEvent({
-				type: "auto_compaction_end",
-				action,
-				result,
-				aborted: false,
-				willRetry,
-				durationMs: elapsedMs(),
-				usage: compactionUsage,
-			});
+			await this.#host.emitSessionEvent({ type: "auto_compaction_end", action, result, aborted: false, willRetry });
 
 			if (retryFits) {
 				this.#host.scheduleAgentContinue({ delayMs: 100, generation });
@@ -3065,8 +3034,6 @@ export class SessionMaintenance {
 					result: undefined,
 					aborted: true,
 					willRetry: false,
-					durationMs: elapsedMs(),
-					usage: compactionUsage,
 				});
 				return COMPACTION_CHECK_NONE;
 			}
@@ -3077,8 +3044,6 @@ export class SessionMaintenance {
 				result: undefined,
 				aborted: false,
 				willRetry: false,
-				durationMs: elapsedMs(),
-				usage: compactionUsage,
 				errorMessage:
 					reason === "overflow"
 						? `Context overflow recovery failed: ${errorMessage}`

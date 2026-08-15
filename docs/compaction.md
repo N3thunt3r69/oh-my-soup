@@ -420,7 +420,7 @@ From `settings-schema.ts`:
 - `compaction.enabled` = `true`
 - `compaction.strategy` = `"snapcompact"` (`"context-full"`, `"handoff"`, `"shake"`, and `"off"` are also supported)
 - `compaction.reserveTokens` is unset by default. The compaction layer normally applies a `16384`-token floor and at least 15% of the context window; on small windows where that default would be impractical, budget checks use the 15% proportional reserve. An explicit configured reserve is honored.
-- `compaction.keepRecentTokens` = `-1` (auto: `max(20000, 10% of context window)` capped at `65536`; explicit positive values are honored unchanged)
+- `compaction.keepRecentTokens` = `20000`
 - `compaction.autoContinue` = `true`
 - `compaction.midTurnEnabled` = `true`
 - `compaction.handoffSaveToDisk` = `false`

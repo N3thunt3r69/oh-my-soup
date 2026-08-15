@@ -29,10 +29,6 @@ export type AgentSessionEvent =
 			errorMessage?: string;
 			/** True when compaction was skipped for a benign reason. */
 			skipped?: boolean;
-			/** Wall-clock milliseconds from auto_compaction_start to this event. */
-			durationMs?: number;
-			/** Aggregate summarization LLM spend for this pass; absent when no local LLM call was made. */
-			usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 	  }
 	| {
 			type: "auto_retry_start";
