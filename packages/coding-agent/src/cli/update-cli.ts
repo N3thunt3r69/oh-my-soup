@@ -167,6 +167,8 @@ export function shouldForceBinaryUpdate(
 	return majorVersion(release.version) > majorVersion(currentVersion);
 }
 
+/** A published release exists but ships no asset with the requested name. */
+export class ReleaseAssetMissingError extends Error {}
 /**
  * Select and validate the binary asset from GitHub release metadata.
  */
@@ -189,6 +191,9 @@ export function resolveReleaseBinaryAsset(
 	}
 
 	const matches = release.assets.filter(asset => isRecord(asset) && asset.name === binaryName);
+	if (matches.length === 0) {
+		throw new ReleaseAssetMissingError(`GitHub release ${expectedTag} has no asset named ${binaryName}`);
+	}
 	if (matches.length !== 1) {
 		throw new Error(`GitHub release ${expectedTag} has ${matches.length} assets named ${binaryName}`);
 	}
@@ -911,6 +916,72 @@ function getBinaryName(): string {
 }
 
 /**
+ * Release asset names to try for this machine, fastest build first. Windows
+ * x64 prefers the AVX2 (`-modern`) binary and falls back to the baseline
+ * asset when the release predates it or the staged binary cannot run on this
+ * CPU; every other target ships exactly one build.
+ */
+function binaryNameCandidates(): string[] {
+	const base = getBinaryName();
+	if (process.platform === "win32" && process.arch === "x64") {
+		return [`${APP_NAME}-windows-x64-modern.exe`, base];
+	}
+	return [base];
+}
+
+/**
+ * Resolve, download, and pre-verify the release binary into `tempPath`,
+ * walking {@link binaryNameCandidates} until one both exists on the release
+ * and starts on this machine. Verifying BEFORE the swap means a modern build
+ * on a non-AVX2 CPU (illegal-instruction crash) or a corrupt download can
+ * never replace a working install.
+ */
+async function stageVerifiedBinary(
+	expectedVersion: string,
+	tempPath: string,
+	options: {
+		binaryName?: string;
+		fetchImpl?: Fetch;
+		githubToken?: string;
+		verifyBinary?: typeof verifyBinaryAtPath;
+	},
+): Promise<string> {
+	const verify = options.verifyBinary ?? verifyBinaryAtPath;
+	const candidates = options.binaryName ? [options.binaryName] : binaryNameCandidates();
+	let lastError: unknown;
+	for (const [index, candidate] of candidates.entries()) {
+		const isLast = index === candidates.length - 1;
+		let asset: ReleaseBinaryAsset;
+		try {
+			asset = await getReleaseBinaryAsset(expectedVersion, candidate, options.fetchImpl, options.githubToken);
+		} catch (err) {
+			if (err instanceof ReleaseAssetMissingError && !isLast) {
+				lastError = err;
+				continue;
+			}
+			throw err;
+		}
+		console.log(chalk.dim(`Downloading ${candidate}…`));
+		await downloadVerifiedBinary({
+			url: asset.url,
+			targetPath: tempPath,
+			expectedSize: asset.size,
+			expectedDigest: asset.digest,
+			fetchImpl: options.fetchImpl,
+		});
+		console.log(chalk.dim(`Verified ${asset.digest}`));
+		const staged = await verify(tempPath, expectedVersion);
+		if (staged.ok) return candidate;
+		await unlinkIfExists(tempPath);
+		lastError = new Error(`Downloaded ${candidate} failed its start check on this machine`);
+		if (!isLast) {
+			console.log(chalk.dim(`${candidate} cannot run on this CPU; falling back to the baseline build…`));
+		}
+	}
+	throw lastError instanceof Error ? lastError : new Error(`No usable release binary for ${expectedVersion}`);
+}
+
+/**
  * Resolve the path that `oms` maps to in the user's PATH.
  */
 function resolveOmsPath(): string | undefined {
@@ -1336,25 +1407,16 @@ export async function updateViaBinaryAt(
 		fetchImpl?: Fetch;
 		githubToken?: string;
 		verifyInstalledVersion?: typeof verifyInstalledVersion;
+		verifyBinary?: typeof verifyBinaryAtPath;
 	} = {},
 ): Promise<void> {
-	const binaryName = options.binaryName ?? getBinaryName();
 	const tempPath = `${targetPath}.new`;
 	// Unique per attempt: a stale backup from an earlier update may still be
 	// locked (it is the previous process image on Windows), and a fixed name
 	// would force the move-aside rename to overwrite it. pid + timestamp keeps
 	// two forced updates in the same millisecond from colliding.
 	const backupPath = `${targetPath}.${Date.now()}.${process.pid}.bak`;
-	const asset = await getReleaseBinaryAsset(expectedVersion, binaryName, options.fetchImpl, options.githubToken);
-	console.log(chalk.dim(`Downloading ${binaryName}…`));
-	await downloadVerifiedBinary({
-		url: asset.url,
-		targetPath: tempPath,
-		expectedSize: asset.size,
-		expectedDigest: asset.digest,
-		fetchImpl: options.fetchImpl,
-	});
-	console.log(chalk.dim(`Verified ${asset.digest}`));
+	await stageVerifiedBinary(expectedVersion, tempPath, options);
 
 	console.log(chalk.dim("Installing update..."));
 	await replaceBinaryForUpdate({
@@ -1409,20 +1471,10 @@ export async function updateViaShimTakeover(
 		verifyBinary?: typeof verifyBinaryAtPath;
 	} = {},
 ): Promise<void> {
-	const binaryName = options.binaryName ?? getBinaryName();
 	const launcherDir = path.dirname(shimPath);
 	const exePath = path.join(launcherDir, `${APP_NAME}.exe`);
 	const tempPath = `${exePath}.new`;
-	const asset = await getReleaseBinaryAsset(expectedVersion, binaryName, options.fetchImpl, options.githubToken);
-	console.log(chalk.dim(`Downloading ${binaryName}…`));
-	await downloadVerifiedBinary({
-		url: asset.url,
-		targetPath: tempPath,
-		expectedSize: asset.size,
-		expectedDigest: asset.digest,
-		fetchImpl: options.fetchImpl,
-	});
-	console.log(chalk.dim(`Verified ${asset.digest}`));
+	await stageVerifiedBinary(expectedVersion, tempPath, options);
 
 	console.log(chalk.dim(`Installing ${APP_NAME}.exe beside the script launcher...`));
 	await fs.promises.rename(tempPath, exePath);

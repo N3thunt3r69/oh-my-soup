@@ -4570,6 +4570,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers.showNewVersionNotification(newVersion);
 	}
 
+	showUpdateInstalledNotification(newVersion: string): void {
+		this.#uiHelpers.showUpdateInstalledNotification(newVersion);
+	}
+
 	clearEditor(): void {
 		this.#uiHelpers.clearEditor();
 	}

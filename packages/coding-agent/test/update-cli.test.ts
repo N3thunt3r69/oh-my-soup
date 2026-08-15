@@ -455,7 +455,7 @@ describe("update-cli release binary integrity", () => {
 			"is not a published stable release",
 		);
 		expect(() => resolveReleaseBinaryAsset({ ...releaseAsset(), assets: [] }, tag, binaryName)).toThrow(
-			`has 0 assets named ${binaryName}`,
+			`has no asset named ${binaryName}`,
 		);
 		expect(() =>
 			resolveReleaseBinaryAsset(
@@ -631,6 +631,72 @@ describe("update-cli release binary integrity", () => {
 			}),
 		).rejects.toThrow("retry later or set GITHUB_TOKEN or GH_TOKEN");
 		expect(await Bun.file(targetPath).exists()).toBe(false);
+	});
+});
+describe("update-cli windows variant fallback", () => {
+	const tag = "v17.1.2";
+	const modernName = "oms-windows-x64-modern.exe";
+	const baselineName = "oms-windows-x64.exe";
+	const modernContent = "modern binary";
+	const baselineContent = "baseline binary";
+
+	const asset = (name: string, content: string): Record<string, unknown> => ({
+		name,
+		state: "uploaded",
+		size: Buffer.byteLength(content),
+		digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+		browser_download_url: `https://github.com/pickpocket/oh-my-soup/releases/download/${tag}/${name}`,
+	});
+
+	const releaseWith = (assets: Record<string, unknown>[]): Record<string, unknown> => ({
+		tag_name: tag,
+		draft: false,
+		prerelease: false,
+		assets,
+	});
+
+	const fetchFor =
+		(assets: Record<string, unknown>[]) =>
+		async (input: string | URL | Request): Promise<Response> => {
+			const requestUrl = String(input);
+			if (requestUrl.startsWith("https://api.github.com/")) return new Response(JSON.stringify(releaseWith(assets)));
+			if (requestUrl.endsWith(modernName)) return new Response(modernContent);
+			if (requestUrl.endsWith(baselineName)) return new Response(baselineContent);
+			throw new Error(`Unexpected request: ${requestUrl}`);
+		};
+
+	it.skipIf(process.platform !== "win32")(
+		"falls back to baseline when the release ships no modern asset",
+		async () => {
+			const dir = await makeTempDir();
+			const targetPath = path.join(dir, "oms.exe");
+			await Bun.write(targetPath, "installed");
+
+			await updateViaBinaryAt(targetPath, "17.1.2", {
+				fetchImpl: fetchFor([asset(baselineName, baselineContent)]),
+				verifyBinary: async stagedPath => ({ ok: true, path: stagedPath }),
+				verifyInstalledVersion: async () => ({ ok: true, path: targetPath }),
+			});
+
+			expect(await Bun.file(targetPath).text()).toBe(baselineContent);
+		},
+	);
+
+	it.skipIf(process.platform !== "win32")("falls back to baseline when the modern binary cannot run", async () => {
+		const dir = await makeTempDir();
+		const targetPath = path.join(dir, "oms.exe");
+		await Bun.write(targetPath, "installed");
+
+		await updateViaBinaryAt(targetPath, "17.1.2", {
+			fetchImpl: fetchFor([asset(modernName, modernContent), asset(baselineName, baselineContent)]),
+			verifyBinary: async stagedPath => ({
+				ok: (await Bun.file(stagedPath).text()) === baselineContent,
+				path: stagedPath,
+			}),
+			verifyInstalledVersion: async () => ({ ok: true, path: targetPath }),
+		});
+
+		expect(await Bun.file(targetPath).text()).toBe(baselineContent);
 	});
 });
 
