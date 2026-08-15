@@ -338,6 +338,28 @@ interface ReplaceArgs {
 	__partialJson?: string;
 }
 
+// -----------------------------------------------------------------------------
+// Matcher digest memoization
+// -----------------------------------------------------------------------------
+
+/**
+ * Digest cache keyed on partial-arguments object identity. The throttled
+ * partial-JSON parser mints a new arguments object at most once per ~256B of
+ * streamed growth, so between identity changes the digest is byte-identical
+ * and rebuilding it from the full partial args on every delta is pure waste.
+ * Keyed on identity only: the parser never mutates an arguments object in
+ * place, so a stale hit is impossible.
+ */
+const MATCHER_DIGEST_MEMO = new WeakMap<object, string | undefined>();
+
+function memoizedMatcherDigest<Args>(args: Args, compute: (args: Args) => string | undefined): string | undefined {
+	if (typeof args !== "object" || args === null) return compute(args);
+	if (MATCHER_DIGEST_MEMO.has(args)) return MATCHER_DIGEST_MEMO.get(args);
+	const digest = compute(args);
+	MATCHER_DIGEST_MEMO.set(args, digest);
+	return digest;
+}
+
 const replaceStrategy: EditStreamingStrategy<ReplaceArgs> = {
 	extractCompleteEdits(args, partialJson) {
 		// While args are still streaming, `old_string` is only trustworthy once
@@ -386,6 +408,20 @@ interface PatchArgs {
 	__partialJson?: string;
 }
 
+function computePatchMatcherDigest(args: PatchArgs): string | undefined {
+	const edits = args?.edits;
+	if (!Array.isArray(edits)) return undefined;
+	let digest: string | undefined;
+	for (const edit of edits) {
+		if (typeof edit?.diff !== "string") continue;
+		// `create` ops carry full file content in `diff` with no +/- markers;
+		// pass that content through whole.
+		const added = extractAddedLines(edit.diff, edit.op === "create");
+		digest = digest === undefined ? added : `${digest}\n${added}`;
+	}
+	return digest;
+}
+
 const patchStrategy: EditStreamingStrategy<PatchArgs> = {
 	extractCompleteEdits(args, partialJson) {
 		if (!args?.edits) return args;
@@ -410,17 +446,7 @@ const patchStrategy: EditStreamingStrategy<PatchArgs> = {
 		return "";
 	},
 	matcherDigest(args) {
-		const edits = args?.edits;
-		if (!Array.isArray(edits)) return undefined;
-		let digest: string | undefined;
-		for (const edit of edits) {
-			if (typeof edit?.diff !== "string") continue;
-			// `create` ops carry full file content in `diff` with no +/- markers;
-			// pass that content through whole.
-			const added = extractAddedLines(edit.diff, edit.op === "create");
-			digest = digest === undefined ? added : `${digest}\n${added}`;
-		}
-		return digest;
+		return memoizedMatcherDigest(args, computePatchMatcherDigest);
 	},
 	matcherPaths(args) {
 		return typeof args?.path === "string" && args.path.length > 0 ? [args.path] : undefined;
@@ -524,6 +550,13 @@ function buildApplyPatchNaturalOrderPreviews(input: string): PerFileDiffPreview[
 	return previews.length > 0 ? previews : null;
 }
 
+function computeHashlineMatcherDigest(args: HashlineArgs): string | undefined {
+	const input = hashlineEditText(args);
+	if (typeof input !== "string") return undefined;
+	// Body rows are `+TEXT`; headers and op lines are grammar, never content.
+	return extractAddedLines(input, false);
+}
+
 const hashlineStrategy: EditStreamingStrategy<HashlineArgs> = {
 	extractCompleteEdits(args) {
 		return args;
@@ -601,10 +634,7 @@ const hashlineStrategy: EditStreamingStrategy<HashlineArgs> = {
 		return "";
 	},
 	matcherDigest(args) {
-		const input = hashlineEditText(args);
-		if (typeof input !== "string") return undefined;
-		// Body rows are `+TEXT`; headers and op lines are grammar, never content.
-		return extractAddedLines(input, false);
+		return memoizedMatcherDigest(args, computeHashlineMatcherDigest);
 	},
 	matcherPaths(args) {
 		const input = hashlineEditText(args);
@@ -622,6 +652,13 @@ const hashlineStrategy: EditStreamingStrategy<HashlineArgs> = {
 
 interface ApplyPatchArgs {
 	input?: string;
+}
+
+function computeApplyPatchMatcherDigest(args: ApplyPatchArgs): string | undefined {
+	const input = args?.input;
+	if (typeof input !== "string") return undefined;
+	// Envelope markers and `@@` hunk headers are grammar, never content.
+	return extractAddedLines(input, false);
 }
 
 const applyPatchStrategy: EditStreamingStrategy<ApplyPatchArgs> = {
@@ -671,10 +708,7 @@ const applyPatchStrategy: EditStreamingStrategy<ApplyPatchArgs> = {
 		return "";
 	},
 	matcherDigest(args) {
-		const input = args?.input;
-		if (typeof input !== "string") return undefined;
-		// Envelope markers and `@@` hunk headers are grammar, never content.
-		return extractAddedLines(input, false);
+		return memoizedMatcherDigest(args, computeApplyPatchMatcherDigest);
 	},
 	matcherPaths(args) {
 		const input = args?.input;

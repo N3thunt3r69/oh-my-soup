@@ -76,6 +76,8 @@ export class TtsrManager {
 	readonly #buffers = new Map<string, string>();
 	/** Last snapshot evaluated for AST conditions, keyed by stream key, to dedupe matcher runs. */
 	readonly #lastAstSnapshots = new Map<string, string>();
+	/** Last snapshot run through the regex matcher, keyed by stream key, to dedupe matcher runs. */
+	readonly #lastRegexSnapshots = new Map<string, string>();
 	#messageCount = 0;
 	#canMatchText = false;
 	#canMatchThinking = false;
@@ -375,6 +377,14 @@ export class TtsrManager {
 	checkSnapshot(snapshot: string, context: TtsrMatchContext): Rule[] {
 		const bufferKey = this.#bufferKey(context);
 		this.#buffers.set(bufferKey, snapshot);
+		// Throttle: the digest memo upstream returns the identical string between
+		// parse-throttle identity changes, so an unchanged snapshot cannot produce
+		// new matches — skip re-running every rule regex over the whole buffer
+		// (same principle as the AST-path dedupe in checkAstSnapshot).
+		if (this.#lastRegexSnapshots.get(bufferKey) === snapshot) {
+			return [];
+		}
+		this.#lastRegexSnapshots.set(bufferKey, snapshot);
 		return this.#matchBuffer(snapshot, context);
 	}
 
@@ -558,6 +568,7 @@ export class TtsrManager {
 	resetBuffer(): void {
 		this.#buffers.clear();
 		this.#lastAstSnapshots.clear();
+		this.#lastRegexSnapshots.clear();
 	}
 
 	/** Check if any TTSR rules are registered. */

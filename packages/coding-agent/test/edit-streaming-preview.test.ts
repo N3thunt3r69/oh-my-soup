@@ -357,6 +357,19 @@ describe("matcherDigest", () => {
 		).toBe("const b = 1;");
 		expect(EDIT_MODE_STRATEGIES.replace.matcherDigest({})).toBeUndefined();
 	});
+
+	test("digest is memoized per arguments-object identity (parse-throttle contract)", () => {
+		// The streaming partial-JSON parser mints a NEW arguments object per
+		// ~256B of growth and never mutates one in place, so the memo keys on
+		// identity alone: the SAME object returns the cached digest even after
+		// an (out-of-contract) field mutation…
+		const args: { input: string } = { input: "[a.ts#AB12]\nPUT 1-1:\n+const x = 1;\n" };
+		expect(EDIT_MODE_STRATEGIES.hashline.matcherDigest(args)).toBe("const x = 1;");
+		args.input += "+const y = 2;\n";
+		expect(EDIT_MODE_STRATEGIES.hashline.matcherDigest(args)).toBe("const x = 1;");
+		// …while a new identity (what the parser actually produces) recomputes.
+		expect(EDIT_MODE_STRATEGIES.hashline.matcherDigest({ ...args })).toBe("const x = 1;\nconst y = 2;");
+	});
 });
 
 describe("hashline streaming preview (tag-based path recovery)", () => {
