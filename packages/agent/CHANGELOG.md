@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `compaction.keepRecentTokens` now auto-scales with the active model's context window when left at its default (`-1` sentinel): `min(max(20000, 10% of window), 65536)`, so 400k-1M-window models keep a proportionally larger verbatim tail and compact less often. Explicit values, including a stored `20000`, behave exactly as before.
+- The local compaction summarizer now trims its own input to the summarization model's usable window (window minus reserve minus summary budget), truncating the oldest serialized content behind an elision marker - parity with the guard the remote V2 path already had, closing an overflow failure mode on very large histories.
+- Streaming assistant snapshots reuse one deep clone of a tool call's parsed `arguments` per parser identity instead of re-cloning on every `message_update` delta (the throttled parser only mints a new object per ~256 bytes of growth). Finalized-message paths (`done`, `message_start`/`message_end` of settled messages) still take fresh clones because later hooks mutate them. Cuts 50-200 ms of clone+GC churn on large streamed tool calls.
+- Compaction summary generation reports usage (`onUsage`) so hosts can attach duration and token cost to their compaction events.
+
 ## [17.3.0] - 2026-08-13
 
 ### Fixed
