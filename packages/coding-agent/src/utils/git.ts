@@ -2309,7 +2309,10 @@ export const repo = {
 		if (repository) return repository.repoRoot;
 		const result = await git(cwd, ["rev-parse", "--show-toplevel"], { readOnly: true, signal });
 		if (result.exitCode !== 0) return null;
-		return result.stdout.trim() || null;
+		const stdout = result.stdout.trim();
+		// git prints forward slashes on Windows; normalize to native separators
+		// so callers can compare against path.dirname() walks.
+		return stdout ? path.resolve(stdout) : null;
 	},
 
 	/** Resolve the primary checkout root, or the shared common dir for bare-repo worktrees. */

@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEisdir, isEnoent, postmortem } from "@oh-my-soup/pi-utils";
+import { hasFsCode, isEnoent, postmortem } from "@oh-my-soup/pi-utils";
 import { daemonRuntimeDir } from "./paths";
 
 const CLIENTS_DIR = "clients";
@@ -14,9 +14,10 @@ async function canonicalProjectDir(projectDir: string): Promise<string> {
 	const resolved = path.resolve(projectDir);
 	try {
 		return await fs.realpath(resolved);
-	} catch (error) {
-		if (isEnoent(error) || isEisdir(error)) return resolved;
-		throw error;
+	} catch {
+		// Network/DFS/virtual drives throw EPERM/EINVAL/UNKNOWN; the resolved
+		// path is always a usable scope identity.
+		return resolved;
 	}
 }
 
@@ -71,8 +72,14 @@ export async function hasLiveDaemonProjectPresence(runtimeDir: string): Promise<
 			try {
 				process.kill(decoded.pid, 0);
 				live = true;
-			} catch {
-				await fs.rm(presencePath, { force: true });
+			} catch (error) {
+				// EPERM: the process exists but is inaccessible (e.g. an elevated
+				// oms on Windows) — it is alive, not stale.
+				if (hasFsCode(error, "EPERM")) {
+					live = true;
+				} else {
+					await fs.rm(presencePath, { force: true });
+				}
 			}
 		} catch (error) {
 			if (!isEnoent(error)) await fs.rm(presencePath, { force: true });

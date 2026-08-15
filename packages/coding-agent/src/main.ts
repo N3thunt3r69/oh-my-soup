@@ -1529,7 +1529,14 @@ export async function runRootCommand(
 
 	await pluginPreloadPromise;
 	if (deps === DEFAULT_RUN_ROOT_DEPENDENCIES) {
-		await logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd);
+		// Presence is bookkeeping for daemon lifetimes; startup must never die on it
+		// (e.g. unwritable runtime dirs on locked-down Windows profiles).
+		await logger
+			.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd)
+			.catch((error: unknown): DaemonProjectPresence => {
+				logger.warn("daemon presence registration failed", { error: String(error) });
+				return { close: async () => {} };
+			});
 	}
 
 	scheduleMarketplaceAutoUpdate({

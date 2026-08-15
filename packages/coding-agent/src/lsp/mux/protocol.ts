@@ -32,9 +32,11 @@ export function lspMuxReadyBanner(endpoint: string): string {
 }
 
 /** Resolve the Unix socket or Windows named pipe for one project scope. */
-export function lspMuxEndpoint(projectDir: string, runtimeDir: string): string {
+export function lspMuxEndpoint(_projectDir: string, runtimeDir: string): string {
 	if (process.platform === "win32") {
-		const key = Bun.hash.wyhash(path.resolve(projectDir)).toString(16).padStart(16, "0");
+		// Same keying scheme as daemonBrokerEndpoint: the runtime dir is
+		// profile-scoped and case-folded per project, so the pipe name is too.
+		const key = Bun.hash.wyhash(runtimeDir.toLowerCase()).toString(16).padStart(16, "0");
 		return `\\\\.\\pipe\\oms-lsp-mux-${key}`;
 	}
 	return path.join(runtimeDir, "lsp-mux.sock");

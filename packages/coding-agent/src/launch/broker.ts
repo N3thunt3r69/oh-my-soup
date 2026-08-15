@@ -3,7 +3,16 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Process, type PtyRunResult, PtySession } from "@oh-my-soup/pi-natives";
-import { isEexist, isEnoent, logger, postmortem, procmgr, sanitizeText, setProcessName } from "@oh-my-soup/pi-utils";
+import {
+	hasFsCode,
+	isEexist,
+	isEnoent,
+	logger,
+	postmortem,
+	procmgr,
+	sanitizeText,
+	setProcessName,
+} from "@oh-my-soup/pi-utils";
 import { hostHasInheritableConsole } from "../eval/py/spawn-options";
 import { truncateHead, truncateHeadBytes, truncateTail, truncateTailBytes } from "../session/streaming-output";
 import { workerEnvFromParent } from "../subprocess/worker-client";
@@ -305,7 +314,10 @@ async function acquireBrokerLease(runtimeDir: string): Promise<BrokerLease | nul
 					try {
 						process.kill(raw.pid, 0);
 						return null;
-					} catch {
+					} catch (error) {
+						// EPERM: the broker exists but is inaccessible (e.g. elevated on
+						// Windows) — it is alive, not stale.
+						if (hasFsCode(error, "EPERM")) return null;
 						// Stale PID file; the next loop iteration claims it.
 					}
 				}
