@@ -1195,10 +1195,9 @@ export const todoToolRenderer = {
 			return new Text(`${header}\n  ${uiTheme.fg("dim", fallback)}`, 0, 0);
 		}
 
-		// framedBlock revision: the collapsed view highlights todos matched by
-		// live subagent descriptions (a module-level provider that changes
-		// without this block being rebuilt), so the active set is the one input
-		// that must bump the cache key. Expanded views ignore it.
+		// framedBlock revision: the completion animation mutates spinnerFrame on
+		// the existing component, while collapsed views also reflect live
+		// subagent descriptions. Every mutable render input must bump the key.
 		return framedBlock(
 			uiTheme,
 			width => {
@@ -1271,7 +1270,10 @@ export const todoToolRenderer = {
 					width,
 				};
 			},
-			() => (options.expanded ? "" : activeTodoDescriptionsProvider().join("\u001f")),
+			() =>
+				`${options.expanded ? 1 : 0}|${options.isPartial ? 1 : 0}|${options.spinnerFrame ?? "-"}|${
+					options.expanded ? "" : activeTodoDescriptionsProvider().join("\u001f")
+				}`,
 		);
 	},
 	mergeCallAndResult: true,
