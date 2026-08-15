@@ -103,6 +103,9 @@
 - The `task` tool accepts a per-spawn `model` field (flat and batch forms): `provider/model-id`, a bare model id, or a role name like `smol`. It rides the existing subagent model-resolution chain (caller request wins over the settings override and the agent definition, with the established auth/retry fallbacks), so an agent can fan work out onto a different model family than its own — e.g. a Kimi session spawning Qwen workers.
 - Windows releases now ship an AVX2 build (`oms-windows-x64-modern.exe`) alongside the baseline exe, and the installer tries it first, using its existing smoke test as the CPU-capability check: a 404 (older release) or an illegal-instruction crash falls back to the baseline asset automatically. `oms-windows-x64.exe` remains the baseline build forever so pinned URLs and old installers keep working.
 - A dim `🍜 oms is starting…` line now paints to stderr before the heavy command graph loads on bare interactive TTY launches, so slow cold starts (first launch after a reboot) show activity instead of a blank terminal. Module evaluation blocks the event loop, so it is a static line by design; the root command erases it before first paint, and subcommands, flags, and piped usage never see it.
+- Fixed adopted keep-alive agents remaining `running` in the registry after deferred turn settlement, and prevented stale detached or non-streaming refs from sustaining bare `hub wait` calls indefinitely ([#8634](https://github.com/can1357/oh-my-pi/issues/8634)).
+
+## [17.3.4] - 2026-08-14
 
 ### Changed
 
