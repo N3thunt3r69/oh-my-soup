@@ -581,7 +581,7 @@ describe("title generator", () => {
 
 // The terminal title runtime is a module-global. `emitTerminalTitle()` composes
 // the emitted OSC title from three inputs — an extension override, a run-state
-// separator (spinner frame, static Windows `:`, `>`, or `!` between the `π`
+// separator (spinner frame, static Windows `:`, `>`, or `!` between the `🍜`
 // brand and the session label), and the session label — and writes it to
 // `process.stdout` as `ESC]0;<title>BEL`. These tests pin the observable
 // contract at that sink: what string actually reaches the terminal after a
@@ -720,7 +720,7 @@ describe("terminal title runtime", () => {
 			writes.length = 0;
 
 			setTerminalTitleState("working");
-			expect(emittedTitles()).toEqual(["π : windows-project"]);
+			expect(emittedTitles()).toEqual(["🍜 : windows-project"]);
 
 			writes.length = 0;
 			vi.advanceTimersByTime(400);
@@ -740,7 +740,7 @@ describe("terminal title runtime", () => {
 			writes.length = 0;
 
 			setTerminalTitleState("working");
-			expect(emittedTitles()).toEqual(["π : wsl-project"]);
+			expect(emittedTitles()).toEqual(["🍜 : wsl-project"]);
 
 			writes.length = 0;
 			vi.advanceTimersByTime(400);

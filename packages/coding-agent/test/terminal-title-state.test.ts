@@ -13,46 +13,46 @@ const LABEL = "my-project";
 
 describe("buildTerminalTitleWithState", () => {
 	it("separates brand and label with '>' when idle/done (your turn)", () => {
-		expect(buildTerminalTitleWithState(LABEL, "idle", 0, true)).toBe(`π > ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "idle", 0, true)).toBe(`🍜 > ${LABEL}`);
 	});
 
 	it("separates brand and label with '!' when the agent needs attention", () => {
-		expect(buildTerminalTitleWithState(LABEL, "attention", 0, true)).toBe(`π ! ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "attention", 0, true)).toBe(`🍜 ! ${LABEL}`);
 	});
 
 	it("animates spinner frames in the separator slot while working outside Windows", () => {
 		const frame0 = buildTerminalTitleWithState(LABEL, "working", 0, true, "linux");
 		const frame1 = buildTerminalTitleWithState(LABEL, "working", 1, true, "linux");
-		// The brand stays a bare `π`; only the separator between brand and label
+		// The brand stays a bare `🍜`; only the separator between brand and label
 		// carries the spinner glyph, and it advances per frame.
-		expect(frame0).toBe(`π ⠋ ${LABEL}`);
-		expect(frame1).toBe(`π ⠙ ${LABEL}`);
+		expect(frame0).toBe(`🍜 ⠋ ${LABEL}`);
+		expect(frame1).toBe(`🍜 ⠙ ${LABEL}`);
 		expect(frame1).not.toBe(frame0);
 		// The frame index is taken modulo the frame count, so it never throws or
 		// produces an "undefined" separator for a large counter.
 		const wrapped = buildTerminalTitleWithState(LABEL, "working", 9999, true, "linux");
-		expect(wrapped.startsWith("π ")).toBe(true);
+		expect(wrapped.startsWith("🍜 ")).toBe(true);
 		expect(wrapped.endsWith(` ${LABEL}`)).toBe(true);
 		expect(wrapped).not.toContain("undefined");
 	});
 
 	it("uses a static colon while working on Windows", () => {
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "win32")).toBe(`π : ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 1, true, "win32")).toBe(`π : ${LABEL}`);
-		expect(buildTerminalTitleWithState(undefined, "working", 1, true, "win32")).toBe("π :");
+		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "win32")).toBe(`🍜 : ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 1, true, "win32")).toBe(`🍜 : ${LABEL}`);
+		expect(buildTerminalTitleWithState(undefined, "working", 1, true, "win32")).toBe("🍜 :");
 	});
 
 	it("keeps the state visible as a trailing separator when there is no label", () => {
-		expect(buildTerminalTitleWithState(undefined, "idle", 0, true)).toBe("π >");
-		expect(buildTerminalTitleWithState(undefined, "attention", 0, true)).toBe("π !");
-		expect(buildTerminalTitleWithState(undefined, "working", 0, true, "linux")).toBe("π ⠋");
+		expect(buildTerminalTitleWithState(undefined, "idle", 0, true)).toBe("🍜 >");
+		expect(buildTerminalTitleWithState(undefined, "attention", 0, true)).toBe("🍜 !");
+		expect(buildTerminalTitleWithState(undefined, "working", 0, true, "linux")).toBe("🍜 ⠋");
 	});
 
-	it("renders the pre-state `π: label` layout when disabled, regardless of state", () => {
-		expect(buildTerminalTitleWithState(LABEL, "working", 3, false)).toBe(`π: ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "idle", 0, false)).toBe(`π: ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "attention", 0, false)).toBe(`π: ${LABEL}`);
-		expect(buildTerminalTitleWithState(undefined, "idle", 0, false)).toBe("π");
+	it("renders the pre-state `🍜: label` layout when disabled, regardless of state", () => {
+		expect(buildTerminalTitleWithState(LABEL, "working", 3, false)).toBe(`🍜: ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "idle", 0, false)).toBe(`🍜: ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "attention", 0, false)).toBe(`🍜: ${LABEL}`);
+		expect(buildTerminalTitleWithState(undefined, "idle", 0, false)).toBe("🍜");
 	});
 });
 
@@ -60,7 +60,7 @@ describe("buildTerminalTitleWithState", () => {
 // `working` spinner arms a periodic `setInterval` that, on every tick, re-emits
 // the terminal title as an OSC-0 write (`ESC]0;<title>BEL`). If that interval is
 // not cleared on teardown, a pending tick can fire AFTER the shell title was
-// restored, leaving the parent shell tab reading `π ⠋ …` post-exit.
+// restored, leaving the parent shell tab reading `🍜 ⠋ …` post-exit.
 // `disposeTerminalTitleState()` (now wired into `InteractiveMode.shutdown()`)
 // must stop the timer so no further OSC-title write reaches stdout.
 //

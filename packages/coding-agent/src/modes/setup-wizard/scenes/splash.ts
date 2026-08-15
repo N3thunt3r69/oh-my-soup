@@ -111,7 +111,7 @@ function waterAmplitude(
 }
 
 /**
- * Animated setup splash, in the spirit of the oms landing page: the brand π
+ * Animated setup splash, in the spirit of the oms landing page: the brand 🍜
  * mark rendered with the live diagonal gradient + shine sweep, rising out of a
  * rippling, gradient-lit water surface, under a faint twinkling starfield. The
  * mark and water share one continuous gradient so the sweep reads across the
