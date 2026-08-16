@@ -92,7 +92,8 @@ describe("multiselect settings (array-of-enum)", () => {
 		comp.handleInput("\n");
 
 		const menu = comp.render(120).join("\n");
-		expect(menu).not.toContain(firstChoice!.label);
+		comp.handleInput(" ");
+		expect(settings.get("providers.webSearchOrder")).toEqual([secondChoice!.value]);
 		expect(menu).toContain(secondChoice!.label);
 	});
 
