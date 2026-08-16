@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.2] - 2026-08-16
+
 ### Added
 
 - Added an `update.auto` setting (default off): when a compiled oms notices a newer release at startup, it downloads and installs it in the background and the transcript shows an "Update Installed - restart oms to finish" notice instead of the manual `oms update` hint. Any background failure falls back to the normal update-available notice.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.2] - 2026-08-16
+
 ### Changed
 
 - Streaming assistant snapshots reuse one deep clone of a tool call's parsed `arguments` per parser identity instead of re-cloning on every `message_update` delta (the throttled parser only mints a new object per ~256 bytes of growth). Finalized-message paths (`done`, `message_start`/`message_end` of settled messages) still take fresh clones because later hooks mutate them. Cuts 50-200 ms of clone+GC churn on large streamed tool calls.

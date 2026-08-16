@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.2] - 2026-08-16
+
 ### Changed
 
 - Replaced the Greek-pi brand glyph in the collab lockup with 🍜.
