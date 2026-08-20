@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import { AuthStorage, type Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { ModelRegistry } from "../src/config/model-registry";
 import { Settings } from "../src/config/settings";
+import { createAgentSession } from "../src/sdk";
 import { AgentSession } from "../src/session/agent-session";
+import type { ToolNamespacesInfo } from "../src/session/code-mode";
 import { buildToolNamespacesInfo, resolveCodeMode } from "../src/session/code-mode";
 import { SessionManager } from "../src/session/session-manager";
 
@@ -176,5 +183,108 @@ describe("Code Mode session reconciliation", () => {
 		settings.set("providers.openai-codex.codeMode", "off");
 		await session.runToolRegistryMutation(async () => undefined);
 		expect(session.agent.state.tools.map(value => value.name)).toEqual(["eval", "read"]);
+	});
+});
+
+describe("Code Mode session startup", () => {
+	// Regression: a session created directly on a `code_mode_only` Codex model
+	// (or with `codeMode: "on"`) used to keep the unrestricted initial tool
+	// surface and omit `tool_namespaces_info` until an unrelated model, setting,
+	// or tool-selection change reconciled. Startup itself must apply the
+	// restricted surface so the very first provider turn sees it.
+	let registryDir: string;
+	let authStorage: AuthStorage;
+	let modelRegistry: ModelRegistry;
+	const sessions: AgentSession[] = [];
+
+	test("fresh session on a code_mode_only model starts restricted with namespaces info", async () => {
+		registryDir = path.join(os.tmpdir(), `pi-code-mode-startup-${Snowflake.next()}`);
+		fs.mkdirSync(registryDir, { recursive: true });
+		authStorage = await AuthStorage.create(path.join(registryDir, "auth.db"));
+		modelRegistry = new ModelRegistry(authStorage, path.join(registryDir, "models.yml"));
+		const codeModel = buildModel({
+			id: "gpt-5.6-sol",
+			name: "GPT-5.6 Sol",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://example.invalid",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 8192,
+			maxTokens: 1024,
+			toolMode: "code_mode_only",
+		});
+		const { session } = await createAgentSession({
+			cwd: registryDir,
+			agentDir: registryDir,
+			modelRegistry,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "providers.openai-codex.codeMode": "auto" }),
+			model: codeModel,
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+		});
+		sessions.push(session);
+
+		const active = session.getActiveToolNames();
+		expect(active).toContain("eval");
+		expect(active).not.toContain("read");
+		expect(active).not.toContain("bash");
+		// Demoted tools stay enabled and bridge-reachable instead of vanishing.
+		expect(session.getEnabledToolNames()).toContain("read");
+		expect(session.getToolForEvalBridge("read")?.name).toBe("read");
+		// The namespaces snapshot feeding `tool_namespaces_info` exists before
+		// any turn runs.
+		const info = session.codeModeNamespacesInfo as ToolNamespacesInfo;
+		expect(info.functions.functions.eval.direct).toBe(true);
+		expect(info.functions.functions.read.direct).toBe(false);
+	});
+
+	test("fresh session with code mode off keeps the direct surface and no namespaces info", async () => {
+		const { session } = await createAgentSession({
+			cwd: registryDir,
+			agentDir: registryDir,
+			modelRegistry,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "providers.openai-codex.codeMode": "off" }),
+			model: buildModel({
+				id: "gpt-5.6-sol",
+				name: "GPT-5.6 Sol",
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				baseUrl: "https://example.invalid",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 8192,
+				maxTokens: 1024,
+				toolMode: "code_mode_only",
+			}),
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+		});
+		sessions.push(session);
+
+		const active = session.getActiveToolNames();
+		expect(active).toContain("read");
+		expect(active).toContain("bash");
+		expect(session.codeModeNamespacesInfo).toBeUndefined();
+	});
+
+	afterEach(async () => {
+		for (const session of sessions.splice(0)) await session.dispose().catch(() => {});
+		authStorage?.close();
+		if (registryDir && fs.existsSync(registryDir)) removeSyncWithRetries(registryDir);
 	});
 });

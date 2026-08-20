@@ -4654,6 +4654,29 @@ export class AgentSession {
 		return this.#tools.refreshSkills();
 	}
 
+	/**
+	 * Applies Code Mode at session startup: when the initial model activates
+	 * it (`codeMode` `on`, or `auto` matching a `code_mode_only` catalog flag),
+	 * the initial tool surface is routed through the Code Mode-aware path so
+	 * the restricted direct surface and namespaces snapshot exist before the
+	 * first provider turn instead of waiting for an unrelated reconciliation.
+	 *
+	 * Inactive sessions keep their initial surface untouched: re-applying an
+	 * unchanged set would seed the prompt-rebuild signature cache and suppress
+	 * the first late tool registration's rebuild (non-MCP `xd://` mounts are
+	 * deliberately not part of that signature).
+	 */
+	initializeCodeMode(): Promise<void> {
+		const model = this.model;
+		if (!model || !this.#tools.codeModeChangesBetween(undefined, model)) return Promise.resolve();
+		return this.#tools.reconcileCodeMode();
+	}
+
+	/** Current Code Mode `tool_namespaces_info` snapshot, or `undefined` when inactive. */
+	get codeModeNamespacesInfo(): unknown {
+		return this.#codeModeState.namespacesInfo;
+	}
+
 	/** Selects enabled tools, ignoring names absent from the registry. */
 	setActiveToolsByName(toolNames: string[]): Promise<void> {
 		return this.#tools.setActiveToolsByName(toolNames);
