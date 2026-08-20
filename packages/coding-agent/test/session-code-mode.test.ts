@@ -15,7 +15,7 @@ import type { ToolNamespacesInfo } from "../src/session/code-mode";
 import { buildToolNamespacesInfo, resolveCodeMode } from "../src/session/code-mode";
 import { SessionManager } from "../src/session/session-manager";
 
-const ENABLED = ["eval", "ask", "todo", "yield", "read", "bash", "edit", "mcp__gmail__search"];
+const ENABLED = ["eval", "ask", "todo", "yield", "think", "read", "bash", "edit", "mcp__gmail__search"];
 
 describe("resolveCodeMode", () => {
 	test("off: inactive regardless of catalog flag", () => {
@@ -36,7 +36,7 @@ describe("resolveCodeMode", () => {
 			enabledToolNames: ENABLED,
 		});
 		expect(r.active).toBe(true);
-		expect([...r.directToolNames].sort()).toEqual(["ask", "eval", "todo", "yield"]);
+		expect([...r.directToolNames].sort()).toEqual(["ask", "eval", "think", "todo", "yield"]);
 	});
 	test("auto without flag: inactive", () => {
 		expect(resolveCodeMode({ provider: "openai-codex", setting: "auto", enabledToolNames: ENABLED }).active).toBe(

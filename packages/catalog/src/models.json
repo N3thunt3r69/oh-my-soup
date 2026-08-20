@@ -73644,6 +73644,9 @@
 			"maxTokens": 128000,
 			"preferWebsockets": true,
 			"useResponsesLite": true,
+			"toolMode": "code_mode_only",
+			"toolMode": "code_mode_only",
+			"toolMode": "code_mode_only",
 			"priority": 3,
 			"applyPatchToolType": "freeform",
 			"thinking": {

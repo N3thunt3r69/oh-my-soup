@@ -5,7 +5,13 @@
  */
 
 /** Tool names that always stay directly model-visible under code mode. */
-export const CODE_MODE_KEEP_TOOLS: Record<string, true> = { eval: true, ask: true, todo: true, yield: true };
+export const CODE_MODE_KEEP_TOOLS: Record<string, true> = {
+	eval: true,
+	ask: true,
+	todo: true,
+	yield: true,
+	think: true,
+};
 
 export interface CodeModeResolution {
 	active: boolean;

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fetchCodexModels } from "../src/discovery/codex";
+import { getBundledModel } from "../src/models";
 
 function modelsResponse(entries: Record<string, unknown>[]): Response {
 	return new Response(JSON.stringify({ models: entries }), {
@@ -39,6 +40,12 @@ describe("codex discovery tool_mode", () => {
 		});
 		for (const spec of result?.models ?? []) {
 			expect(spec.toolMode).toBeUndefined();
+		}
+	});
+
+	test("bundles Code Mode flags for offline GPT-5.6 fallbacks", () => {
+		for (const id of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]) {
+			expect(getBundledModel("openai-codex", id)?.toolMode).toBe("code_mode_only");
 		}
 	});
 });
