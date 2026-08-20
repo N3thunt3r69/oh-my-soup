@@ -10,6 +10,7 @@ import type { BackendProbeOptions } from "../eval/probe";
 import { defaultEvalSessionId } from "../eval/session-id";
 import type { EvalCellResult, EvalDisplayOutput, EvalLanguage, EvalStatusEvent, EvalToolDetails } from "../eval/types";
 import evalDescription from "../prompts/tools/eval.md" with { type: "text" };
+import { resolveCodeMode } from "../session/code-mode";
 import { DEFAULT_MAX_BYTES, OutputSink, type OutputSummary, TailBuffer } from "../session/streaming-output";
 import { resolveSpawnPolicy } from "../task/spawn-policy";
 import { webpExclusionForModel } from "../utils/image-loading";
@@ -17,6 +18,7 @@ import { formatDimensionNote, resizeImage } from "../utils/image-resize";
 import type { ToolSession } from ".";
 import { truncateForPrompt } from "./approval";
 import { type EvalBackendsAllowance, resolveEvalBackends } from "./eval-backends";
+import { generateCodeModeDeclarations } from "./eval-format/code-mode-declarations";
 import { upsertStatusEvent } from "./eval-render";
 import { resolveOutputMaxColumns, resolveOutputSinkHeadBytes } from "./output-meta";
 import { ToolAbortError, ToolError, throwIfAborted } from "./tool-errors";
@@ -304,16 +306,57 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 	readonly loadMode = "essential";
 	readonly label = "Eval";
 	get description(): string {
-		if (!this.session) return getEvalToolDescription();
-		const backends = resolveEvalBackends(this.session);
-		const sessionSpawns = this.session.getSessionSpawns?.() ?? "*";
-		return getEvalToolDescription({
-			py: backends.python,
-			js: backends.js,
-			rb: backends.ruby,
-			jl: backends.julia,
-			spawns: sessionSpawns,
+		let base: string;
+		if (!this.session) {
+			base = getEvalToolDescription();
+		} else {
+			const backends = resolveEvalBackends(this.session);
+			const sessionSpawns = this.session.getSessionSpawns?.() ?? "*";
+			base = getEvalToolDescription({
+				py: backends.python,
+				js: backends.js,
+				rb: backends.ruby,
+				jl: backends.julia,
+				spawns: sessionSpawns,
+			});
+		}
+		const codeModeBlock = this.#codeModeDeclarationsBlock();
+		return codeModeBlock ? `${base}\n\n${codeModeBlock}` : base;
+	}
+
+	/**
+	 * Codex Code Mode advertisement, pulled from the session on every read so
+	 * the description can never drift from the active model or tool registry.
+	 */
+	#codeModeDeclarationsBlock(): string | undefined {
+		const session = this.session;
+		if (!session) return undefined;
+		const model = session.getActiveModel?.();
+		const enabledToolNames = session.getEvalBridgeToolNames?.() ?? [...(session.toolRegistry?.keys() ?? [])];
+		const codeMode = resolveCodeMode({
+			provider: model?.provider ?? "",
+			toolMode: model?.toolMode,
+			setting:
+				(session.settings.get("providers.openai-codex.codeMode") as "off" | "on" | "auto" | undefined) ?? "off",
+			extraDirectTools: session.settings.get("providers.openai-codex.codeModeDirectTools") as string[] | undefined,
+			enabledToolNames,
 		});
+		if (!codeMode.active) return undefined;
+		const declarations = generateCodeModeDeclarations(
+			enabledToolNames.flatMap(name => {
+				if (codeMode.directToolNames.has(name)) return [];
+				const tool = session.toolRegistry?.get(name);
+				return tool ? [{ name, parameters: (tool as { parameters?: unknown }).parameters }] : [];
+			}),
+		);
+		return [
+			"Codex Code Mode is active: this tool is your primary work surface and the direct tool surface is restricted.",
+			"Plan multiple operations into ONE cell whenever the next steps are known, calling session tools via `await tool.<name>(args)`;",
+			"use `parallel([...])` for independent calls. Prefer `tool.*` calls over raw `Bun.file`/fs so operations flow through the session tool pipeline.",
+			"Reserve separate cells for steps that must inspect earlier results.",
+			"",
+			declarations,
+		].join("\n");
 	}
 	/** All reuse-chain examples; the `examples` getter filters by enabled languages. */
 	private static readonly ALL_EXAMPLES: readonly ToolExample<typeof evalSchema.infer>[] = [

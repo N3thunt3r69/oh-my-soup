@@ -599,6 +599,9 @@ export class Settings {
 		if (path === "modelRoles") {
 			modelRolesSignal.fire();
 		}
+		if (path === "providers.openai-codex.codeMode" || path === "providers.openai-codex.codeModeDirectTools") {
+			codeModeSignal.fire();
+		}
 	}
 
 	/** Set once this instance is discarded; background saves become no-ops. */
@@ -2361,6 +2364,11 @@ const modelRolesSignal = new SettingSignal("modelRoles");
 /** Subscribe to model role changes. Returns an unsubscribe function. */
 export const onModelRolesChanged: (cb: () => void) => () => void = modelRolesSignal.on.bind(modelRolesSignal);
 
+/** Fires when Code Mode activation or its direct keep-set changes at runtime. */
+const codeModeSignal = new SettingSignal("providers.openai-codex.codeMode");
+
+/** Subscribe to Code Mode setting changes. Returns an unsubscribe function. */
+export const onCodeModeChanged = (cb: () => void) => codeModeSignal.on(cb);
 /** Fires when `statusLine.sessionAccent` changes at runtime. */
 const statusLineSessionAccentSignal = new SettingSignal("statusLine.sessionAccent");
 

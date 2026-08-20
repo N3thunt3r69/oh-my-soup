@@ -35,6 +35,7 @@ import {
 	PERMISSION_REQUIRED_TOOLS,
 } from "./acp-permission-gate";
 import type { ClientBridge, ClientBridgePermissionOutcome } from "./client-bridge";
+import { buildToolNamespacesInfo, resolveCodeMode } from "./code-mode";
 import type { CustomMessage } from "./messages";
 import type { SessionManager } from "./session-manager";
 
@@ -62,6 +63,8 @@ export interface SessionToolsHost {
 	/** Session-scoped `/vision` override; undefined means "follow the persisted setting". */
 	getInspectImageModeOverride(): InspectImageMode | undefined;
 	setInspectImageModeOverride(mode: InspectImageMode | undefined): void;
+	/** Publishes the current Codex Code Mode tool exposure snapshot for turn metadata; undefined clears it. */
+	setCodeModeNamespacesInfo?(info: unknown): void;
 }
 
 interface SessionToolsOptions {
@@ -217,6 +220,8 @@ export class SessionTools {
 	 */
 	#turnSystemPromptOverride: string[] | undefined;
 	#lastAppliedToolSignature: string | undefined;
+	/** Full enabled set, including tools demoted from the model-visible surface. */
+	#enabledToolNames = new Set<string>();
 	/**
 	 * `xd://` device names the current base system prompt renders in its catalog
 	 * (the last rebuild's {@link BuildSystemPromptResult.xdevCatalogNames}). Consulted
@@ -356,9 +361,9 @@ export class SessionTools {
 	getActiveToolNames(): string[] {
 		return this.#host.agent.state.tools.map(t => t.name);
 	}
-
-	/** Enabled top-level and discoverable tool names. */
+	/** Enabled top-level, `xd://`, and Code Mode bridge tool names. */
 	getEnabledToolNames(): string[] {
+		if (this.#enabledToolNames.size > 0) return [...this.#enabledToolNames];
 		const mountedNames = this.#xdev?.mountedNames;
 		if (!mountedNames || mountedNames.size === 0) return this.getActiveToolNames();
 		return [...this.getActiveToolNames(), ...mountedNames];
@@ -377,6 +382,18 @@ export class SessionTools {
 	/** Looks up a registered tool by name. */
 	getToolByName(name: string): AgentTool | undefined {
 		return this.#toolRegistry.get(name);
+	}
+
+	/** Looks up an enabled tool through the same ACP permission gate as direct calls. */
+	getToolForEvalBridge(name: string): AgentTool | undefined {
+		if (!this.getEnabledToolNames().includes(name)) return undefined;
+		const tool = this.#toolRegistry.get(name);
+		return tool ? this.#wrapToolForAcpPermission(tool) : undefined;
+	}
+
+	/** Canonical allowlist advertised by and enforced for the eval bridge. */
+	getEvalBridgeToolNames(): string[] {
+		return this.getEnabledToolNames();
 	}
 
 	/**
@@ -592,6 +609,7 @@ export class SessionTools {
 		if (computerExpected && !computerActive) {
 			const model = this.#host.model();
 			const modelName = model ? formatModelString(model) : "the current model";
+
 			logger.warn("Enabled computer tool missing after model change", { model: modelName });
 			this.#host.emitNotice(
 				"warning",
@@ -605,6 +623,38 @@ export class SessionTools {
 		// inspect_image auto mode keys off model image capability, so a model
 		// switch can flip the tool either way.
 		await this.reconcileInspectImageAfterModelChange();
+	}
+
+	/** Whether a model transition crosses a Code Mode presentation boundary. */
+	codeModeChangesBetween(previousModel: Model | undefined, nextModel: Model): boolean {
+		const enabledToolNames = this.getEnabledToolNames();
+		const setting =
+			(this.#host.settings.get("providers.openai-codex.codeMode") as "off" | "on" | "auto" | undefined) ?? "off";
+		const extraDirectTools = this.#host.settings.get("providers.openai-codex.codeModeDirectTools") as
+			| string[]
+			| undefined;
+		const resolve = (model: Model | undefined) =>
+			resolveCodeMode({
+				provider: model?.provider ?? "",
+				toolMode: model?.toolMode,
+				setting,
+				extraDirectTools,
+				enabledToolNames,
+			});
+		const previous = resolve(previousModel);
+		const next = resolve(nextModel);
+		if (previous.active !== next.active) return true;
+		if (!next.active) return false;
+		if (previous.directToolNames.size !== next.directToolNames.size) return true;
+		for (const name of previous.directToolNames) {
+			if (!next.directToolNames.has(name)) return true;
+		}
+		return false;
+	}
+
+	/** Reapplies the preserved enabled set after model or Code Mode setting changes. */
+	reconcileCodeMode(): Promise<void> {
+		return this.applyActiveToolsByName(this.getEnabledToolNames());
 	}
 
 	/** Enabled MCP tools in their current presentation partition. */
@@ -767,6 +817,19 @@ export class SessionTools {
 				isMountableUnderXdev(tool),
 		);
 		const mountNames = new Set(mountCandidates.map(({ name }) => name));
+		const codeMode = resolveCodeMode({
+			provider: this.#host.model()?.provider ?? "",
+			toolMode: this.#host.model()?.toolMode,
+			setting:
+				(this.#host.settings.get("providers.openai-codex.codeMode") as "off" | "on" | "auto" | undefined) ?? "off",
+			extraDirectTools: this.#host.settings.get("providers.openai-codex.codeModeDirectTools") as
+				| string[]
+				| undefined,
+			enabledToolNames: toolNames,
+		});
+		// Demoted tools stay reachable through the eval bridge, so nothing is
+		// mounted under xd:// while code mode restricts the direct surface.
+		if (codeMode.active) mountNames.clear();
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
 		for (const { name, tool } of selectedTools) {
@@ -799,19 +862,51 @@ export class SessionTools {
 			if (writeToolIndex >= 0) tools.splice(writeToolIndex, 1);
 		}
 
+		let appliedTools = tools;
+		let appliedNames = validToolNames;
+		if (codeMode.active) {
+			// The write tool survives demotion only when plan mode or a deferrable
+			// tool still needs it as the staging transport.
+			if (transportNeeded && validToolNames.includes("write")) codeMode.directToolNames.add("write");
+			appliedTools = tools.filter(tool => codeMode.directToolNames.has(tool.name));
+			appliedNames = validToolNames.filter(name => codeMode.directToolNames.has(name));
+			this.#host.setCodeModeNamespacesInfo?.(
+				buildToolNamespacesInfo({
+					tools: validToolNames.flatMap(name => {
+						const tool = this.#toolRegistry.get(name);
+						if (!tool) return [];
+						return [
+							{
+								name,
+								loadMode: "loadMode" in tool && typeof tool.loadMode === "string" ? tool.loadMode : undefined,
+								mcpServerName:
+									"mcpServerName" in tool && typeof tool.mcpServerName === "string"
+										? tool.mcpServerName
+										: undefined,
+							},
+						];
+					}),
+					directToolNames: codeMode.directToolNames,
+				}),
+			);
+		} else {
+			this.#host.setCodeModeNamespacesInfo?.(undefined);
+		}
 		const previousMounted = new Set(this.#xdev?.mountedNames ?? []);
 		const previousActiveToolNames = this.getActiveToolNames();
+		const previousEnabledToolNames = this.#enabledToolNames;
+		this.#enabledToolNames = new Set([...validToolNames, ...mountNames]);
 		this.#setMountedNames(mountNames);
-		this.#setActiveToolNames?.(validToolNames);
+		this.#setActiveToolNames?.(codeMode.active ? this.#enabledToolNames : appliedNames);
 
 		let rebuiltSystemPrompt: string[] | undefined;
 		let rebuiltSignature: string | undefined;
 		let rebuiltXdevCatalogNames: readonly string[] | undefined;
 		try {
 			if (this.#rebuildSystemPrompt) {
-				const signature = this.#computeAppliedToolSignature(validToolNames, tools);
+				const signature = this.#computeAppliedToolSignature(appliedNames, appliedTools);
 				if (forcePromptRefresh || signature !== this.#lastAppliedToolSignature) {
-					const built = await untilAborted(signal, this.#rebuildSystemPrompt(validToolNames, this.#toolRegistry));
+					const built = await untilAborted(signal, this.#rebuildSystemPrompt(appliedNames, this.#toolRegistry));
 					rebuiltSystemPrompt = built.systemPrompt;
 					rebuiltSignature = signature;
 					rebuiltXdevCatalogNames = built.xdevCatalogNames;
@@ -821,17 +916,19 @@ export class SessionTools {
 		} catch (error) {
 			this.#setMountedNames(previousMounted);
 			this.#setActiveToolNames?.(previousActiveToolNames);
+			this.#enabledToolNames = previousEnabledToolNames;
 			throw error;
 		}
 
 		if (this.#host.isDisposed()) {
 			this.#setMountedNames(previousMounted);
 			this.#setActiveToolNames?.(previousActiveToolNames);
+			this.#enabledToolNames = previousEnabledToolNames;
 			return;
 		}
 
 		this.#notifyXdevMountDelta(previousMounted);
-		this.#host.agent.setTools(tools);
+		this.#host.agent.setTools(appliedTools);
 		if (rebuiltSystemPrompt && rebuiltSignature) {
 			if (this.#lastAppliedToolSignature !== undefined) this.#host.clearInheritedProviderPromptCacheKey();
 			this.#baseSystemPrompt = rebuiltSystemPrompt;

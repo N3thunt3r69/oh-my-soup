@@ -145,4 +145,32 @@ describe("callSessionTool", () => {
 
 		await expect(callSessionTool("missing", {}, { session })).rejects.toThrow("Unknown tool from js runtime");
 	});
+
+	it("executes the bridge-authorized tool instead of the raw registry tool", async () => {
+		const rawExecute = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "raw" }] });
+		const authorizedExecute = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "authorized" }] });
+		const session = {
+			...createSession([createTool("write", rawExecute)]),
+			getToolForEvalBridge: () => createTool("write", authorizedExecute),
+		};
+
+		const result = await callSessionTool("write", { path: "out.txt", content: "data" }, { session });
+
+		expect(result).toBe("authorized");
+		expect(authorizedExecute).toHaveBeenCalledTimes(1);
+		expect(rawExecute).not.toHaveBeenCalled();
+	});
+
+	it("rejects a registry tool excluded from the eval bridge", async () => {
+		const rawExecute = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "raw" }] });
+		const session = {
+			...createSession([createTool("write", rawExecute)]),
+			getToolForEvalBridge: () => undefined,
+		};
+
+		await expect(callSessionTool("write", { path: "out.txt", content: "data" }, { session })).rejects.toThrow(
+			"Unknown tool from js runtime",
+		);
+		expect(rawExecute).not.toHaveBeenCalled();
+	});
 });

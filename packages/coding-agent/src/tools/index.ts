@@ -267,6 +267,10 @@ export interface ToolSession {
 	getAgentId?: () => string | null;
 	/** Look up a registered tool by name (used by the eval js backend's tool bridge). */
 	getToolByName?: (name: string) => AgentTool | undefined;
+	/** Look up an enabled tool through the eval bridge's normal permission pipeline. */
+	getToolForEvalBridge?: (name: string) => AgentTool | undefined;
+	/** Names currently authorized for invocation through the eval bridge. */
+	getEvalBridgeToolNames?: () => readonly string[];
 	/** Return whether a built-in tool is active in this turn's tool set. */
 	isToolActive?: (name: string) => boolean;
 	/** Update the active built-in tool predicate when a session changes tools mid-run. */

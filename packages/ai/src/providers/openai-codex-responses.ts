@@ -521,10 +521,11 @@ const CODEX_RESERVED_METADATA_KEYS: Record<string, true> = {
 	[OPENAI_HEADERS.SUBAGENT]: true,
 	request_kind: true,
 	compaction: true,
-	// codex-rs reserves `code_mode_tool_names` for its Responses Lite Code Mode
-	// mapping (#35271); OMS never emits it, but callers must not smuggle it in
-	// as an extra either.
+	// codex-rs retired `code_mode_tool_names` in favor of `tool_namespaces_info`
+	// for its Responses Lite Code Mode mapping; both stay reserved so callers
+	// cannot smuggle them in as extras.
 	code_mode_tool_names: true,
+	tool_namespaces_info: true,
 	turn_started_at_unix_ms: true,
 	forked_from_thread_id: true,
 	parent_thread_id: true,
@@ -629,6 +630,7 @@ function createCodexRequestMetadata(
 		clientMetadata?: Readonly<Record<string, string>>;
 		parentTurnId?: string;
 		compaction?: CodexCompactionRequestContext;
+		toolNamespacesInfo?: unknown;
 	},
 ): CodexRequestMetadata {
 	if (options.startNewTurn || !session.turnId) {
@@ -666,6 +668,9 @@ function createCodexRequestMetadata(
 	}
 	if (session.turnStartedAtUnixMs !== undefined) {
 		turnMetadata.turn_started_at_unix_ms = session.turnStartedAtUnixMs;
+	}
+	if (options.toolNamespacesInfo !== undefined) {
+		turnMetadata.tool_namespaces_info = options.toolNamespacesInfo;
 	}
 	for (const key in extra) turnMetadata[key] = extra[key];
 	const turnMetadataJson = toAsciiJsonString(turnMetadata);
@@ -1477,6 +1482,7 @@ function createCodexRequestContext(
 		clientMetadata: transformedBody.client_metadata,
 		parentTurnId: options?.parentTurnId,
 		compaction,
+		toolNamespacesInfo: options?.toolNamespacesInfo,
 	});
 	transformedBody.client_metadata = requestMetadata.clientMetadata;
 	return {

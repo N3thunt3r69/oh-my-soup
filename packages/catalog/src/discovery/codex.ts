@@ -43,6 +43,7 @@ const codexModelEntrySchema = type({
 	"priority?": "unknown",
 	"prefer_websockets?": "unknown",
 	"use_responses_lite?": "unknown",
+	"tool_mode?": "unknown",
 });
 
 const codexModelsResponseSchema = type({
@@ -237,6 +238,7 @@ interface ParsedCodexModelEntry {
 	preferWebsockets: boolean;
 	useResponsesLite: boolean;
 	priority: number;
+	toolMode: boolean;
 }
 
 function parseCodexModelEntry(entry: unknown): ParsedCodexModelEntry | null {
@@ -257,6 +259,7 @@ function parseCodexModelEntry(entry: unknown): ParsedCodexModelEntry | null {
 		reasoning: supportsReasoning(payload.default_reasoning_level, payload.supported_reasoning_levels),
 		input: normalizeInputModalities(payload.input_modalities),
 		preferWebsockets: toBoolean(payload.prefer_websockets) === true,
+		toolMode: payload.tool_mode === "code_mode_only",
 		useResponsesLite: toBoolean(payload.use_responses_lite) === true,
 		priority: toFiniteNumber(payload.priority) ?? Number.MAX_SAFE_INTEGER,
 	};
@@ -297,6 +300,7 @@ function buildNormalizedCodexModel(
 			maxTokens,
 			...(parsed.preferWebsockets ? { preferWebsockets: true } : {}),
 			...(parsed.useResponsesLite ? { useResponsesLite: true } : {}),
+			...(parsed.toolMode ? { toolMode: "code_mode_only" as const } : {}),
 			...(parsed.priority !== Number.MAX_SAFE_INTEGER ? { priority: parsed.priority } : {}),
 		},
 	};
