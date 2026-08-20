@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `disasm open` appearing to hang or timing out on large existing IDA databases: managed IDALib workers now advertise loaded `.i64`/`.idb` targets without first draining the database's entire pending auto-analysis queue; raw input imports still wait for initial analysis.
+
 ## [17.3.2] - 2026-08-16
 
 ### Added

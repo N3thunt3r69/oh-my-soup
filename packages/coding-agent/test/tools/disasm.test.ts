@@ -9,6 +9,7 @@ import {
 } from "@oh-my-soup/pi-coding-agent/disasm";
 import type { ToolSession } from "@oh-my-soup/pi-coding-agent/sdk";
 import { DisasmTool } from "@oh-my-soup/pi-coding-agent/tools/disasm";
+import { patchIdalibRunnerAutoWait } from "../../scripts/generate-ida-bridge-bundle";
 
 interface WireRequest {
 	v?: unknown;
@@ -465,5 +466,31 @@ describe("disasm tool adapter boundary", () => {
 		} finally {
 			unregister();
 		}
+	});
+});
+
+describe("IDA bridge bundle generation", () => {
+	it("advertises an existing IDB without draining its pending auto-analysis queue", () => {
+		const upstream = [
+			"before",
+			"        # Wait for analysis before advertising ourselves to the bridge.",
+			'        log.info("waiting for auto-analysis: %s", idb_path)',
+			"        ida_auto.auto_wait()",
+			"after",
+		].join("\n");
+
+		expect(patchIdalibRunnerAutoWait(upstream)).toBe(
+			[
+				"before",
+				"        # Existing IDBs are queryable as soon as open_database() returns. Draining",
+				"        # a saved database's pending auto-analysis queue can take hours on large",
+				"        # IDBs and prevents the bridge from advertising the target meanwhile.",
+				"        # Raw inputs still require complete initial analysis before exposure.",
+				"        if args.input is not None:",
+				'            log.info("waiting for auto-analysis: %s", idb_path)',
+				"            ida_auto.auto_wait()",
+				"after",
+			].join("\n"),
+		);
 	});
 });
