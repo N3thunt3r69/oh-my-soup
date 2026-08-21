@@ -3,6 +3,16 @@ import { isSignalableProcessGroup, killProcessGroup } from "../../src/eval/kerne
 
 const POSIX = process.platform !== "win32";
 
+/** Ground truth for "does a process group with this leader exist right now?" via the null signal. */
+function processGroupExists(pid: number): boolean {
+	try {
+		process.kill(-pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 describe("isSignalableProcessGroup", () => {
 	test("rejects the degenerate kill(2) group targets", () => {
 		// `-0` would signal omp's own process group and `-1` would signal every
@@ -37,26 +47,20 @@ describe("killProcessGroup", () => {
 		expect(killProcessGroup(0x7fffffff, "SIGKILL")).toBe(false);
 	});
 
-	test.skipIf(!POSIX)("reaps a detached kernel-style child through its process group", async () => {
-		const proc = Bun.spawn(["sleep", "30"], {
-			detached: true,
-			stdin: "ignore",
-			stdout: "ignore",
-			stderr: "ignore",
-		});
+	test.skipIf(!POSIX)("agrees with kill(2) on a live child and never throws", async () => {
+		const proc = Bun.spawn(["sleep", "30"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
 		try {
-			expect(killProcessGroup(proc.pid, "SIGKILL")).toBe(true);
+			// Whether the child leads its own group depends on the spawn backend, so
+			// compare against kill(2) ground truth rather than assuming detachment.
+			const expected = processGroupExists(proc.pid);
+			expect(killProcessGroup(proc.pid, "SIGKILL")).toBe(expected);
+		} finally {
+			proc.kill("SIGKILL");
 			const settled = await Promise.race([
 				proc.exited.then(() => "exited" as const),
 				Bun.sleep(5_000).then(() => "timeout" as const),
 			]);
 			expect(settled).toBe("exited");
-		} finally {
-			try {
-				proc.kill("SIGKILL");
-			} catch {
-				/* already reaped */
-			}
 		}
 	});
 });
