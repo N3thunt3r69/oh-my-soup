@@ -6,6 +6,9 @@
 ### Fixed
 
 - Reviving a finished subagent with a `hub` message no longer overwrites its completed `agent://<id>` output with a "exited without calling yield" warning; revival/wake turns only rewrite the artifact when they produce a new `yield` result ([#9518](https://github.com/can1357/oh-my-pi/issues/9518)).
+### Fixed
+
+- Settings → Plugins tab no longer renders empty on first open of a fresh session; the async plugin list now schedules a repaint when it mounts ([#9526](https://github.com/can1357/oh-my-pi/issues/9526)).
 
 ## [18.0.3] - 2026-08-23
 
