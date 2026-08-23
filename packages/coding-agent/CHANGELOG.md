@@ -2,10 +2,12 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-23
+
 ### Added
 
 - Added `--history <directory>` (`-H`) as a directory-backed session history option; it stores the authoritative chat transcript and session data there.
-- Added `--stream <directory>` for local Unix-socket integration: `chat.sock` emits live JSONL chat events and `session.sock` starts with a session snapshot then emits every appended session entry.
+- Added `--stream <directory>` (`-S`) for local Unix-socket integration: `chat.sock` emits live JSONL chat events and `session.sock` starts with a session snapshot then emits every appended session entry.
 
 ### Fixed
 

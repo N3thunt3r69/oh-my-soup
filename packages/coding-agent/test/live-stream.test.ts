@@ -80,7 +80,10 @@ describe("--stream", () => {
 		const chat = await connect(stream.paths.chat);
 		const journal = await connect(stream.paths.session);
 
-		await expect(chat.reader.next()).resolves.toMatchObject({ type: "session", sessionId: sessionManager.getSessionId() });
+		await expect(chat.reader.next()).resolves.toMatchObject({
+			type: "session",
+			sessionId: sessionManager.getSessionId(),
+		});
 		await expect(journal.reader.next()).resolves.toMatchObject({
 			type: "session",
 			sessionId: sessionManager.getSessionId(),
