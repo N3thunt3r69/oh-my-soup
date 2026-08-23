@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `--history <directory>` (`-H`) as a directory-backed session history option; it stores the authoritative chat transcript and session data there.
+- Added `--stream <directory>` for local Unix-socket integration: `chat.sock` emits live JSONL chat events and `session.sock` starts with a session snapshot then emits every appended session entry.
+
 ### Fixed
 
 - Fixed `disasm open` appearing to hang or timing out on large existing IDA databases: managed IDALib workers now advertise loaded `.i64`/`.idb` targets without first draining the database's entire pending auto-analysis queue; raw input imports still wait for initial analysis.

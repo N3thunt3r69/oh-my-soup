@@ -87,6 +87,16 @@ const setResume: OptionalSetter = (result, value) => {
 	result.resume = value !== undefined ? value : true;
 };
 
+const setHistory: StringSetter = (result, value) => {
+	if (value.length === 0) throw new CliUsageError("--history requires a non-empty directory");
+	result.history = value;
+};
+
+const setStream: StringSetter = (result, value) => {
+	if (value.length === 0) throw new CliUsageError("--stream requires a non-empty directory");
+	result.stream = value;
+};
+
 const MAX_TIME_DURATION_RE = /^(\d+(?:\.\d+)?)([smh])$/;
 
 function maxTimeMultiplier(unit: string | undefined): number {
@@ -179,6 +189,10 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--session-dir": (result, value) => {
 		result.sessionDir = value;
 	},
+	"--history": setHistory,
+	"-H": setHistory,
+	"--stream": setStream,
+	"-S": setStream,
 	"--models": (result, value) => {
 		result.models = value.split(",").map(s => s.trim());
 	},

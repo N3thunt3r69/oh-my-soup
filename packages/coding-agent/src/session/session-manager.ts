@@ -460,6 +460,7 @@ export class SessionManager {
 	 * in-memory (pre-blob-externalization) entry, so inline images survive.
 	 */
 	onEntryAppended?: (entry: SessionEntry) => void;
+	#entryAppendedListeners = new Set<(entry: SessionEntry) => void>();
 
 	#turnBudgetTotal: number | null = null;
 	#turnBudgetHard = false;
@@ -1020,6 +1021,13 @@ export class SessionManager {
 				callback(entry);
 			} catch (err) {
 				logger.warn("collab entry hook failed", { error: String(err) });
+			}
+		}
+		for (const listener of this.#entryAppendedListeners) {
+			try {
+				listener(entry);
+			} catch (err) {
+				logger.warn("Session entry listener failed", { error: String(err) });
 			}
 		}
 	}
@@ -2375,6 +2383,11 @@ export class SessionManager {
 	/** All session entries (excludes header). Returns a shallow copy. */
 	getEntries(): SessionEntry[] {
 		return [...this.#entries];
+	}
+
+	subscribeToEntries(listener: (entry: SessionEntry) => void): () => void {
+		this.#entryAppendedListeners.add(listener);
+		return () => this.#entryAppendedListeners.delete(listener);
 	}
 
 	/**
