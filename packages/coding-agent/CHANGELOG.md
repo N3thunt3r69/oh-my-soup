@@ -68,6 +68,8 @@
 - Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
 - Fixed the browser tool's first `open` timing out after 30 s on a slow or cold host: tab startup now runs under its own budget inside the caller's timeout, falls back to the inline worker in time, and no longer leaves an orphan page behind ([#9271](https://github.com/can1357/oh-my-pi/pull/9271) by [@CaptainArni](https://github.com/CaptainArni))
 - Fixed eval kernel shutdown leaking detached runner descendants when direct-process termination could not confirm exit.
+## [17.3.3] - 2026-08-23
+- Subagent advisors now review the final `yield`: the yield turn is delivered to the advisor and its review is drained before the subagent session is disposed, instead of being abandoned at teardown ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
 
 ## [18.0.3] - 2026-08-23
 

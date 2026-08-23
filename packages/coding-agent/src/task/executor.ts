@@ -2468,6 +2468,15 @@ export async function finalizeSubagentLifecycle(args: {
 	const ownsRef = Boolean(ref && ref.session === args.session);
 	const cleanupDeadlineAt = args.cleanupDeadlineAt ?? Date.now() + 5000;
 	const disposeSession = async (): Promise<void> => {
+		// On a graceful finish (e.g. a `yield`) the advisor's review of the final
+		// turn was enqueued at turn end but may still be draining. Give it a
+		// chance to land in the transcript before the runtime is torn down —
+		// mirroring print mode's headless drain — bounded by the shared cleanup
+		// deadline. Hard aborts skip this to keep kill teardown fast.
+		if (!args.aborted) {
+			args.session.prepareForHeadlessAdvisorDrain();
+			await args.session.waitForAdvisorCatchup(Math.max(0, cleanupDeadlineAt - Date.now()));
+		}
 		const disposal = args.session.dispose();
 		const remainingMs = Math.max(0, cleanupDeadlineAt - Date.now());
 		try {
