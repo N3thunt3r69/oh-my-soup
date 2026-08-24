@@ -58,6 +58,8 @@ export interface Args {
 	mode?: Mode;
 	noSession?: boolean;
 	sessionDir?: string;
+	history?: string;
+	stream?: string;
 	providerSessionId?: string;
 	providerPromptCacheKey?: string;
 	fork?: string;

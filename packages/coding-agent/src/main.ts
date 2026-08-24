@@ -6,6 +6,7 @@
  */
 import * as fsSync from "node:fs";
 import * as os from "node:os";
+import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { EventLoopKeepalive } from "@oh-my-soup/pi-agent-core";
 import type { ImageContent } from "@oh-my-soup/pi-ai";
@@ -60,6 +61,7 @@ import { clearBootNotice } from "./launch/boot-notice";
 import { type DaemonProjectPresence, registerDaemonProjectPresence } from "./launch/presence";
 import type { MCPManager } from "./mcp";
 import { InteractiveMode } from "./modes/interactive-mode";
+import { LiveStream } from "./modes/live-stream";
 import type { PrintModeOptions } from "./modes/print-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
 import { CURRENT_SETUP_VERSION } from "./modes/setup-version";
@@ -1226,6 +1228,21 @@ export async function runRootCommand(
 
 	const parsedArgs = parsed;
 	await logger.time("applyStartupCwd", applyStartupCwd, parsedArgs);
+	if (parsedArgs.history) {
+		if (parsedArgs.noSession) {
+			process.stderr.write(`${chalk.red("Error: --history cannot be combined with --no-session")}\n`);
+			process.exit(1);
+		}
+		if (
+			parsedArgs.sessionDir &&
+			normalizePathForComparison(path.resolve(parsedArgs.history)) !==
+				normalizePathForComparison(path.resolve(parsedArgs.sessionDir))
+		) {
+			process.stderr.write(`${chalk.red("Error: --history cannot be combined with a different --session-dir")}\n`);
+			process.exit(1);
+		}
+		parsedArgs.sessionDir = parsedArgs.history;
+	}
 
 	const notifs: (InteractiveModeNotify | null)[] = [];
 
@@ -1254,6 +1271,10 @@ export async function runRootCommand(
 		process.exit(1);
 	}
 	const mode = parsedArgs.mode || "text";
+	if (parsedArgs.stream && mode === "acp") {
+		process.stderr.write(`${chalk.red("Error: --stream is not supported in ACP mode")}\n`);
+		process.exit(1);
+	}
 	// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
 	const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
 
@@ -1767,6 +1788,16 @@ export async function runRootCommand(
 			process.exit(1);
 		}
 
+		let liveStream: LiveStream | undefined;
+		if (parsedArgs.stream) {
+			liveStream = await LiveStream.create(parsedArgs.stream, session);
+		}
+		if (liveStream) {
+			const message = `Live stream: ${liveStream.paths.chat} (chat) · ${liveStream.paths.session} (session)`;
+			if (isInteractive) notifs.push({ kind: "info", message });
+			else process.stderr.write(`${message}\n`);
+		}
+
 		if (mode === "rpc" || mode === "rpc-ui") {
 			// Branch-only protocol runner: keep RPC host code out of normal interactive startup.
 			const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
@@ -1829,6 +1860,7 @@ export async function runRootCommand(
 			if ($env.PI_TIMING) {
 				logger.printTimings();
 			}
+			await liveStream?.close();
 			await session.dispose();
 			stopThemeWatcher();
 			await postmortem.quit(0);

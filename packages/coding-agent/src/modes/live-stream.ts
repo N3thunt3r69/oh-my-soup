@@ -1,0 +1,212 @@
+import * as fs from "node:fs/promises";
+import * as net from "node:net";
+import * as path from "node:path";
+import { isEnoent, logger } from "@oh-my-soup/pi-utils";
+import type { AgentSession } from "../session/agent-session";
+import { serializeAgentSessionEvent } from "../session/event-serialization";
+import type { SessionEntry, SessionHeader } from "../session/session-entries";
+
+const CHAT_SOCKET_NAME = "chat.sock";
+const SESSION_SOCKET_NAME = "session.sock";
+const MAX_CLIENT_BACKLOG_BYTES = 1024 * 1024;
+
+export type LiveStreamSession = Pick<AgentSession, "registerSessionChangeCallback" | "subscribe"> & {
+	sessionManager: {
+		getEntries(): SessionEntry[];
+		getHeader(): SessionHeader | null;
+		getSessionFile(): string | undefined;
+		getSessionId(): string;
+		subscribeToEntries(listener: (entry: SessionEntry) => void): () => void;
+	};
+};
+
+type StreamFrame = Record<string, unknown>;
+
+export interface LiveStreamPaths {
+	directory: string;
+	chat: string;
+	session: string;
+}
+
+export class LiveStream {
+	readonly paths: LiveStreamPaths;
+	readonly #session: LiveStreamSession;
+	#chatClients = new Set<net.Socket>();
+	#sessionClients = new Set<net.Socket>();
+	#chatServer: net.Server | undefined;
+	#sessionServer: net.Server | undefined;
+	#unsubscribeEvents: (() => void) | undefined;
+	#unsubscribeEntries: (() => void) | undefined;
+	#unsubscribeSessionChange: (() => void) | undefined;
+	#observedSessionId: string;
+	#closed = false;
+
+	constructor(directory: string, session: LiveStreamSession) {
+		this.#session = session;
+		this.#observedSessionId = session.sessionManager.getSessionId();
+		this.paths = {
+			directory,
+			chat: path.join(directory, CHAT_SOCKET_NAME),
+			session: path.join(directory, SESSION_SOCKET_NAME),
+		};
+	}
+
+	static async create(directory: string, session: LiveStreamSession): Promise<LiveStream> {
+		if (process.platform === "win32") {
+			throw new Error("--stream is not supported on Windows yet; it requires Unix-domain sockets.");
+		}
+		const resolvedDirectory = path.resolve(directory);
+		await fs.mkdir(resolvedDirectory, { recursive: true, mode: 0o700 });
+
+		const stream = new LiveStream(resolvedDirectory, session);
+		await stream.#start();
+		return stream;
+	}
+
+	async #start(): Promise<void> {
+		const entries = await fs.readdir(this.paths.directory);
+		if (entries.length > 0) {
+			throw new Error(`Stream directory must be empty: ${this.paths.directory}`);
+		}
+		try {
+			this.#chatServer = await listenSocket(this.paths.chat, socket => this.#acceptChat(socket));
+			this.#sessionServer = await listenSocket(this.paths.session, socket => this.#acceptSession(socket));
+			await Promise.all([fs.chmod(this.paths.chat, 0o600), fs.chmod(this.paths.session, 0o600)]);
+		} catch (error) {
+			await this.close();
+			throw error;
+		}
+
+		this.#unsubscribeEvents = this.#session.subscribe(event => {
+			this.#refreshSessionSnapshot();
+			this.#broadcast(this.#chatClients, { type: "event", event: serializeAgentSessionEvent(event) });
+		});
+		this.#unsubscribeEntries = this.#session.sessionManager.subscribeToEntries(entry => {
+			this.#refreshSessionSnapshot();
+			this.#broadcast(this.#sessionClients, { type: "entry", entry });
+		});
+		this.#unsubscribeSessionChange = this.#session.registerSessionChangeCallback(() => {
+			this.#refreshSessionSnapshot();
+		});
+	}
+
+	#acceptChat(socket: net.Socket): void {
+		this.#trackClient(this.#chatClients, socket);
+		this.#send(socket, {
+			type: "session",
+			sessionId: this.#session.sessionManager.getSessionId(),
+			sessionFile: this.#session.sessionManager.getSessionFile(),
+		});
+	}
+
+	#acceptSession(socket: net.Socket): void {
+		this.#trackClient(this.#sessionClients, socket);
+		this.#sendSessionSnapshot(socket);
+	}
+
+	#trackClient(clients: Set<net.Socket>, socket: net.Socket): void {
+		clients.add(socket);
+		const remove = (): void => {
+			clients.delete(socket);
+		};
+		socket.once("close", remove);
+		socket.once("error", remove);
+	}
+
+	#sendSessionSnapshot(socket: net.Socket): void {
+		this.#send(socket, {
+			type: "session",
+			sessionId: this.#session.sessionManager.getSessionId(),
+			sessionFile: this.#session.sessionManager.getSessionFile(),
+			header: this.#session.sessionManager.getHeader(),
+			entries: this.#session.sessionManager.getEntries(),
+		});
+	}
+
+	#broadcastSessionSnapshot(): void {
+		for (const socket of this.#sessionClients) this.#sendSessionSnapshot(socket);
+		for (const socket of this.#chatClients) {
+			this.#send(socket, {
+				type: "session",
+				sessionId: this.#session.sessionManager.getSessionId(),
+				sessionFile: this.#session.sessionManager.getSessionFile(),
+			});
+		}
+	}
+
+	#refreshSessionSnapshot(): void {
+		const sessionId = this.#session.sessionManager.getSessionId();
+		if (sessionId === this.#observedSessionId) return;
+		this.#observedSessionId = sessionId;
+		this.#broadcastSessionSnapshot();
+	}
+
+	#broadcast(clients: Set<net.Socket>, frame: StreamFrame): void {
+		for (const socket of clients) this.#send(socket, frame);
+	}
+
+	#send(socket: net.Socket, frame: StreamFrame): void {
+		if (socket.destroyed) return;
+		if (socket.writableLength > MAX_CLIENT_BACKLOG_BYTES) {
+			socket.destroy();
+			return;
+		}
+		try {
+			socket.write(`${JSON.stringify(frame)}\n`);
+		} catch (error) {
+			logger.debug("Live stream client write failed", { error: String(error) });
+			socket.destroy();
+		}
+	}
+
+	async close(): Promise<void> {
+		if (this.#closed) return;
+		this.#closed = true;
+		this.#unsubscribeEvents?.();
+		this.#unsubscribeEntries?.();
+		this.#unsubscribeSessionChange?.();
+		this.#unsubscribeEvents = undefined;
+		this.#unsubscribeEntries = undefined;
+		this.#unsubscribeSessionChange = undefined;
+		for (const client of this.#chatClients) client.destroy();
+		for (const client of this.#sessionClients) client.destroy();
+		this.#chatClients.clear();
+		this.#sessionClients.clear();
+		await Promise.all([closeServer(this.#chatServer), closeServer(this.#sessionServer)]);
+		this.#chatServer = undefined;
+		this.#sessionServer = undefined;
+		await Promise.all([removeSocket(this.paths.chat), removeSocket(this.paths.session)]);
+	}
+}
+
+async function removeSocket(socketPath: string): Promise<void> {
+	try {
+		await fs.unlink(socketPath);
+	} catch (error) {
+		if (isEnoent(error)) return;
+		throw error;
+	}
+}
+
+async function listenSocket(socketPath: string, onConnection: (socket: net.Socket) => void): Promise<net.Server> {
+	const server = net.createServer(onConnection);
+	const { promise, resolve, reject } = Promise.withResolvers<void>();
+	server.once("error", reject);
+	server.once("listening", resolve);
+	server.listen(socketPath);
+	try {
+		await promise;
+	} catch (error) {
+		server.close();
+		throw error;
+	}
+	server.on("error", error => logger.warn("Live stream socket server failed", { socketPath, error: String(error) }));
+	return server;
+}
+
+async function closeServer(server: net.Server | undefined): Promise<void> {
+	if (!server) return;
+	const { promise, resolve } = Promise.withResolvers<void>();
+	server.close(() => resolve());
+	await promise;
+}

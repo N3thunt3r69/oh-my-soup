@@ -5,10 +5,10 @@
  * - `oms -p "prompt"` - text output
  * - `oms --mode json "prompt"` - JSON event stream
  */
-import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
 import type { ImageContent } from "@oh-my-soup/pi-ai";
 import { logger, sanitizeText } from "@oh-my-soup/pi-utils";
-import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
+import { type AgentSession, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
+import { serializeAgentSessionEvent } from "../session/event-serialization";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
 import { initializeExtensions } from "./runtime-init";
@@ -36,53 +36,7 @@ export const PRINT_MODE_ADVISOR_DRAIN_TIMEOUT_MS = 10 * 60_000;
 /** Error exits cannot hold automation for the full normal drain budget. */
 export const PRINT_MODE_ERROR_ADVISOR_DRAIN_TIMEOUT_MS = 30_000;
 
-/** Drop the provider-opaque replay payload (e.g. encrypted reasoning items) before printing. */
-function stripProviderPayload<T extends AgentMessage>(message: T): T {
-	if (!("providerPayload" in message) || message.providerPayload === undefined) return message;
-	const { providerPayload: _providerPayload, ...rest } = message;
-	return rest as T;
-}
-
-/**
- * Shape an event for `--mode json` output.
- *
- * Removes two classes of bloat so transcripts grow linearly with conversation
- * size instead of quadratically (a single long turn used to re-serialize its
- * whole in-progress message on every streamed delta, producing multi-GB logs):
- * - `message_update` snapshots (`message`, `assistantMessageEvent.partial`,
- *   and the `done`/`error` payloads) are dropped; only the incremental delta
- *   is printed. The authoritative message follows in `message_end`.
- * - `providerPayload` is transport-native replay state, opaque and useless
- *   outside this process.
- */
-export function printableEvent(event: AgentSessionEvent): unknown {
-	switch (event.type) {
-		case "message_update": {
-			const streamEvent = event.assistantMessageEvent;
-			if (streamEvent.type === "done" || streamEvent.type === "error") {
-				return {
-					type: "message_update",
-					assistantMessageEvent: { type: streamEvent.type, reason: streamEvent.reason },
-				};
-			}
-			const { partial: _partial, ...rest } = streamEvent;
-			return { type: "message_update", assistantMessageEvent: rest };
-		}
-		case "message_start":
-		case "message_end":
-			return { ...event, message: stripProviderPayload(event.message) };
-		case "turn_end":
-			return {
-				...event,
-				message: stripProviderPayload(event.message),
-				toolResults: event.toolResults.map(stripProviderPayload),
-			};
-		case "agent_end":
-			return { ...event, messages: event.messages.map(stripProviderPayload) };
-		default:
-			return event;
-	}
-}
+export const printableEvent = serializeAgentSessionEvent;
 
 /**
  * Run in print (single-shot) mode.
