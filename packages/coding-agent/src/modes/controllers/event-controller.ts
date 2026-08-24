@@ -829,7 +829,7 @@ export class EventController {
 			// still removable, and finalize it regardless so it can retire.
 			const abandoned = this.ctx.streamingComponent;
 			if (abandoned) {
-				if (this.ctx.chatContainer.canRemoveBlock(abandoned)) {
+				if (this.ctx.chatContainer.isBlockUncommitted(abandoned)) {
 					this.ctx.chatContainer.removeChild(abandoned);
 				}
 				abandoned.markTranscriptBlockFinalized();

@@ -76,7 +76,7 @@
     },
     "packages/coding-agent": {
       "name": "@oh-my-soup/pi-coding-agent",
-      "version": "17.3.2",
+      "version": "17.3.3",
       "bin": {
         "oms": "src/cli.ts",
       },
@@ -357,7 +357,7 @@
     "@oh-my-soup/pi-agent-core": "17.3.2",
     "@oh-my-soup/pi-ai": "17.3.2",
     "@oh-my-soup/pi-catalog": "17.3.2",
-    "@oh-my-soup/pi-coding-agent": "17.3.2",
+    "@oh-my-soup/pi-coding-agent": "17.3.3",
     "@oh-my-soup/pi-mnemopi": "17.3.2",
     "@oh-my-soup/pi-natives": "17.3.2",
     "@oh-my-soup/pi-tui": "17.3.2",

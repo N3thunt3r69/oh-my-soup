@@ -1,4 +1,4 @@
-import * as fs from "node:fs/promises";
+import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-soup/pi-utils";
@@ -38,6 +38,18 @@ export class LiveStream {
 	#unsubscribeEvents: (() => void) | undefined;
 	#unsubscribeEntries: (() => void) | undefined;
 	#unsubscribeSessionChange: (() => void) | undefined;
+	// Async teardown cannot run from process.exit(); unlinking the bound paths
+	// synchronously prevents normal CLI exits from stranding unusable sockets.
+	readonly #cleanupSocketFilesOnExit = (): void => {
+		for (const socketPath of [this.paths.chat, this.paths.session]) {
+			try {
+				fs.unlinkSync(socketPath);
+			} catch {
+				// Exit is already committed. Forced termination can still leave a
+				// stale path, but cleanup errors must not replace the real exit code.
+			}
+		}
+	};
 	#observedSessionId: string;
 	#closed = false;
 
@@ -56,7 +68,7 @@ export class LiveStream {
 			throw new Error("--stream is not supported on Windows yet; it requires Unix-domain sockets.");
 		}
 		const resolvedDirectory = path.resolve(directory);
-		await fs.mkdir(resolvedDirectory, { recursive: true, mode: 0o700 });
+		await fs.promises.mkdir(resolvedDirectory, { recursive: true, mode: 0o700 });
 
 		const stream = new LiveStream(resolvedDirectory, session);
 		await stream.#start();
@@ -64,30 +76,32 @@ export class LiveStream {
 	}
 
 	async #start(): Promise<void> {
-		const entries = await fs.readdir(this.paths.directory);
+		const entries = await fs.promises.readdir(this.paths.directory);
 		if (entries.length > 0) {
 			throw new Error(`Stream directory must be empty: ${this.paths.directory}`);
 		}
+		await fs.promises.chmod(this.paths.directory, 0o700);
 		try {
 			this.#chatServer = await listenSocket(this.paths.chat, socket => this.#acceptChat(socket));
 			this.#sessionServer = await listenSocket(this.paths.session, socket => this.#acceptSession(socket));
-			await Promise.all([fs.chmod(this.paths.chat, 0o600), fs.chmod(this.paths.session, 0o600)]);
+			await Promise.all([fs.promises.chmod(this.paths.chat, 0o600), fs.promises.chmod(this.paths.session, 0o600)]);
+
+			this.#unsubscribeEvents = this.#session.subscribe(event => {
+				this.#refreshSessionSnapshot();
+				this.#broadcast(this.#chatClients, { type: "event", event: serializeAgentSessionEvent(event) });
+			});
+			this.#unsubscribeEntries = this.#session.sessionManager.subscribeToEntries(entry => {
+				this.#refreshSessionSnapshot();
+				this.#broadcast(this.#sessionClients, { type: "entry", entry });
+			});
+			this.#unsubscribeSessionChange = this.#session.registerSessionChangeCallback(() => {
+				this.#refreshSessionSnapshot();
+			});
+			process.once("exit", this.#cleanupSocketFilesOnExit);
 		} catch (error) {
 			await this.close();
 			throw error;
 		}
-
-		this.#unsubscribeEvents = this.#session.subscribe(event => {
-			this.#refreshSessionSnapshot();
-			this.#broadcast(this.#chatClients, { type: "event", event: serializeAgentSessionEvent(event) });
-		});
-		this.#unsubscribeEntries = this.#session.sessionManager.subscribeToEntries(entry => {
-			this.#refreshSessionSnapshot();
-			this.#broadcast(this.#sessionClients, { type: "entry", entry });
-		});
-		this.#unsubscribeSessionChange = this.#session.registerSessionChangeCallback(() => {
-			this.#refreshSessionSnapshot();
-		});
 	}
 
 	#acceptChat(socket: net.Socket): void {
@@ -147,12 +161,13 @@ export class LiveStream {
 
 	#send(socket: net.Socket, frame: StreamFrame): void {
 		if (socket.destroyed) return;
-		if (socket.writableLength > MAX_CLIENT_BACKLOG_BYTES) {
-			socket.destroy();
-			return;
-		}
 		try {
-			socket.write(`${JSON.stringify(frame)}\n`);
+			const payload = `${JSON.stringify(frame)}\n`;
+			if (socket.writableLength + Buffer.byteLength(payload) > MAX_CLIENT_BACKLOG_BYTES) {
+				socket.destroy();
+				return;
+			}
+			socket.write(payload);
 		} catch (error) {
 			logger.debug("Live stream client write failed", { error: String(error) });
 			socket.destroy();
@@ -162,6 +177,7 @@ export class LiveStream {
 	async close(): Promise<void> {
 		if (this.#closed) return;
 		this.#closed = true;
+		process.removeListener("exit", this.#cleanupSocketFilesOnExit);
 		this.#unsubscribeEvents?.();
 		this.#unsubscribeEntries?.();
 		this.#unsubscribeSessionChange?.();
@@ -181,7 +197,7 @@ export class LiveStream {
 
 async function removeSocket(socketPath: string): Promise<void> {
 	try {
-		await fs.unlink(socketPath);
+		await fs.promises.unlink(socketPath);
 	} catch (error) {
 		if (isEnoent(error)) return;
 		throw error;
@@ -205,7 +221,7 @@ async function listenSocket(socketPath: string, onConnection: (socket: net.Socke
 }
 
 async function closeServer(server: net.Server | undefined): Promise<void> {
-	if (!server) return;
+	if (!server?.listening) return;
 	const { promise, resolve } = Promise.withResolvers<void>();
 	server.close(() => resolve());
 	await promise;

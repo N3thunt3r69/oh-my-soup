@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fast tool completions no longer leave a running summary that blocks transcript retirement and squeezes later tool output.
+- Reviving a finished subagent with a `hub` message no longer overwrites its completed `agent://<id>` output with an "exited without calling yield" warning; revival turns only rewrite the artifact when they produce a new `yield` result ([#9518](https://github.com/can1357/oh-my-pi/issues/9518)).
+- Settings → Plugins no longer renders empty on first open; the async plugin list schedules a repaint when it mounts ([#9526](https://github.com/can1357/oh-my-pi/issues/9526)).
+- An orphaned streaming block no longer jams transcript retirement after a stream dies mid-message.
+- Pending streamed-edit verification is reset before asynchronous session events so a stale check cannot abort a later turn.
+- Subagent advisors now review and drain the final `yield` before the subagent session is disposed ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
+- `--stream` now secures existing stream directories before binding, accounts for the pending frame in its client backlog limit, and removes Unix socket paths during normal process exit.
+
 ## [17.3.3] - 2026-08-23
 ### Fixed
 

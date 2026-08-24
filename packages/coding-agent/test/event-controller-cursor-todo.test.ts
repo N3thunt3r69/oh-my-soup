@@ -65,8 +65,8 @@ function createFixture(): Fixture {
 function expectRetirableResult(block: unknown): void {
 	const transcript = new TranscriptContainer();
 	transcript.addChild(block as Component);
-	const batch = transcript.peekFinalizedBatch(80, 0);
-	const retired = Bun.stripANSI(batch?.rows.join("\n") ?? "");
+	const batch = transcript.render(80);
+	const retired = Bun.stripANSI(batch.join("\n"));
 	expect(retired).toContain("done");
 	expect(retired).not.toContain("running");
 }
