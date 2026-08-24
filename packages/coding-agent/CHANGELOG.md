@@ -10,6 +10,8 @@
 - An orphaned streaming block no longer jams transcript retirement after a stream dies mid-message.
 - Pending streamed-edit verification is reset before asynchronous session events so a stale check cannot abort a later turn.
 - Subagent advisors now review and drain the final `yield` before the subagent session is disposed ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
+- A bare `hub wait` now consumes mail already queued from a peer before checking whether any peers or jobs are still running.
+- POSIX eval-kernel shutdown now escalates to the detached process group so child processes cannot survive the runner.
 - `--stream` now secures existing stream directories before binding, accounts for the pending frame in its client backlog limit, and removes Unix socket paths during normal process exit.
 
 ## [17.3.3] - 2026-08-23
