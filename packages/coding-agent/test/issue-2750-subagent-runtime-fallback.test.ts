@@ -53,6 +53,7 @@ function createYieldingSession(fallback: "served" | "unproven" = "served"): Agen
 			listeners.push(listener);
 			return () => {};
 		},
+		subscribeRunState: () => () => {},
 		prompt: async () => {
 			// Broadcast per event, not per subscriber: every observer must see the
 			// same session state at the same point in the sequence.
@@ -79,6 +80,8 @@ function createYieldingSession(fallback: "served" | "unproven" = "served"): Agen
 			});
 		},
 		waitForIdle: async () => {},
+		prepareForHeadlessAdvisorDrain: () => {},
+		waitForAdvisorCatchup: async () => {},
 		getLastAssistantMessage: () => undefined,
 		abort: async () => {},
 		dispose: async () => {},
