@@ -86,7 +86,9 @@ describe("createSessionManager — cross-project --resume", () => {
 
 		if (!result) throw new Error("Expected resumed session manager");
 		try {
-			expect(result.getSessionFile()).toBe(match.session.path);
+			expect(normalizePathForComparison(result.getSessionFile()!)).toBe(
+				normalizePathForComparison(match.session.path),
+			);
 			expect(result.getCwd()).toBe(existingProject);
 		} finally {
 			await result.close();
