@@ -360,7 +360,7 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 
 		const exited = this.#waitForExitWithTimeout(timeoutMs);
 		let result = await exited;
-		if (!result) {
+		if (result === null) {
 			try {
 				proc.kill("SIGTERM");
 			} catch {
@@ -371,7 +371,7 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 			killProcessGroup(proc.pid, "SIGTERM");
 			result = await this.#waitForExitWithTimeout(timeoutMs);
 		}
-		if (!result) {
+		if (result === null) {
 			try {
 				proc.kill("SIGKILL");
 			} catch {
@@ -381,7 +381,7 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 			result = await this.#waitForExitWithTimeout(timeoutMs);
 		}
 
-		const confirmed = !!result;
+		const confirmed = result !== null;
 		if (!confirmed) {
 			// Nothing acknowledged the exit. Record the pid so an operator can find
 			// the survivor; the group SIGKILL above is our last automatic recourse.

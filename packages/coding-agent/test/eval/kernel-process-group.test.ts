@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import { isSignalableProcessGroup, killProcessGroup } from "../../src/eval/kernel-base";
+import { describe, expect, mock, test } from "bun:test";
+import type { Subprocess } from "bun";
+import { BaseKernel, isSignalableProcessGroup, killProcessGroup } from "../../src/eval/kernel-base";
 
 const POSIX = process.platform !== "win32";
 
@@ -12,6 +13,45 @@ function processGroupExists(pid: number): boolean {
 		return false;
 	}
 }
+
+class TestKernel extends BaseKernel {
+	constructor() {
+		super("test-kernel", {
+			languageName: "Test",
+			traceIpc: false,
+			exitPayload: "{}",
+			interruptEscalationMs: 1,
+			shutdownGraceMs: 1,
+			buildPayload: () => "{}",
+		});
+	}
+}
+
+test("treats graceful exit code zero as a confirmed shutdown", async () => {
+	const kill = mock(() => {});
+	const closedStream = () =>
+		new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.close();
+			},
+		});
+	const kernel = new TestKernel();
+	kernel.setProcess({
+		pid: 0x7fffffff,
+		stdin: {
+			write: mock(() => 0),
+			flush: mock(() => {}),
+			end: mock(() => {}),
+		},
+		stdout: closedStream(),
+		stderr: closedStream(),
+		exited: Promise.resolve(0),
+		kill,
+	} as unknown as Subprocess<"pipe", "pipe", "pipe">);
+
+	await expect(kernel.shutdown({ timeoutMs: 0 })).resolves.toEqual({ confirmed: true });
+	expect(kill).not.toHaveBeenCalled();
+});
 
 describe("isSignalableProcessGroup", () => {
 	test("rejects the degenerate kill(2) group targets", () => {

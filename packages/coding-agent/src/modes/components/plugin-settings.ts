@@ -586,6 +586,7 @@ class ConfigInputSubmenu extends Container {
 export interface PluginSettingsCallbacks {
 	onClose: () => void;
 	onPluginChanged: () => void | Promise<void>;
+	requestRender?: () => void;
 }
 
 /** Component with handleInput method */

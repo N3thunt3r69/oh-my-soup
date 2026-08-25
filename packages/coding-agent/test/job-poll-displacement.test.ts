@@ -237,6 +237,39 @@ describe("EventController displaces consecutive waiting polls", () => {
 		expect(first.isTranscriptBlockFinalized()).toBe(true);
 	});
 
+	it("displaces a waiting poll whose completion arrived before its streamed block", async () => {
+		const { controller, children } = createFixture();
+
+		await controller.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: "t1",
+			toolName: "hub",
+			result: pollResult(["running", "running"]),
+			isError: false,
+		});
+		expect(children).toHaveLength(0);
+
+		await controller.handleEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "hub",
+			args: { op: "wait", ids: ["j0"] },
+		});
+		const first = trackComponent(created, children[children.length - 1] as ToolExecutionComponent);
+		expect(first.isDisplaceableBlock()).toBe(true);
+
+		await controller.handleEvent({
+			type: "tool_execution_start",
+			toolCallId: "t2",
+			toolName: "hub",
+			args: { op: "wait", ids: ["j0"] },
+		});
+		trackComponent(created, children[children.length - 1] as ToolExecutionComponent);
+
+		expect(children).not.toContain(first);
+		expect(first.isTranscriptBlockFinalized()).toBe(true);
+	});
+
 	it("seals the waiting poll in place when a different tool runs next", async () => {
 		const { controller, children } = createFixture();
 

@@ -142,6 +142,33 @@ describe("EventController async update finalization", () => {
 		expect(component.isTranscriptBlockFinalized()).toBe(true);
 	});
 
+	it("keeps a held background completion tracked for later job updates", async () => {
+		const { controller, pendingTools } = createFixture();
+
+		// Packed provider chunks can deliver the synchronous end callback before
+		// the streamed tool block. A running task must still park the late-created
+		// card instead of finalizing and untracking it as an ordinary completion.
+		await controller.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: "tc-task",
+			toolName: "task",
+			result: taskResult("running", "Spawned agent `Job1` (job `Job1`)."),
+			isError: false,
+		});
+		const component = await startTask(controller, pendingTools);
+		expect(pendingTools.get("tc-task")).toBe(component);
+
+		await controller.handleEvent({
+			type: "tool_execution_update",
+			toolCallId: "tc-task",
+			toolName: "task",
+			args: {},
+			partialResult: taskResult("completed", "Background task Job1 complete."),
+		});
+		expect(pendingTools.has("tc-task")).toBe(false);
+		expect(component.isTranscriptBlockFinalized()).toBe(true);
+	});
+
 	it("finalizes a backgrounded Bash block without tracking later job updates", async () => {
 		const { controller, pendingTools } = createFixture();
 		await controller.handleEvent({

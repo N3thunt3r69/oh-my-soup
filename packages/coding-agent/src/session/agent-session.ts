@@ -3652,7 +3652,6 @@ export class AgentSession {
 		this.#runStateListeners.add(listener);
 		return () => this.#runStateListeners.delete(listener);
 	}
-
 	/** Register a callback that runs after this AgentSession commits replacement session state. */
 	registerSessionChangeCallback(callback: () => void): () => void {
 		this.#sessionChangeCallbacks.add(callback);
@@ -7880,9 +7879,7 @@ export class AgentSession {
 				this.#advisors.restoreCost(await loadAdvisorTranscriptCosts(this.sessionFile));
 			}
 			this.#bash.finishSessionTransition(bashTransition, true);
-			if (previousSessionState.sessionId !== this.sessionManager.getSessionId()) {
-				this.#notifySessionChangeCallbacks();
-			}
+			this.#notifySessionChangeCallbacks();
 			return true;
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);

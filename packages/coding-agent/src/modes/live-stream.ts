@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-soup/pi-utils";
+import { isEnoent, logger, postmortem, stringifyJson } from "@oh-my-soup/pi-utils";
 import type { AgentSession } from "../session/agent-session";
 import { serializeAgentSessionEvent } from "../session/event-serialization";
 import type { SessionEntry, SessionHeader } from "../session/session-entries";
@@ -38,10 +38,12 @@ export class LiveStream {
 	#unsubscribeEvents: (() => void) | undefined;
 	#unsubscribeEntries: (() => void) | undefined;
 	#unsubscribeSessionChange: (() => void) | undefined;
+	readonly #ownedSocketPaths = new Set<string>();
+	#cancelPostmortemCleanup: (() => void) | undefined;
 	// Async teardown cannot run from process.exit(); unlinking the bound paths
 	// synchronously prevents normal CLI exits from stranding unusable sockets.
 	readonly #cleanupSocketFilesOnExit = (): void => {
-		for (const socketPath of [this.paths.chat, this.paths.session]) {
+		for (const socketPath of this.#ownedSocketPaths) {
 			try {
 				fs.unlinkSync(socketPath);
 			} catch {
@@ -82,8 +84,12 @@ export class LiveStream {
 		}
 		await fs.promises.chmod(this.paths.directory, 0o700);
 		try {
+			this.#cancelPostmortemCleanup = postmortem.register(`live-stream:${this.paths.directory}`, () => this.close());
+			process.once("exit", this.#cleanupSocketFilesOnExit);
 			this.#chatServer = await listenSocket(this.paths.chat, socket => this.#acceptChat(socket));
+			this.#ownedSocketPaths.add(this.paths.chat);
 			this.#sessionServer = await listenSocket(this.paths.session, socket => this.#acceptSession(socket));
+			this.#ownedSocketPaths.add(this.paths.session);
 			await Promise.all([fs.promises.chmod(this.paths.chat, 0o600), fs.promises.chmod(this.paths.session, 0o600)]);
 
 			this.#unsubscribeEvents = this.#session.subscribe(event => {
@@ -91,13 +97,13 @@ export class LiveStream {
 				this.#broadcast(this.#chatClients, { type: "event", event: serializeAgentSessionEvent(event) });
 			});
 			this.#unsubscribeEntries = this.#session.sessionManager.subscribeToEntries(entry => {
-				this.#refreshSessionSnapshot();
-				this.#broadcast(this.#sessionClients, { type: "entry", entry });
+				if (!this.#refreshSessionSnapshot()) {
+					this.#broadcast(this.#sessionClients, { type: "entry", entry });
+				}
 			});
 			this.#unsubscribeSessionChange = this.#session.registerSessionChangeCallback(() => {
-				this.#refreshSessionSnapshot();
+				this.#refreshSessionSnapshot(true);
 			});
-			process.once("exit", this.#cleanupSocketFilesOnExit);
 		} catch (error) {
 			await this.close();
 			throw error;
@@ -148,11 +154,12 @@ export class LiveStream {
 		}
 	}
 
-	#refreshSessionSnapshot(): void {
+	#refreshSessionSnapshot(force = false): boolean {
 		const sessionId = this.#session.sessionManager.getSessionId();
-		if (sessionId === this.#observedSessionId) return;
+		if (!force && sessionId === this.#observedSessionId) return false;
 		this.#observedSessionId = sessionId;
 		this.#broadcastSessionSnapshot();
+		return true;
 	}
 
 	#broadcast(clients: Set<net.Socket>, frame: StreamFrame): void {
@@ -162,8 +169,11 @@ export class LiveStream {
 	#send(socket: net.Socket, frame: StreamFrame): void {
 		if (socket.destroyed) return;
 		try {
-			const payload = `${JSON.stringify(frame)}\n`;
-			if (socket.writableLength + Buffer.byteLength(payload) > MAX_CLIENT_BACKLOG_BYTES) {
+			const payload = `${stringifyJson(frame) ?? "null"}\n`;
+			if (
+				socket.writableLength > 0 &&
+				socket.writableLength + Buffer.byteLength(payload) > MAX_CLIENT_BACKLOG_BYTES
+			) {
 				socket.destroy();
 				return;
 			}
@@ -177,7 +187,6 @@ export class LiveStream {
 	async close(): Promise<void> {
 		if (this.#closed) return;
 		this.#closed = true;
-		process.removeListener("exit", this.#cleanupSocketFilesOnExit);
 		this.#unsubscribeEvents?.();
 		this.#unsubscribeEntries?.();
 		this.#unsubscribeSessionChange?.();
@@ -188,10 +197,15 @@ export class LiveStream {
 		for (const client of this.#sessionClients) client.destroy();
 		this.#chatClients.clear();
 		this.#sessionClients.clear();
+		const ownedSocketPaths = [...this.#ownedSocketPaths];
 		await Promise.all([closeServer(this.#chatServer), closeServer(this.#sessionServer)]);
 		this.#chatServer = undefined;
 		this.#sessionServer = undefined;
-		await Promise.all([removeSocket(this.paths.chat), removeSocket(this.paths.session)]);
+		await Promise.all(ownedSocketPaths.map(removeSocket));
+		for (const socketPath of ownedSocketPaths) this.#ownedSocketPaths.delete(socketPath);
+		process.removeListener("exit", this.#cleanupSocketFilesOnExit);
+		this.#cancelPostmortemCleanup?.();
+		this.#cancelPostmortemCleanup = undefined;
 	}
 }
 

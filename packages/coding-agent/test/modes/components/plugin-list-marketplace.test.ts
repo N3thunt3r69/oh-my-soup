@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it, spyOn } from "bun:test";
 import * as os from "node:os";
 import { stripVTControlCharacters } from "node:util";
+import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import { PluginManager } from "@oh-my-soup/pi-coding-agent/extensibility/plugins";
 import {
 	type InstalledPluginSummary,
@@ -13,6 +14,7 @@ import {
 	type PluginListEntry,
 	PluginSettingsComponent,
 } from "@oh-my-soup/pi-coding-agent/modes/components/plugin-settings";
+import { SettingsSelectorComponent } from "@oh-my-soup/pi-coding-agent/modes/components/settings-selector";
 import { initTheme } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 
 beforeAll(async () => {
@@ -190,7 +192,9 @@ describe("PluginSettingsComponent", () => {
 		}
 	});
 
-	it("schedules a render frame once the async plugin list mounts", async () => {
+	it("schedules a render frame once the production plugins tab mounts its async list", async () => {
+		resetSettingsForTest();
+		await Settings.init({ inMemory: true });
 		const npmListSpy = spyOn(PluginManager.prototype, "list").mockResolvedValue([]);
 		const listInstalledSpy = spyOn(MarketplaceManager.prototype, "listInstalledPlugins").mockResolvedValue([
 			marketplace("late@mkt"),
@@ -199,24 +203,37 @@ describe("PluginSettingsComponent", () => {
 		try {
 			const mounted = Promise.withResolvers<void>();
 			let renders = 0;
-			const component = new PluginSettingsComponent(process.cwd(), {
-				onClose: () => {},
-				onPluginChanged: () => {},
-				requestRender: () => {
-					renders++;
-					mounted.resolve();
+			let selector: SettingsSelectorComponent | undefined;
+			selector = new SettingsSelectorComponent(
+				{
+					availableThinkingLevels: [],
+					thinkingLevel: undefined,
+					availableThemes: ["dark"],
+					providers: [],
+					cwd: process.cwd(),
+					requestRender: () => {
+						renders++;
+						const frame = stripVTControlCharacters(selector?.render(120).join("\n") ?? "");
+						if (frame.includes("late@mkt")) mounted.resolve();
+					},
 				},
-			});
+				{
+					onChange: () => {},
+					onCancel: () => {},
+				},
+			);
+			// Plugins follows the ten settings tabs. Exercise the production
+			// SettingsSelector → PluginSettings callback wiring, not a direct
+			// component construction that can hide an unwired caller.
+			for (let i = 0; i < 10; i++) selector.handleInput("\x1b[C");
 
-			// No manual render() poll: the real TUI only repaints when the
-			// component asks for a frame. Without requestRender the list stays
-			// blank until an unrelated event forces a redraw (reopening /settings).
 			await mounted.promise;
 			expect(renders).toBeGreaterThanOrEqual(1);
-			expect(stripVTControlCharacters(component.render(120).join("\n"))).toContain("late@mkt");
+			expect(stripVTControlCharacters(selector.render(120).join("\n"))).toContain("late@mkt");
 		} finally {
 			npmListSpy.mockRestore();
 			listInstalledSpy.mockRestore();
+			resetSettingsForTest();
 		}
 	});
 

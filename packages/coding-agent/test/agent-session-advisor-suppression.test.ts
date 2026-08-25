@@ -229,8 +229,8 @@ describe("AgentSession advisor auto-resume suppression", () => {
 		};
 	}
 
-	function isAdvisorCard(message: AgentMessage): boolean {
-		return message.role === "custom" && (message as { customType?: string }).customType === ADVISOR_TYPE;
+	function isAdvisorCard(message: AgentMessage): message is Extract<AgentMessage, { role: "custom" }> {
+		return message.role === "custom" && message.customType === ADVISOR_TYPE;
 	}
 
 	function userMessageText(messages: AgentMessage[]): string[] {

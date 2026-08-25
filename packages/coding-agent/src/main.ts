@@ -1234,6 +1234,7 @@ export async function runRootCommand(
 			process.exit(1);
 		}
 		if (
+			parsedArgs.sessionDirExplicit &&
 			parsedArgs.sessionDir &&
 			normalizePathForComparison(path.resolve(parsedArgs.history)) !==
 				normalizePathForComparison(path.resolve(parsedArgs.sessionDir))
@@ -1271,6 +1272,12 @@ export async function runRootCommand(
 		process.exit(1);
 	}
 	const mode = parsedArgs.mode || "text";
+	if (parsedArgs.stream && process.platform === "win32") {
+		process.stderr.write(
+			`${chalk.red("Error: --stream is not supported on Windows yet; it requires Unix-domain sockets.")}\n`,
+		);
+		process.exit(1);
+	}
 	if (parsedArgs.stream && mode === "acp") {
 		process.stderr.write(`${chalk.red("Error: --stream is not supported in ACP mode")}\n`);
 		process.exit(1);
@@ -1790,7 +1797,18 @@ export async function runRootCommand(
 
 		let liveStream: LiveStream | undefined;
 		if (parsedArgs.stream) {
-			liveStream = await LiveStream.create(parsedArgs.stream, session);
+			try {
+				liveStream = await LiveStream.create(parsedArgs.stream, session);
+			} catch (error) {
+				try {
+					await session.dispose();
+				} catch (disposeError) {
+					logger.warn("Failed to dispose session after live stream startup error", {
+						error: String(disposeError),
+					});
+				}
+				throw error;
+			}
 		}
 		if (liveStream) {
 			const message = `Live stream: ${liveStream.paths.chat} (chat) · ${liveStream.paths.session} (session)`;

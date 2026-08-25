@@ -73,8 +73,12 @@ describe("--session-dir", () => {
 		const previous = Bun.env.PI_CODING_AGENT_SESSION_DIR;
 		Bun.env.PI_CODING_AGENT_SESSION_DIR = "/env/sessions";
 		try {
-			expect(parseArgs([]).sessionDir).toBe("/env/sessions");
-			expect(parseArgs(["--session-dir", "/cli/sessions"]).sessionDir).toBe("/cli/sessions");
+			const inherited = parseArgs([]);
+			expect(inherited.sessionDir).toBe("/env/sessions");
+			expect(inherited.sessionDirExplicit).toBeUndefined();
+			const explicit = parseArgs(["--session-dir", "/cli/sessions"]);
+			expect(explicit.sessionDir).toBe("/cli/sessions");
+			expect(explicit.sessionDirExplicit).toBe(true);
 		} finally {
 			if (previous === undefined) {
 				delete Bun.env.PI_CODING_AGENT_SESSION_DIR;

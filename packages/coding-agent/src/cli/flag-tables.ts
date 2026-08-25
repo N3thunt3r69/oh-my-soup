@@ -188,6 +188,7 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	},
 	"--session-dir": (result, value) => {
 		result.sessionDir = value;
+		result.sessionDirExplicit = true;
 	},
 	"--history": setHistory,
 	"-H": setHistory,

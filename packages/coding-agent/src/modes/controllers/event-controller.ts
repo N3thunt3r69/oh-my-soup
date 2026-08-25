@@ -1471,25 +1471,31 @@ export class EventController {
 		component: ToolExecutionHandle,
 		event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>,
 	): void {
-		component.updateResult({ ...event.result, isError: event.isError }, false, event.toolCallId);
-		this.ctx.pendingTools.delete(event.toolCallId);
-		if (
-			component instanceof ToolExecutionComponent &&
-			component.isDisplaceableBlock() &&
-			event.toolName === "todo" &&
-			component.canBeDisplacedBy("todo")
-		) {
-			// Mirrors the displacement bookkeeping in `#handleToolExecutionEnd`:
-			// a successful snapshot supersedes the previous live panel.
-			const previous = this.#displaceableTodoComponent;
-			if (previous && previous !== component && previous.isDisplaceableBlock()) {
-				this.#displaceableTodoComponent = undefined;
-				if (this.ctx.chatContainer.isBlockUncommitted(previous)) {
-					this.ctx.chatContainer.removeChild(previous);
+		const asyncState = (event.result.details as { async?: { state?: string } } | undefined)?.async?.state;
+		const isBackgroundTask = event.toolName === "task" && asyncState === "running";
+		component.updateResult({ ...event.result, isError: event.isError }, isBackgroundTask, event.toolCallId);
+		if (isBackgroundTask) {
+			this.#backgroundTaskCallIds.add(event.toolCallId);
+		} else {
+			this.ctx.pendingTools.delete(event.toolCallId);
+			this.#backgroundTaskCallIds.delete(event.toolCallId);
+		}
+		if (component instanceof ToolExecutionComponent && component.isDisplaceableBlock()) {
+			if (event.toolName === "hub" && component.canBeDisplacedBy("hub")) {
+				this.#displaceablePollComponent = component;
+			} else if (event.toolName === "todo" && component.canBeDisplacedBy("todo")) {
+				// Mirrors the displacement bookkeeping in `#handleToolExecutionEnd`:
+				// a successful snapshot supersedes the previous live panel.
+				const previous = this.#displaceableTodoComponent;
+				if (previous && previous !== component && previous.isDisplaceableBlock()) {
+					this.#displaceableTodoComponent = undefined;
+					if (this.ctx.chatContainer.isBlockUncommitted(previous)) {
+						this.ctx.chatContainer.removeChild(previous);
+					}
+					previous.seal();
 				}
-				previous.seal();
+				this.#displaceableTodoComponent = component;
 			}
-			this.#displaceableTodoComponent = component;
 		}
 		this.ctx.ui.requestRender();
 	}
@@ -1725,11 +1731,12 @@ export class EventController {
 			this.ctx.loadingAnimation = undefined;
 			this.ctx.statusContainer.disposeChildren();
 		}
-		if (this.ctx.streamingComponent) {
-			this.ctx.chatContainer.removeChild(this.ctx.streamingComponent);
-			// Removal is refused for blocks already offered/committed to history;
-			// finalize so a kept block can never jam transcript retirement.
-			this.ctx.streamingComponent.markTranscriptBlockFinalized();
+		const abandoned = this.ctx.streamingComponent;
+		if (abandoned) {
+			if (this.ctx.chatContainer.isBlockUncommitted(abandoned)) {
+				this.ctx.chatContainer.removeChild(abandoned);
+			}
+			abandoned.markTranscriptBlockFinalized();
 			this.ctx.streamingComponent = undefined;
 			this.ctx.streamingMessage = undefined;
 		}

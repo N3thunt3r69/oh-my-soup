@@ -58,6 +58,8 @@ export interface Args {
 	mode?: Mode;
 	noSession?: boolean;
 	sessionDir?: string;
+	/** True when argv, rather than PI_CODING_AGENT_SESSION_DIR, supplied sessionDir. */
+	sessionDirExplicit?: boolean;
 	history?: string;
 	stream?: string;
 	providerSessionId?: string;
