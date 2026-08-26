@@ -9,6 +9,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { $env, $which, getPythonEnvDir } from "@oh-my-soup/pi-utils";
 
+const SYSTEM_PYTHON_COMMANDS = [
+	"python",
+	"python3",
+	"python3.15",
+	"python3.14",
+	"python3.13",
+	"python3.12",
+	"python3.11",
+	"python3.10",
+];
+
 const DEFAULT_ENV_ALLOWLIST = new Set([
 	"PATH",
 	"HOME",
@@ -254,7 +265,9 @@ export function enumeratePythonRuntimes(cwd: string, baseEnv: Record<string, str
 		});
 	}
 
-	const systemPath = $which("python") ?? $which("python3");
+	const systemPath = SYSTEM_PYTHON_COMMANDS.map(command => $which(command)).find(
+		(candidate): candidate is string => candidate !== null,
+	);
 	if (systemPath) {
 		push({ pythonPath: systemPath, env: { ...baseEnv } });
 	}

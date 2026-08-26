@@ -3,7 +3,6 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getGlobalDaemonRuntimeDir, isEexist, isEnoent, logger, postmortem } from "@oh-my-soup/pi-utils";
-import { hostHasInheritableConsole } from "../eval/py/spawn-options";
 import { resolveWorkerSpawnCmd, workerEnvFromParent } from "../subprocess/worker-client";
 import { daemonBrokerEndpoint, daemonRuntimeDir } from "./paths";
 import {
@@ -18,15 +17,16 @@ import {
 	parseDaemonRpcResult,
 	parseDaemonWireMessage,
 } from "./protocol";
-import { resolveDaemonSpawnOptions } from "./spawn-options";
+import type { DaemonSpawnOptions } from "./spawn-options";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const CONNECT_RETRY_MS = 50;
 const TOKEN_FILE = "broker.token";
-const BROKER_SPAWN_OPTIONS = resolveDaemonSpawnOptions({
-	platform: process.platform,
-	hostHasInheritableConsole: hostHasInheritableConsole(),
-});
+// A broker is a cross-process lease holder, not a managed command. It must
+// outlive the client that won the spawn race; hide its detached console on
+// Windows instead of applying the managed-daemon console inheritance policy.
+const BROKER_SPAWN_OPTIONS: DaemonSpawnOptions =
+	process.platform === "win32" ? { detached: true, windowsHide: true } : { detached: true };
 
 interface PendingRequest {
 	operation: DaemonOperation;

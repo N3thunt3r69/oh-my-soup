@@ -23,7 +23,7 @@ import {
 import { buildExperimentState } from "../state";
 import { openAutoresearchStorageIfExists } from "../storage";
 import type { AutoresearchToolFactoryOptions, RunDetails, RunExperimentProgressDetails } from "../types";
-import { DEFAULT_HARNESS_COMMAND } from "./init-experiment";
+import { DEFAULT_HARNESS_COMMAND, HARNESS_FILENAME } from "./init-experiment";
 
 const runExperimentSchema = type({
 	"timeout_seconds?": type("number").describe("timeout in seconds (default 600)"),
@@ -42,6 +42,14 @@ interface ProgressSnapshot {
 	fullOutputPath: string;
 	tailOutput: string;
 	truncation?: RunExperimentProgressDetails["truncation"];
+}
+
+function resolveHarnessExecutionCommand(): string {
+	if (process.platform !== "win32") return DEFAULT_HARNESS_COMMAND;
+	// System32\bash.exe exists even when WSL is unavailable. Keep the canonical
+	// command in session state, but let the bundled shell run the harness in an
+	// isolated subshell instead of handing it to that unusable launcher.
+	return `( . ./${HARNESS_FILENAME} )`;
 }
 
 export function createRunExperimentTool(
@@ -116,7 +124,7 @@ export function createRunExperimentTool(
 			let execution: ProcessExecutionResult;
 			try {
 				execution = await executeProcess({
-					command: resolvedCommand,
+					command: resolveHarnessExecutionCommand(),
 					cwd: ctx.cwd,
 					logPath: benchmarkLogPath,
 					timeoutMs,

@@ -445,46 +445,49 @@ describe("DAP launch failure handling", () => {
 		}
 	});
 
-	it("kills the detached adapter process when it never dials back on the TCP client-addr path", async () => {
-		const originalPlatform = process.platform;
-		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
-		try {
-			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "oms-debug-tcp-leak-"));
+	it.skipIf(process.platform === "win32")(
+		"kills the detached adapter process when it never dials back on the TCP client-addr path",
+		async () => {
+			const originalPlatform = process.platform;
+			Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 			try {
-				const adapterPath = path.join(cwd, "wedged-tcp-adapter.mjs");
-				const pidFilePath = path.join(cwd, "adapter.pid");
-				await fs.writeFile(
-					adapterPath,
-					`await Bun.write(${JSON.stringify(pidFilePath)}, String(process.pid));\nawait Bun.sleep(60_000);\n`,
-				);
-				const adapter: DapResolvedAdapter = {
-					...TEST_ADAPTER,
-					name: "wedged-tcp-adapter",
-					command: process.execPath,
-					args: [adapterPath],
-					resolvedCommand: process.execPath,
-					connectMode: "socket",
-				};
-				await expect(DapClient.spawn({ adapter, cwd, socketReadyTimeoutMs: 300 })).rejects.toThrow(
-					/did not connect within/,
-				);
-				await Bun.sleep(500);
-				const adapterPid = Number(await Bun.file(pidFilePath).text());
-				expect(Number.isFinite(adapterPid)).toBe(true);
-				let alive = true;
+				const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "oms-debug-tcp-leak-"));
 				try {
-					process.kill(adapterPid, 0);
-				} catch {
-					alive = false;
+					const adapterPath = path.join(cwd, "wedged-tcp-adapter.mjs");
+					const pidFilePath = path.join(cwd, "adapter.pid");
+					await fs.writeFile(
+						adapterPath,
+						`await Bun.write(${JSON.stringify(pidFilePath)}, String(process.pid));\nawait Bun.sleep(60_000);\n`,
+					);
+					const adapter: DapResolvedAdapter = {
+						...TEST_ADAPTER,
+						name: "wedged-tcp-adapter",
+						command: process.execPath,
+						args: [adapterPath],
+						resolvedCommand: process.execPath,
+						connectMode: "socket",
+					};
+					await expect(DapClient.spawn({ adapter, cwd, socketReadyTimeoutMs: 300 })).rejects.toThrow(
+						/did not connect within/,
+					);
+					await Bun.sleep(500);
+					const adapterPid = Number(await Bun.file(pidFilePath).text());
+					expect(Number.isFinite(adapterPid)).toBe(true);
+					let alive = true;
+					try {
+						process.kill(adapterPid, 0);
+					} catch {
+						alive = false;
+					}
+					expect(alive).toBe(false);
+				} finally {
+					await removeWithRetries(cwd);
 				}
-				expect(alive).toBe(false);
 			} finally {
-				await removeWithRetries(cwd);
+				Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
 			}
-		} finally {
-			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
-		}
-	});
+		},
+	);
 });
 
 describe("connectSocket unix transport", () => {
@@ -504,7 +507,7 @@ describe("connectSocket unix transport", () => {
 	});
 });
 
-describe("DAP TCP transport resilience", () => {
+describe.skipIf(process.platform === "win32")("DAP TCP transport resilience", () => {
 	const TCP_ADAPTER_BASE: DapResolvedAdapter = {
 		...TEST_ADAPTER,
 		name: "js-debug-adapter",

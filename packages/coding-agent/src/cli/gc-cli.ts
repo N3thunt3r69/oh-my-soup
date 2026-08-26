@@ -151,8 +151,7 @@ function numberSetting(value: number | undefined, fallback: unknown, defaultValu
 async function resolveOptions(flags: GcCommandFlags): Promise<ResolvedGcOptions> {
 	const agentDir = path.resolve(flags.agentDir ?? getAgentDir());
 	const selected = flags.blobs === true || flags.archive === true || flags.wal === true;
-	const settings =
-		flags.apply === true ? await Settings.loadIsolated({ agentDir }) : await Settings.loadReadOnly({ agentDir });
+	const settings = await Settings.loadReadOnly({ agentDir });
 	const getBoolean = (pathKey: "gc.blobs" | "gc.archive" | "gc.wal") => settings.get(pathKey);
 	const getNumber = (pathKey: "gc.coldArchiveAfterDays" | "gc.retainNewestGlobal" | "gc.retainNewestPerCwd") =>
 		settings.get(pathKey);
@@ -550,15 +549,23 @@ function sqliteNumber(value: number | bigint | null | undefined): number {
 }
 
 function tableExists(db: Database, table: string): boolean {
-	const row = db
-		.prepare("SELECT 1 AS present FROM sqlite_master WHERE type IN ('table','view') AND name = ?")
-		.get(table) as { present?: number } | null;
-	return row?.present === 1;
+	const statement = db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type IN ('table','view') AND name = ?");
+	try {
+		const row = statement.get(table) as { present?: number } | null;
+		return row?.present === 1;
+	} finally {
+		statement.finalize();
+	}
 }
 
 function historyHasSessionId(db: Database): boolean {
-	const rows = db.prepare("PRAGMA table_info(history)").all() as Array<{ name?: string | null }>;
-	return rows.some(row => row.name === "session_id");
+	const statement = db.prepare("PRAGMA table_info(history)");
+	try {
+		const rows = statement.all() as Array<{ name?: string | null }>;
+		return rows.some(row => row.name === "session_id");
+	} finally {
+		statement.finalize();
+	}
 }
 
 function deleteHistoryRowsForSessions(dbPath: string, sessionIds: string[]): { deleted: number; ftsRebuilt: boolean } {
@@ -570,16 +577,20 @@ function deleteHistoryRowsForSessions(dbPath: string, sessionIds: string[]): { d
 		if (!historyHasSessionId(db)) return { deleted: 0, ftsRebuilt: false };
 		const hasFts = tableExists(db, "history_fts");
 		const deleteStmt = db.prepare("DELETE FROM history WHERE session_id = ?");
-		let deleted = 0;
-		const tx = db.transaction((ids: string[]) => {
-			for (const id of ids) {
-				const result = deleteStmt.run(id) as SqliteRunResult;
-				deleted += sqliteNumber(result.changes);
-			}
-			if (deleted > 0 && hasFts) db.run("INSERT INTO history_fts(history_fts) VALUES('rebuild')");
-		});
-		tx(sessionIds);
-		return { deleted, ftsRebuilt: deleted > 0 && hasFts };
+		try {
+			let deleted = 0;
+			const tx = db.transaction((ids: string[]) => {
+				for (const id of ids) {
+					const result = deleteStmt.run(id) as SqliteRunResult;
+					deleted += sqliteNumber(result.changes);
+				}
+				if (deleted > 0 && hasFts) db.run("INSERT INTO history_fts(history_fts) VALUES('rebuild')");
+			});
+			tx(sessionIds);
+			return { deleted, ftsRebuilt: deleted > 0 && hasFts };
+		} finally {
+			deleteStmt.finalize();
+		}
 	} finally {
 		db.close();
 	}
@@ -687,19 +698,27 @@ function statsIdentityKeys(identities: Record<StatsEntryTable, StatsEntryIdentit
 }
 
 function tableHasColumn(db: Database, table: string, column: string): boolean {
-	const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string | null }>;
-	return rows.some(row => row.name === column);
+	const statement = db.prepare(`PRAGMA table_info(${table})`);
+	try {
+		const rows = statement.all() as Array<{ name?: string | null }>;
+		return rows.some(row => row.name === column);
+	} finally {
+		statement.finalize();
+	}
 }
 
 function collectStoredStatsSessionPaths(db: Database): string[] {
 	const sessionPaths = new Set<string>();
 	for (const table of STATS_SESSION_TABLES) {
 		if (!tableExists(db, table) || !tableHasColumn(db, table, "session_file")) continue;
-		const rows = db.prepare(`SELECT DISTINCT session_file FROM ${table}`).all() as Array<{
-			session_file?: string | null;
-		}>;
-		for (const row of rows) {
-			if (typeof row.session_file === "string") sessionPaths.add(row.session_file);
+		const statement = db.prepare(`SELECT DISTINCT session_file FROM ${table}`);
+		try {
+			const rows = statement.all() as Array<{ session_file?: string | null }>;
+			for (const row of rows) {
+				if (typeof row.session_file === "string") sessionPaths.add(row.session_file);
+			}
+		} finally {
+			statement.finalize();
 		}
 	}
 	return [...sessionPaths];
@@ -1074,42 +1093,49 @@ function reconcileStatsRowsForSessions(dbPath: string, plans: StatsCleanupPlan[]
 			statement: db.prepare(`DELETE FROM ${table} WHERE session_file = ? OR instr(session_file, ?) = 1`),
 		}));
 		let deleted = 0;
-		const tx = db.transaction((cleanupPlans: StatsCleanupPlan[]) => {
-			for (const plan of cleanupPlans) {
-				if (plan.preserveAll) continue;
-				clearRetainedEntries.run();
-				for (const target of plan.transfers) {
-					for (const table of entryTables) {
-						for (const identity of target.identities[table]) {
-							insertRetainedEntry.run(
-								table,
-								identity.entryId,
-								identity.timestamp,
-								identity.toolCallId,
-								target.path,
-							);
+		try {
+			const tx = db.transaction((cleanupPlans: StatsCleanupPlan[]) => {
+				for (const plan of cleanupPlans) {
+					if (plan.preserveAll) continue;
+					clearRetainedEntries.run();
+					for (const target of plan.transfers) {
+						for (const table of entryTables) {
+							for (const identity of target.identities[table]) {
+								insertRetainedEntry.run(
+									table,
+									identity.entryId,
+									identity.timestamp,
+									identity.toolCallId,
+									target.path,
+								);
+							}
+						}
+					}
+					for (const sessionPath of new Set(plan.sessionPaths)) {
+						for (const statement of transferStatements) statement.run(sessionPath);
+					}
+					for (const sessionPath of new Set(plan.sessionPaths)) {
+						const nestedPrefix = `${sessionArtifactsPath(sessionPath)}${path.sep}`;
+						for (const { table, statement } of deletionStatements) {
+							const requiresTransfer =
+								plan.retainedSessions.length > 0 &&
+								table !== "file_offsets" &&
+								!entryTables.some(entryTable => entryTable === table);
+							if (requiresTransfer) continue;
+							const result = statement.run(sessionPath, nestedPrefix) as SqliteRunResult;
+							deleted += sqliteNumber(result.changes);
 						}
 					}
 				}
-				for (const sessionPath of new Set(plan.sessionPaths)) {
-					for (const statement of transferStatements) statement.run(sessionPath);
-				}
-				for (const sessionPath of new Set(plan.sessionPaths)) {
-					const nestedPrefix = `${sessionArtifactsPath(sessionPath)}${path.sep}`;
-					for (const { table, statement } of deletionStatements) {
-						const requiresTransfer =
-							plan.retainedSessions.length > 0 &&
-							table !== "file_offsets" &&
-							!entryTables.some(entryTable => entryTable === table);
-						if (requiresTransfer) continue;
-						const result = statement.run(sessionPath, nestedPrefix) as SqliteRunResult;
-						deleted += sqliteNumber(result.changes);
-					}
-				}
-			}
-		});
-		tx(plans);
-		return deleted;
+			});
+			tx(plans);
+			return deleted;
+		} finally {
+			clearRetainedEntries.finalize();
+			insertRetainedEntry.finalize();
+			for (const statement of transferStatements) statement.finalize();
+			for (const { statement } of deletionStatements) statement.finalize();
+		}
 	} finally {
 		db.close();
 	}
@@ -1308,11 +1334,16 @@ async function checkpointWal(dbPath: string, apply: boolean): Promise<WalCheckpo
 	let checkpointAttempted = false;
 	try {
 		db.run("PRAGMA busy_timeout = 5000");
-		const row = db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as WalCheckpointRow | null;
-		checkpointAttempted = true;
-		result.busy = sqliteNumber(row?.busy);
-		result.log = sqliteNumber(row?.log);
-		result.checkpointedFrames = sqliteNumber(row?.checkpointed);
+		const statement = db.prepare("PRAGMA wal_checkpoint(TRUNCATE)");
+		try {
+			const row = statement.get() as WalCheckpointRow | null;
+			checkpointAttempted = true;
+			result.busy = sqliteNumber(row?.busy);
+			result.log = sqliteNumber(row?.log);
+			result.checkpointedFrames = sqliteNumber(row?.checkpointed);
+		} finally {
+			statement.finalize();
+		}
 	} finally {
 		db.close();
 	}

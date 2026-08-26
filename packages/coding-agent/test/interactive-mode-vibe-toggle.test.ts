@@ -58,18 +58,14 @@ class ExitFaultStorage extends FileSessionStorage {
 		return { started: started.promise, release: release.resolve };
 	}
 
-	override async readTextSlices(
-		filePath: string,
-		prefixBytes: number,
-		suffixBytes: number,
-	): Promise<[string, string]> {
+	override async readText(filePath: string): Promise<string> {
 		const gate = this.#readGate;
 		if (gate?.filePath === filePath) {
 			this.#readGate = undefined;
 			gate.started.resolve();
 			await gate.release.promise;
 		}
-		return super.readTextSlices(filePath, prefixBytes, suffixBytes);
+		return super.readText(filePath);
 	}
 
 	override async writeTextAtomic(filePath: string, content: string, options?: WriteTextAtomicOptions): Promise<void> {

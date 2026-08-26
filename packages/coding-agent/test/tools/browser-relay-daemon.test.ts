@@ -16,6 +16,64 @@ async function waitUntil(condition: () => boolean | Promise<boolean>, timeoutMs:
 }
 
 describe("browser relay daemon", () => {
+	it("bypasses HTTP_PROXY when probing the loopback relay", async () => {
+		let relayHits = 0;
+		let proxyHits = 0;
+		const relay = Bun.serve({
+			port: 0,
+			fetch: () => {
+				relayHits++;
+				return new Response("waiting", { status: 503 });
+			},
+		});
+		const proxy = Bun.serve({
+			port: 0,
+			fetch: () => {
+				proxyHits++;
+				return new Response("Bad Gateway", { status: 502 });
+			},
+		});
+		const child = Bun.spawn(
+			[
+				process.execPath,
+				"-e",
+				`import { probeRelayServer } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/tools/browser/relay/daemon.ts"))};
+const url = Bun.env.OMS_TEST_RELAY_URL;
+if (!url) throw new Error("missing relay URL");
+process.stdout.write(String(await probeRelayServer(url)));`,
+			],
+			{
+				env: {
+					...process.env,
+					HTTP_PROXY: `http://127.0.0.1:${proxy.port}`,
+					http_proxy: `http://127.0.0.1:${proxy.port}`,
+					NO_PROXY: "",
+					no_proxy: "",
+					OMS_TEST_RELAY_URL: `http://127.0.0.1:${relay.port}`,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		try {
+			const [exitCode, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			expect(stderr).toBe("");
+			expect(exitCode).toBe(0);
+			expect(stdout).toBe("true");
+			expect(relayHits).toBe(1);
+			expect(proxyHits).toBe(0);
+		} finally {
+			if (child.exitCode === null) child.kill();
+			await child.exited;
+			await relay.stop(true);
+			await proxy.stop(true);
+		}
+	});
+
 	it("stays alive while a consumer in another project holds the global broker lease", async () => {
 		const home = await fs.mkdtemp(path.join(os.tmpdir(), "oms-relay-global-"));
 		const firstProject = path.join(home, "project-a");
@@ -30,6 +88,7 @@ describe("browser relay daemon", () => {
 			scriptPath,
 			`
 import { closeDaemonClients } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/launch/client.ts"))};
+import { getGlobalDaemonRuntimeDir } from ${JSON.stringify(path.resolve(import.meta.dir, "../../../utils/src/dirs.ts"))};
 import { ensureRelayDaemon } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/tools/browser/relay/daemon.ts"))};
 
 const cdpUrl = process.env.OMS_TEST_RELAY_URL;
@@ -37,7 +96,7 @@ const marker = process.env.OMS_TEST_READY_MARKER;
 if (!cdpUrl || !marker) throw new Error("relay consumer environment is incomplete");
 try {
 	if (!(await ensureRelayDaemon({ cdpUrl }))) throw new Error("relay did not start");
-	await Bun.write(marker, "ready");
+	await Bun.write(marker, getGlobalDaemonRuntimeDir("browser-relay"));
 	const stopped = Promise.withResolvers<void>();
 	process.stdin.once("end", () => stopped.resolve());
 	process.stdin.resume();
@@ -69,17 +128,21 @@ try {
 		const first = spawnConsumer(firstProject, "profile-a", firstMarker);
 		try {
 			expect(await waitUntil(() => Bun.file(firstMarker).exists(), 15_000)).toBeTrue();
+			expect(await Bun.file(firstMarker).text()).toBe(globalRuntimeDir);
 			expect(await probeRelayServer(cdpUrl)).toBeTrue();
 
 			const second = spawnConsumer(secondProject, "profile-b", secondMarker);
 			try {
 				expect(await waitUntil(() => Bun.file(secondMarker).exists(), 15_000)).toBeTrue();
+				expect(second.exitCode).toBeNull();
 				first.stdin.end();
+				expect(await Bun.file(secondMarker).text()).toBe(globalRuntimeDir);
 				const firstExit = await first.exited;
 				if (firstExit !== 0) throw new Error(await new Response(first.stderr).text());
 
 				// The global broker's real idle clock must pass while the second client remains connected.
 				await Bun.sleep(500);
+				expect(second.exitCode).toBeNull();
 				expect(await probeRelayServer(cdpUrl)).toBeTrue();
 
 				second.stdin.end();

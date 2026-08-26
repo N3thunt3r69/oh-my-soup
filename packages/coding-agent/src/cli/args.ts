@@ -6,7 +6,7 @@ import { $env, APP_NAME, logger } from "@oh-my-soup/pi-utils";
 import chalk from "@oh-my-soup/pi-utils/chalk";
 import type { ServiceTierOpenAISettingValue } from "../config/service-tier";
 import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "../thinking";
-import { BUILTIN_TOOL_NAMES, HIDDEN_TOOL_NAMES, normalizeToolNames } from "../tools/builtin-names";
+import { normalizeToolNames } from "../tools/builtin-names";
 import {
 	OPTIONAL_FLAGS,
 	OPTIONAL_VALUE_FLAGS,
@@ -112,7 +112,6 @@ export interface Args {
 const PARSE_DEPS: ParseDeps = {
 	logger,
 	parseThinking: parseCliThinkingLevel,
-	builtinToolNames: [...BUILTIN_TOOL_NAMES, ...HIDDEN_TOOL_NAMES],
 	normalizeToolNames,
 	thinkingEfforts: CLI_THINKING_LEVELS,
 };
@@ -334,6 +333,17 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 	}
 
 	return result;
+}
+
+/** Reject requested tool names absent from the fully discovered session registry. */
+export function validateToolNames(requested: readonly string[] | undefined, known: readonly string[]): void {
+	if (!requested) return;
+	const knownNames = new Set(known);
+	const unknown = requested.filter(name => !knownNames.has(name));
+	if (unknown.length === 0) return;
+	throw new CliUsageError(
+		`Unknown tool${unknown.length === 1 ? "" : "s"} in --tools: ${unknown.join(", ")}. Valid tools: ${known.join(", ")}.`,
+	);
 }
 
 /**

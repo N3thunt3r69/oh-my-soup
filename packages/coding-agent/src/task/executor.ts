@@ -6,9 +6,9 @@
 
 import path from "node:path";
 import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-soup/pi-agent-core";
-import { recordHandoff, resolveTelemetry } from "@oh-my-soup/pi-agent-core";
+import { EventLoopKeepalive, recordHandoff, resolveTelemetry } from "@oh-my-soup/pi-agent-core";
 import type { Api, Model, ServiceTierByFamily, Usage } from "@oh-my-soup/pi-ai";
-import { logger, popLoopPhase, prompt, pushLoopPhase, untilAborted } from "@oh-my-soup/pi-utils";
+import { logger, popLoopPhase, prompt, pushLoopPhase, withTimeout } from "@oh-my-soup/pi-utils";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobManager } from "../async";
 import type { Rule } from "../capability/rule";
 import { ModelRegistry } from "../config/model-registry";
@@ -35,6 +35,7 @@ import type { HindsightSessionState } from "../hindsight/state";
 import type { LocalProtocolOptions } from "../internal-urls";
 import type { MCPManager } from "../mcp/manager";
 import type { MnemopiSessionState } from "../mnemopi/state";
+import { initializeExtensions } from "../modes/runtime-init";
 import subagentAsyncPendingTemplate from "../prompts/system/subagent-async-pending.md" with { type: "text" };
 import subagentSystemPromptTemplate from "../prompts/system/subagent-system-prompt.md" with { type: "text" };
 import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md" with { type: "text" };
@@ -1887,6 +1888,7 @@ async function driveSessionToYield(
 	monitor: SubagentRunMonitor,
 	task: string,
 ): Promise<DriveOutcome> {
+	using _keepalive = new EventLoopKeepalive();
 	const abortSignal = monitor.abortSignal;
 	let exitCode = 0;
 	let error: string | undefined;
@@ -2474,13 +2476,15 @@ export async function finalizeSubagentLifecycle(args: {
 		// mirroring print mode's headless drain — bounded by the shared cleanup
 		// deadline. Hard aborts skip this to keep kill teardown fast.
 		if (!args.aborted) {
-			args.session.prepareForHeadlessAdvisorDrain();
-			await args.session.waitForAdvisorCatchup(Math.max(0, cleanupDeadlineAt - Date.now()));
+			// Optional-chained because executor tests and embedders may provide a
+			// partial AgentSession cleanup surface.
+			args.session.prepareForHeadlessAdvisorDrain?.();
+			await args.session.waitForAdvisorCatchup?.(Math.max(0, cleanupDeadlineAt - Date.now()));
 		}
 		const disposal = args.session.dispose();
 		const remainingMs = Math.max(0, cleanupDeadlineAt - Date.now());
 		try {
-			await untilAborted(AbortSignal.timeout(remainingMs), () => disposal);
+			await withTimeout(disposal, remainingMs, "Subagent session cleanup timed out");
 		} catch (error) {
 			if (Date.now() >= cleanupDeadlineAt) {
 				args.onCleanupDeferred?.(disposal);
@@ -2490,6 +2494,22 @@ export async function finalizeSubagentLifecycle(args: {
 				id: args.id,
 				error: error instanceof Error ? error.message : String(error),
 			});
+		}
+	};
+	const releaseWithinDeadline = async (options?: { tombstone?: boolean }): Promise<void> => {
+		const completion = AgentLifecycleManager.global()
+			.release(args.id, ref, options)
+			.then(() => {});
+		try {
+			await withTimeout(completion, Math.max(0, cleanupDeadlineAt - Date.now()), "Subagent release timed out");
+		} catch (error) {
+			if (Date.now() >= cleanupDeadlineAt) {
+				// Lifecycle release already owns the live session. Let it finish
+				// out-of-band instead of starting a competing dispose.
+				args.onCleanupDeferred?.(completion);
+				return;
+			}
+			throw error;
 		}
 	};
 
@@ -2503,7 +2523,7 @@ export async function finalizeSubagentLifecycle(args: {
 		if (ref && ownsRef) {
 			if (args.abortKind === "shutdown") {
 				try {
-					await AgentLifecycleManager.global().release(args.id, ref);
+					await releaseWithinDeadline();
 				} catch (error) {
 					logger.warn("runSubagent: failed to release session during manager shutdown", {
 						id: args.id,
@@ -2517,7 +2537,7 @@ export async function finalizeSubagentLifecycle(args: {
 				// decision is durable and a restart cannot rediscover the transcript
 				// as a revivable parked agent.
 				try {
-					await AgentLifecycleManager.global().release(args.id, ref, { tombstone: true });
+					await releaseWithinDeadline({ tombstone: true });
 				} catch (error) {
 					logger.warn("runSubagent: failed to persist kill tombstone", { id: args.id, error: String(error) });
 					registry.setStatus(args.id, "aborted", ref);
@@ -2660,7 +2680,7 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 		outcome = await driveSessionToYield(session, monitor, message);
 	} finally {
 		try {
-			await untilAborted(AbortSignal.timeout(5000), () => monitor.waitForActiveSessionAbort());
+			await withTimeout(monitor.waitForActiveSessionAbort(), 5000, "Subagent abort cleanup timed out");
 		} catch {
 			// Ignore abort cleanup timeouts; the session stays adopted either way.
 		}
@@ -3228,6 +3248,16 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					const { session: revived } = await createAgentSession(
 						buildSubagentSessionOptions(reopened, expectedAgentRef),
 					);
+					// Re-run the executor's extension wiring on the rebuilt session.
+					// Skipping it leaves the runner pre-init, so a `tool_call` handler
+					// touching a runtime action trips the fail-closed gate and blocks
+					// every tool (including `yield`) in the revived agent (issue #8824).
+					await initializeExtensions(revived, {
+						reportSendError: (action, err) =>
+							logger.error("Extension send failed", { action, error: err.message }),
+						reportRuntimeError: err =>
+							logger.error("Extension error", { path: err.extensionPath, error: err.error }),
+					});
 					AgentRegistry.global().syncSessionStatus(id, revived);
 					installIrcWakeTurnMonitor(revived);
 					return revived;
@@ -3406,9 +3436,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			sessionAbortController.abort();
 			const activeSessionAbort = monitor.waitForActiveSessionAbort();
 			try {
-				await untilAborted(
-					AbortSignal.timeout(Math.max(0, cleanupDeadlineAt - Date.now())),
-					() => activeSessionAbort,
+				await withTimeout(
+					activeSessionAbort,
+					Math.max(0, cleanupDeadlineAt - Date.now()),
+					"Subagent abort cleanup timed out",
 				);
 			} catch (cleanupError) {
 				if (Date.now() >= cleanupDeadlineAt) {

@@ -1027,16 +1027,29 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 						}
 
 						const streamed = await streamResponse(currentResponse);
-						// Only accept an empty STOP as valid silence once every fallback
-						// endpoint is exhausted: an earlier endpoint returning empty
-						// successful streams must still fail over (Antigravity auto mode)
-						// rather than be recorded as a real silent review.
+						// Eventless silence may fail over to the alternate Antigravity
+						// endpoint. Once thinking has streamed, the endpoint is already
+						// committed downstream; Advisor mode may accept that silence,
+						// while normal sessions surface it to final-output recovery.
+						const thoughtOnly = output.content.some(
+							block =>
+								block.type === "thinking" &&
+								(block.thinking.trim().length > 0 || Boolean(block.thinkingSignature)),
+						);
 						const acceptedSilence =
-							options?.acceptEmptyResponse === true && !streamed.strippedPlanningLeak && isLastEndpoint;
+							options?.acceptEmptyResponse === true &&
+							!streamed.strippedPlanningLeak &&
+							(isLastEndpoint || thoughtOnly);
 						if (output.stopReason !== "stop" || streamed.meaningful || acceptedSilence) {
 							receivedContent = streamed.meaningful || acceptedSilence;
 							break;
 						}
+
+						// A thought-only STOP is a complete provider response, not a
+						// transiently empty transport. Replaying the identical request
+						// burns another full reasoning pass; let session recovery add
+						// an explicit final-output reminder instead.
+						if (thoughtOnly) break;
 
 						if (emptyAttempt < MAX_EMPTY_STREAM_RETRIES) {
 							resetOutput();
@@ -1051,10 +1064,20 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 					}
 
 					if (!receivedContent) {
-						throw new AIError.ProviderResponseError("Cloud Code Assist API returned an empty response", {
-							provider: model.provider,
-							kind: "empty-body",
-						});
+						const thoughtOnly = output.content.some(
+							block =>
+								block.type === "thinking" &&
+								(block.thinking.trim().length > 0 || Boolean(block.thinkingSignature)),
+						);
+						throw new AIError.ProviderResponseError(
+							thoughtOnly
+								? "Cloud Code Assist API returned a thought-only response without final output"
+								: "Cloud Code Assist API returned an empty response",
+							{
+								provider: model.provider,
+								kind: thoughtOnly ? "empty-output" : "empty-body",
+							},
+						);
 					}
 
 					if (options?.signal?.aborted) {

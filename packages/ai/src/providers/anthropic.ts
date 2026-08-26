@@ -3537,6 +3537,11 @@ function buildToolResultBlock(
 		}
 		content = content.filter(block => block.type === "text");
 	}
+	// Strict Anthropic-compatible endpoints reject `content: []`; the equivalent
+	// empty-string form is accepted by both compatible endpoints and Anthropic.
+	if (Array.isArray(content) && content.length === 0) {
+		content = "";
+	}
 	content = ensureErrorToolResultWireContent(content, msg.isError);
 	const block: ContentBlockParam = {
 		type: "tool_result",

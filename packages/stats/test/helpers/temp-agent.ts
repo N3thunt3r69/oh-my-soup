@@ -45,8 +45,13 @@ export function installStatsTestIsolation(prefix: string): StatsTestIsolation {
 		setAgentDir(path.join(os.homedir(), configDir, "agent"));
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
 		closeDb();
+		// sqlite3_close_v2 releases the file after ephemeral prepared statements
+		// are finalized. Let the completed test's async stack unwind before forcing
+		// that collection so Windows can remove the database directory.
+		await Bun.sleep(0);
+		Bun.gc(true);
 		if (originalConfigDir === undefined) {
 			delete process.env.PI_CONFIG_DIR;
 		} else {
@@ -58,7 +63,7 @@ export function installStatsTestIsolation(prefix: string): StatsTestIsolation {
 			else process.env[key] = prior;
 		}
 		setAgentDir(originalAgentDir);
-		tempDir?.removeSync();
+		await tempDir?.remove();
 		tempDir = null;
 	});
 

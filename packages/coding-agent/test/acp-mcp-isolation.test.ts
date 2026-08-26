@@ -75,6 +75,80 @@ describe("createAcpSessionFactory MCP isolation (issue #1234)", () => {
 		}
 	});
 
+	it("rejects allowlisted tools absent from the completed ACP session registry", async () => {
+		const tempDir = TempDir.createSync("@pi-acp-tool-allowlist-");
+		let authStorage: AuthStorage | undefined;
+		try {
+			authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+			const modelRegistry = new ModelRegistry(authStorage);
+			const settings = Settings.isolated({});
+			let disposed = false;
+			const fakeSession = {
+				extensionRunner: undefined,
+				getAllToolNames: () => ["read"],
+				dispose: async () => {
+					disposed = true;
+				},
+			} as unknown as AgentSession;
+			const factory = createAcpSessionFactory({
+				baseOptions: {} as CreateAgentSessionOptions,
+				settings,
+				sessionDir: tempDir.join("sessions"),
+				authStorage,
+				modelRegistry,
+				parsedArgs: { tools: ["read", "missing"] },
+				rawArgs: ["--tools", "read,missing"],
+				createSession: async () => ({ session: fakeSession }) as CreateAgentSessionResult,
+			});
+
+			await expect(factory(tempDir.path())).rejects.toThrow(/Unknown tool in --tools: missing/);
+			expect(disposed).toBe(true);
+		} finally {
+			try {
+				authStorage?.close();
+			} finally {
+				await tempDir.remove();
+			}
+		}
+	});
+
+	it("accepts extension-provided tools present in the completed ACP session registry", async () => {
+		const tempDir = TempDir.createSync("@pi-acp-extension-tool-allowlist-");
+		let authStorage: AuthStorage | undefined;
+		try {
+			authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+			const modelRegistry = new ModelRegistry(authStorage);
+			const settings = Settings.isolated({});
+			let disposed = false;
+			const fakeSession = {
+				extensionRunner: undefined,
+				getAllToolNames: () => ["read", "extension_tool"],
+				dispose: async () => {
+					disposed = true;
+				},
+			} as unknown as AgentSession;
+			const factory = createAcpSessionFactory({
+				baseOptions: {} as CreateAgentSessionOptions,
+				settings,
+				sessionDir: tempDir.join("sessions"),
+				authStorage,
+				modelRegistry,
+				parsedArgs: { tools: ["read", "extension_tool"] },
+				rawArgs: ["--tools", "read,extension_tool"],
+				createSession: async () => ({ session: fakeSession }) as CreateAgentSessionResult,
+			});
+
+			await expect(factory(tempDir.path())).resolves.toBe(fakeSession);
+			expect(disposed).toBe(false);
+		} finally {
+			try {
+				authStorage?.close();
+			} finally {
+				await tempDir.remove();
+			}
+		}
+	});
+
 	it("shares the trusted extension EventBus with the ACP session", async () => {
 		const tempDir = TempDir.createSync("@pi-acp-trusted-extension-");
 		let authStorage: AuthStorage | undefined;

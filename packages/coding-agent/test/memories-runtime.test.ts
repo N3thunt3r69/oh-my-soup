@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as ai from "@oh-my-soup/pi-ai";
-import { Effort, type Model } from "@oh-my-soup/pi-ai";
+import { type AssistantMessage, Effort, type Model } from "@oh-my-soup/pi-ai";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import {
 	buildMemoryToolDeveloperInstructions,
@@ -11,28 +11,45 @@ import {
 	startMemoryStartupTask,
 } from "@oh-my-soup/pi-coding-agent/memories";
 import * as memoryStorage from "@oh-my-soup/pi-coding-agent/memories/storage";
-import { getAgentDbPath, Snowflake, TempDir } from "@oh-my-soup/pi-utils";
+import { getAgentDbPath, logger, Snowflake, TempDir } from "@oh-my-soup/pi-utils";
+
+type CompleteSimpleResult = AssistantMessage;
+
+interface ModelRegistryFixture {
+	find: (...args: unknown[]) => Model;
+	getAll: () => Model[];
+	getApiKey: (...args: unknown[]) => Promise<string>;
+	resolver: (...args: unknown[]) => () => Promise<string>;
+}
+
+interface RuntimeSessionFixture {
+	sessionManager: {
+		getSessionFile: () => string;
+		getSessionDir: () => string;
+		getSessionId: () => string;
+		getCwd: () => string;
+	};
+	settings: Settings;
+	model: Model;
+	modelRegistry: ModelRegistryFixture;
+	refreshBaseSystemPrompt: () => Promise<void>;
+	beginLocalMemoryStartup: () => AbortSignal;
+	endLocalMemoryStartup: (signal: AbortSignal) => void;
+}
 
 interface SessionFixture {
 	agentDir: string;
 	sessionDir: string;
 	sessionFile: string;
 	settings: Settings;
-	session: any;
-	modelRegistry: any;
+	session: RuntimeSessionFixture;
+	modelRegistry: ModelRegistryFixture;
 	model: Model;
-	whenSettled: Promise<void>;
+	activeStartups: Set<AbortSignal>;
 }
 
 let sharedRoot: TempDir | undefined;
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-	let resolve!: () => void;
-	const promise = new Promise<void>(res => {
-		resolve = res;
-	});
-	return { promise, resolve };
-}
 async function makeTempDir(prefix: string): Promise<string> {
 	const base = sharedRoot?.path() ?? os.tmpdir();
 	const dir = path.join(base, `${prefix}-${Snowflake.next()}`);
@@ -49,7 +66,7 @@ function createModel(id = "test-model"): Model {
 	} as Model;
 }
 
-function createModelRegistry(model: Model): any {
+function createModelRegistry(model: Model): ModelRegistryFixture {
 	return {
 		find: vi.fn(() => model),
 		getAll: vi.fn(() => [model]),
@@ -58,8 +75,33 @@ function createModelRegistry(model: Model): any {
 	};
 }
 
+function completionResult(
+	payload: Record<string, unknown>,
+	usage: Omit<AssistantMessage["usage"], "cost"> = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+	},
+): CompleteSimpleResult {
+	return {
+		role: "assistant",
+		api: "openai-completions",
+		provider: "openai",
+		model: "test-model",
+		timestamp: 0,
+		stopReason: "stop",
+		content: [{ type: "text", text: JSON.stringify(payload) }],
+		usage: {
+			...usage,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+	};
+}
+
 async function createFixture(overrides?: Partial<Record<string, unknown>>): Promise<SessionFixture> {
-	const agentDir = await makeTempDir("memories-runtime-agent");
+	const agentDir = await makeTempDir("m");
 	const sessionDir = path.join(agentDir, "sessions");
 	await fs.mkdir(sessionDir, { recursive: true });
 	const sessionFile = path.join(sessionDir, "current-session.jsonl");
@@ -75,10 +117,8 @@ async function createFixture(overrides?: Partial<Record<string, unknown>>): Prom
 	});
 	const model = createModel();
 	const modelRegistry = createModelRegistry(model);
-	const settled = deferred();
-	const refreshBaseSystemPrompt = vi.fn(async () => {
-		settled.resolve();
-	});
+	const activeStartups = new Set<AbortSignal>();
+	const refreshBaseSystemPrompt = vi.fn(async () => {});
 	const session = {
 		sessionManager: {
 			getSessionFile: () => sessionFile,
@@ -90,36 +130,43 @@ async function createFixture(overrides?: Partial<Record<string, unknown>>): Prom
 		model,
 		modelRegistry,
 		refreshBaseSystemPrompt,
+		beginLocalMemoryStartup: vi.fn(() => {
+			const signal = new AbortController().signal;
+			activeStartups.add(signal);
+			return signal;
+		}),
+		endLocalMemoryStartup: vi.fn((signal: AbortSignal) => {
+			activeStartups.delete(signal);
+		}),
 	};
 
-	return { agentDir, sessionDir, sessionFile, settings, session, modelRegistry, model, whenSettled: settled.promise };
+	return { agentDir, sessionDir, sessionFile, settings, session, modelRegistry, model, activeStartups };
 }
 
-// Resolve any already-scheduled microtasks/macrotasks without a fixed wall delay.
-const flushAsync = (): Promise<void> => new Promise<void>(resolve => setTimeout(resolve, 0));
-
-// Await the pipeline's completion signal (its final `refreshBaseSystemPrompt`)
-// instead of polling, racing a generous timeout so a stalled regression fails
-// loudly rather than hanging.
-async function settle(promise: Promise<void>, label: string, timeoutMs = 3000): Promise<void> {
-	let timer: Timer | undefined;
-	const timeout = new Promise<never>((_, reject) => {
-		timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), timeoutMs);
+async function runStartup(fx: SessionFixture, taskDepth = 0): Promise<void> {
+	const warnings: unknown[][] = [];
+	const warningSpy = vi.spyOn(logger, "warn").mockImplementation((...args: unknown[]) => {
+		warnings.push(args);
 	});
-	try {
-		await Promise.race([promise, timeout]);
-	} finally {
-		if (timer) clearTimeout(timer);
-	}
+	const completion = startMemoryStartupTask({
+		session: fx.session as unknown as Parameters<typeof startMemoryStartupTask>[0]["session"],
+		settings: fx.settings,
+		modelRegistry: fx.modelRegistry as unknown as Parameters<typeof startMemoryStartupTask>[0]["modelRegistry"],
+		agentDir: fx.agentDir,
+		taskDepth,
+	});
+	await completion;
+	warningSpy.mockRestore();
+	expect(warnings).toEqual([]);
+	expect(fx.activeStartups.size).toBe(0);
 }
 
 beforeAll(async () => {
-	sharedRoot = await TempDir.create(`@memories-runtime-${Snowflake.next()}`);
+	sharedRoot = await TempDir.create(`@mr-${Snowflake.next()}`);
 });
 
 afterAll(async () => {
 	if (sharedRoot) {
-		await Bun.sleep(0);
 		await sharedRoot.remove();
 	}
 	sharedRoot = undefined;
@@ -148,32 +195,14 @@ describe("memories runtime", () => {
 	test("startup gating follows memory.backend and skips subagents", async () => {
 		const disabled = await createFixture({ "memories.enabled": false });
 		const openSpy = vi.spyOn(memoryStorage, "openMemoryDb");
-		startMemoryStartupTask({
-			session: disabled.session,
-			settings: disabled.settings,
-			modelRegistry: disabled.modelRegistry,
-			agentDir: disabled.agentDir,
-			taskDepth: 0,
-		});
+		await runStartup(disabled);
 		expect(openSpy).not.toHaveBeenCalled();
 		const explicitlyOff = await createFixture({ "memory.backend": "off", "memories.enabled": true });
-		startMemoryStartupTask({
-			session: explicitlyOff.session,
-			settings: explicitlyOff.settings,
-			modelRegistry: explicitlyOff.modelRegistry,
-			agentDir: explicitlyOff.agentDir,
-			taskDepth: 0,
-		});
+		await runStartup(explicitlyOff);
 		expect(openSpy).not.toHaveBeenCalled();
 
 		const subagent = await createFixture({ "memories.enabled": true });
-		startMemoryStartupTask({
-			session: subagent.session,
-			settings: subagent.settings,
-			modelRegistry: subagent.modelRegistry,
-			agentDir: subagent.agentDir,
-			taskDepth: 1,
-		});
+		await runStartup(subagent, 1);
 		expect(openSpy).not.toHaveBeenCalled();
 	});
 
@@ -184,15 +213,7 @@ describe("memories runtime", () => {
 		});
 		const stage1Spy = vi.spyOn(ai, "completeSimple");
 
-		startMemoryStartupTask({
-			session: fx.session,
-			settings: fx.settings,
-			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
-			taskDepth: 0,
-		});
-
-		await flushAsync();
+		await runStartup(fx);
 		expect(stage1Spy).not.toHaveBeenCalled();
 	});
 
@@ -207,44 +228,27 @@ describe("memories runtime", () => {
 
 		const completeSpy = vi
 			.spyOn(ai, "completeSimple")
-			.mockResolvedValueOnce({
-				stopReason: "end_turn",
-				content: [
+			.mockResolvedValueOnce(
+				completionResult(
 					{
-						type: "text",
-						text: JSON.stringify({
-							rollout_summary: "Rollout summary A",
-							rollout_slug: "thread-a-rollout",
-							raw_memory: "Raw memory A",
-						}),
+						rollout_summary: "Rollout summary A",
+						rollout_slug: "thread-a-rollout",
+						raw_memory: "Raw memory A",
 					},
-				],
-				usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 },
-			} as any)
-			.mockResolvedValueOnce({
-				stopReason: "end_turn",
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify({
-							memory_md: "# Memory\n\nConsolidated body",
-							memory_summary: "Consolidated summary",
-							skills: [{ name: "deploy-playbook", content: "# Deploy\nUse blue/green." }],
-						}),
-					},
-				],
-			} as any);
+					{ input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 },
+				),
+			)
+			.mockResolvedValueOnce(
+				completionResult({
+					memory_md: "# Memory\n\nConsolidated body",
+					memory_summary: "Consolidated summary",
+					skills: [{ name: "deploy-playbook", content: "# Deploy\nUse blue/green." }],
+				}),
+			);
 
-		startMemoryStartupTask({
-			session: fx.session,
-			settings: fx.settings,
-			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
-			taskDepth: 0,
-		});
+		await runStartup(fx);
 
 		const memoryRoot = getMemoryRoot(fx.agentDir, fx.session.sessionManager.getCwd());
-		await settle(fx.whenSettled, "phase1->phase2 pipeline");
 		expect((await fs.readFile(path.join(memoryRoot, "MEMORY.md"), "utf8")).trim()).toBe(
 			"# Memory\n\nConsolidated body",
 		);
@@ -255,8 +259,7 @@ describe("memories runtime", () => {
 			"# Deploy\nUse blue/green.",
 		);
 		expect(fx.session.refreshBaseSystemPrompt).toHaveBeenCalledTimes(1);
-		expect(ai.completeSimple).toHaveBeenCalled();
-		expect(ai.completeSimple).toHaveBeenCalledTimes(2);
+		expect(completeSpy).toHaveBeenCalledTimes(2);
 		const phase2Prompt = completeSpy.mock.calls[1]?.[1];
 		expect(phase2Prompt?.systemPrompt?.[0]).toContain("memory-stage-two consolidator");
 	});
@@ -284,70 +287,47 @@ describe("memories runtime", () => {
 		];
 		await fs.writeFile(rolloutPath, `${rolloutRows.map(row => JSON.stringify(row)).join("\n")}\n`);
 
-		const spy = vi
+		const completeSpy = vi
 			.spyOn(ai, "completeSimple")
-			.mockResolvedValueOnce({
-				stopReason: "end_turn",
-				content: [
+			.mockResolvedValueOnce(
+				completionResult(
 					{
-						type: "text",
-						text: JSON.stringify({
-							rollout_summary: "Rollout summary",
-							rollout_slug: "thread-constrained",
-							raw_memory: "Raw memory",
-						}),
+						rollout_summary: "Rollout summary",
+						rollout_slug: "thread-constrained",
+						raw_memory: "Raw memory",
 					},
-				],
-				usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
-			} as any)
-			.mockResolvedValueOnce({
-				stopReason: "end_turn",
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify({
-							memory_md: "# Memory\n\nBody",
-							memory_summary: "Summary",
-							skills: [],
-						}),
-					},
-				],
-			} as any);
+					{ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+				),
+			)
+			.mockResolvedValueOnce(
+				completionResult({
+					memory_md: "# Memory\n\nBody",
+					memory_summary: "Summary",
+					skills: [],
+				}),
+			);
 
-		startMemoryStartupTask({
-			session: fx.session,
-			settings: fx.settings,
-			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
-			taskDepth: 0,
-		});
+		await runStartup(fx);
 
 		const memoryRoot = getMemoryRoot(fx.agentDir, fx.session.sessionManager.getCwd());
-		await settle(fx.whenSettled, "effort-clamp pipeline");
 		expect((await fs.readFile(path.join(memoryRoot, "MEMORY.md"), "utf8")).trim()).toBe("# Memory\n\nBody");
 
-		expect(spy).toHaveBeenCalledTimes(2);
+		expect(completeSpy).toHaveBeenCalledTimes(2);
 		// stage1 requested `low`, phase2 requested `medium`; both must clamp up to the
 		// model's floor (`high`) instead of being passed through and throwing.
-		expect(spy.mock.calls[0]?.[2]?.reasoning).toBe(Effort.High);
-		expect(spy.mock.calls[1]?.[2]?.reasoning).toBe(Effort.High);
+		expect(completeSpy.mock.calls[0]?.[2]?.reasoning).toBe(Effort.High);
+		expect(completeSpy.mock.calls[1]?.[2]?.reasoning).toBe(Effort.High);
 	});
 
 	test("phase2 sync prunes stale summaries and preserves raw memory ordering", async () => {
 		const fx = await createFixture();
-		vi.spyOn(ai, "completeSimple").mockResolvedValue({
-			stopReason: "end_turn",
-			content: [
-				{
-					type: "text",
-					text: JSON.stringify({
-						memory_md: "# Memory\n\nMerged",
-						memory_summary: "Merged summary",
-						skills: [{ name: "ops", content: "# Ops\nRunbook" }],
-					}),
-				},
-			],
-		} as any);
+		const completeSpy = vi.spyOn(ai, "completeSimple").mockResolvedValue(
+			completionResult({
+				memory_md: "# Memory\n\nMerged",
+				memory_summary: "Merged summary",
+				skills: [{ name: "ops", content: "# Ops\nRunbook" }],
+			}),
+		);
 
 		const db = memoryStorage.openMemoryDb(getAgentDbPath(fx.agentDir));
 		memoryStorage.upsertThreads(db, [
@@ -381,15 +361,9 @@ describe("memories runtime", () => {
 		await fs.mkdir(path.join(memoryRoot, "rollout_summaries"), { recursive: true });
 		await fs.writeFile(path.join(memoryRoot, "rollout_summaries", "old.md"), "stale");
 
-		startMemoryStartupTask({
-			session: fx.session,
-			settings: fx.settings,
-			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
-			taskDepth: 0,
-		});
+		await runStartup(fx);
+		expect(completeSpy).toHaveBeenCalledTimes(1);
 
-		await settle(fx.whenSettled, "phase2 sync/prune");
 		const files = await fs.readdir(path.join(memoryRoot, "rollout_summaries"));
 		expect(files.includes("old.md")).toBe(false);
 		expect(files).toEqual(expect.arrayContaining(["thread-a-alpha.md", "thread-b-beta.md"]));
@@ -411,15 +385,8 @@ describe("memories runtime", () => {
 		});
 		memoryStorage.closeMemoryDb(db);
 
-		startMemoryStartupTask({
-			session: fx.session,
-			settings: fx.settings,
-			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
-			taskDepth: 0,
-		});
+		await runStartup(fx);
 
-		await settle(fx.whenSettled, "phase2 empty-input cleanup");
 		expect(await Bun.file(path.join(memoryRoot, "MEMORY.md")).exists()).toBe(false);
 		expect(await Bun.file(path.join(memoryRoot, "memory_summary.md")).exists()).toBe(false);
 		expect(await Bun.file(path.join(memoryRoot, "skills")).exists()).toBe(false);

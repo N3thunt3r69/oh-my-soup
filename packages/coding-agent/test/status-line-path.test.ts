@@ -79,9 +79,7 @@ function expectContentToContainPath(content: string, expected: string): void {
 }
 
 function createFakeHome(): { home: string; projectsRoot: string } {
-	const homeRoot = path.join(originalProjectDir, ".wt");
-	fs.mkdirSync(homeRoot, { recursive: true });
-	const home = fs.mkdtempSync(path.join(homeRoot, "oms-status-line-home-"));
+	const home = fs.mkdtempSync(path.join(os.homedir(), ".oms-status-line-home-"));
 	const projectsRoot = path.join(home, "Projects");
 	fs.mkdirSync(projectsRoot, { recursive: true });
 	vi.spyOn(os, "homedir").mockReturnValue(home);

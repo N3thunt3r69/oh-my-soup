@@ -102,11 +102,13 @@ const writerRegistry = new FinalizationRegistry<number>(fd => {
 
 class FileSessionStorageWriter implements SessionStorageWriter {
 	#fd: number;
+	#path: string;
 	#closed = false;
 	#error: Error | undefined;
 	#onError: ((err: Error) => void) | undefined;
 
 	constructor(fpath: string, options?: { flags?: "a" | "w"; onError?: (err: Error) => void }) {
+		this.#path = fpath;
 		this.#onError = options?.onError;
 		const flags = options?.flags ?? "a";
 		// Ensure parent directory exists
@@ -128,14 +130,38 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 	}
 
 	#writeNow(line: string): void {
+		const originalSize = fs.fstatSync(this.#fd).size;
 		const buf = Buffer.from(line, "utf-8");
 		let offset = 0;
-		while (offset < buf.length) {
-			const written = fs.writeSync(this.#fd, buf, offset, buf.length - offset);
-			if (written === 0) {
-				throw new Error("Short write");
+		try {
+			while (offset < buf.length) {
+				const written = fs.writeSync(this.#fd, buf, offset, buf.length - offset);
+				if (written === 0) {
+					throw new Error("Short write");
+				}
+				offset += written;
 			}
-			offset += written;
+		} catch (writeError) {
+			if (offset === 0) throw writeError;
+			// Windows cannot reliably ftruncate an O_APPEND descriptor. Close the
+			// poisoned writer before truncating by path; SessionManager will open a
+			// fresh append handle after it records this write failure.
+			writerRegistry.unregister(this);
+			let fdClosed = false;
+			try {
+				fs.closeSync(this.#fd);
+				fdClosed = true;
+				fs.truncateSync(this.#path, originalSize);
+				this.#closed = true;
+			} catch (rollbackError) {
+				if (fdClosed) this.#closed = true;
+				else writerRegistry.register(this, this.#fd, this);
+				throw new AggregateError(
+					[toError(writeError), toError(rollbackError)],
+					"Session append failed and its partial bytes could not be rolled back",
+				);
+			}
+			throw writeError;
 		}
 	}
 
@@ -709,14 +735,21 @@ export class MemorySessionStorage implements SessionStorage {
 	}
 
 	listFilesSync(dir: string, pattern: string): string[] {
-		const prefix = dir.endsWith("/") ? dir : `${dir}/`;
 		const files: string[] = [];
-		for (const path of this.#files.keys()) {
-			if (!path.startsWith(prefix)) continue;
-			const name = path.slice(prefix.length);
-			if (name.includes("/") || name.includes("\\")) continue;
+		for (const filePath of this.#files.keys()) {
+			const name = path.relative(dir, filePath);
+			if (
+				!name ||
+				name === ".." ||
+				name.startsWith(`..${path.sep}`) ||
+				path.isAbsolute(name) ||
+				name.includes("/") ||
+				name.includes("\\")
+			) {
+				continue;
+			}
 			if (!matchesPattern(name, pattern)) continue;
-			files.push(path);
+			files.push(filePath);
 		}
 		return files;
 	}

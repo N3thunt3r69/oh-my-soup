@@ -3,12 +3,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AuthStorage } from "@oh-my-soup/pi-ai";
+import { closeSharedModelCache } from "@oh-my-soup/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-soup/pi-coding-agent/sdk";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
-import { removeSyncWithRetries, Snowflake } from "@oh-my-soup/pi-utils";
+import { removeWithRetries, Snowflake } from "@oh-my-soup/pi-utils";
 import { getAgentDir, setAgentDir } from "@oh-my-soup/pi-utils/dirs";
 import {
 	BOUNDED_GUIDANCE_MODE,
@@ -55,12 +56,13 @@ describe("createAgentSession MCP server instructions (deferred UI)", () => {
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
-	afterAll(() => {
+	afterAll(async () => {
 		authStorage.close();
+		closeSharedModelCache();
 		setAgentDir(originalAgentDir);
 		for (const dir of [registryDir, isolatedHome]) {
 			if (dir && fs.existsSync(dir)) {
-				removeSyncWithRetries(dir);
+				await removeWithRetries(dir);
 			}
 		}
 	});
@@ -79,9 +81,9 @@ describe("createAgentSession MCP server instructions (deferred UI)", () => {
 		);
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
 		if (tempDir && fs.existsSync(tempDir)) {
-			removeSyncWithRetries(tempDir);
+			await removeWithRetries(tempDir);
 		}
 		mock.restore();
 	});

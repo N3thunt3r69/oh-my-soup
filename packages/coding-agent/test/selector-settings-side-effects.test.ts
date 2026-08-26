@@ -15,6 +15,7 @@ import { SelectorController } from "@oh-my-soup/pi-coding-agent/modes/controller
 import { getThemeByName, setThemeInstance } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-soup/pi-coding-agent/modes/types";
 import type { ResolvedRoleModel } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import { AgentStorage } from "@oh-my-soup/pi-coding-agent/session/agent-storage";
 import { AUTO_THINKING } from "@oh-my-soup/pi-coding-agent/thinking";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-soup/pi-utils";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
@@ -751,6 +752,7 @@ describe("selector setting side effects", () => {
 				hub.dispose();
 			}
 		} finally {
+			AgentStorage.resetInstance();
 			if (fs.existsSync(testDir)) removeSyncWithRetries(testDir);
 		}
 	});

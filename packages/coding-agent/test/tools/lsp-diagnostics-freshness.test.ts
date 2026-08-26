@@ -4,6 +4,7 @@ import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import { createLspWritethrough, type FileDiagnosticsResult, FileFormatResult } from "@oh-my-soup/pi-coding-agent/lsp";
 import * as lspClient from "@oh-my-soup/pi-coding-agent/lsp/client";
 import * as lspConfig from "@oh-my-soup/pi-coding-agent/lsp/config";
+import { formatContent } from "@oh-my-soup/pi-coding-agent/lsp/diagnostics";
 import type { Diagnostic, LinterClient, LspClient, ServerConfig } from "@oh-my-soup/pi-coding-agent/lsp/types";
 import { EquivalentUriMap, fileToUri } from "@oh-my-soup/pi-coding-agent/lsp/utils";
 import type { DeferredDiagnosticsEntry, ToolSession } from "@oh-my-soup/pi-coding-agent/tools";
@@ -203,6 +204,68 @@ describe("LSP diagnostics freshness", () => {
 		expect(getOrCreate).not.toHaveBeenCalled();
 		expect(sync).not.toHaveBeenCalled();
 		expect(notifySaved).not.toHaveBeenCalled();
+	});
+
+	it("reports a rejected custom formatter instead of unchanged formatting", async () => {
+		const filePath = path.join(tempDir.path(), "format-failure.ts");
+		const formatter = createFormatter(async () => {
+			throw new Error("formatter crashed");
+		});
+		vi.spyOn(lspConfig, "loadConfig").mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
+		vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["broken-formatter", formatter]]);
+		vi.spyOn(lspClient, "notifyWorkspaceWatchedFiles").mockResolvedValue();
+
+		const writethrough = createLspWritethrough(tempDir.path(), {
+			enableFormat: true,
+			enableDiagnostics: false,
+		});
+		const content = "export const value=1\n";
+		const result = await writethrough(filePath, content);
+
+		expect(result?.formatter).toBe(FileFormatResult.FAILED);
+		expect(await Bun.file(filePath).text()).toBe(content);
+	});
+
+	it("propagates unchanged formatting and distinguishes unsupported servers", async () => {
+		const content = "export const value = 1;\n";
+		const unchangedFormatter = createFormatter(async (_filePath, original) => original);
+		vi.spyOn(lspConfig, "loadConfig").mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
+		vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["unchanged", unchangedFormatter]]);
+		vi.spyOn(lspClient, "notifyWorkspaceWatchedFiles").mockResolvedValue();
+		const writethrough = createLspWritethrough(tempDir.path(), {
+			enableFormat: true,
+			enableDiagnostics: false,
+		});
+		const unchanged = await writethrough(path.join(tempDir.path(), "unchanged.ts"), content);
+
+		const unsupportedClient = createClient(tempDir.path(), { ...TEST_SERVER, command: "unsupported" });
+		unsupportedClient.serverCapabilities = {};
+		vi.spyOn(lspClient, "getOrCreateClient").mockResolvedValue(unsupportedClient);
+		const unsupported = await formatContent(path.join(tempDir.path(), "unsupported.ts"), content, tempDir.path(), [
+			["unsupported", unsupportedClient.config],
+		]);
+
+		expect(unchanged?.formatter).toBe(FileFormatResult.UNCHANGED);
+		expect(unsupported).toEqual({ content, failed: false, unsupported: true });
+	});
+
+	it("keeps an earlier formatter failure when a later server is unsupported", async () => {
+		const failedClient = createClient(tempDir.path(), { ...TEST_SERVER, command: "capable" });
+		failedClient.serverCapabilities = { documentFormattingProvider: true };
+		const unsupportedClient = createClient(tempDir.path(), { ...TEST_SERVER, command: "unsupported" });
+		unsupportedClient.serverCapabilities = {};
+		vi.spyOn(lspClient, "getOrCreateClient").mockImplementation(async config =>
+			config.command === "capable" ? failedClient : unsupportedClient,
+		);
+		const sendRequest = vi.spyOn(lspClient, "sendRequest").mockRejectedValue(new Error("formatter crashed"));
+		const content = "export const value=1\n";
+		const result = await formatContent(path.join(tempDir.path(), "failed.ts"), content, tempDir.path(), [
+			["capable", failedClient.config],
+			["unsupported", unsupportedClient.config],
+		]);
+
+		expect(result).toEqual({ content, failed: true, unsupported: false });
+		expect(sendRequest).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps an already-running LSP client synchronized after custom formatting", async () => {

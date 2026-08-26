@@ -1,9 +1,10 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BeamMemory } from "@oh-my-soup/pi-mnemopi/core/beam";
+import { removeSyncWithRetries } from "@oh-my-soup/pi-utils";
 
 // Real embeddings (fastembed + onnxruntime-node, ~270MB) install on demand via
 // `bun install` on first use. These tests never exercise embeddings — the
@@ -92,7 +93,7 @@ afterEach(() => {
 	delete process.env.MNEMOPI_AUTO_MIGRATE;
 	while (tempDbs.length > 0) {
 		const db = tempDbs.pop();
-		if (db) rmSync(db.dir, { recursive: true, force: true });
+		if (db) removeSyncWithRetries(db.dir);
 	}
 });
 

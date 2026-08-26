@@ -11,10 +11,21 @@ import { ModelRegistry, type ProviderConfigInput } from "@oh-my-soup/pi-coding-a
 import { getModelMatchPreferences, resolveModelScope } from "@oh-my-soup/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import { buildSessionOptions as buildCliSessionOptions } from "@oh-my-soup/pi-coding-agent/main";
-import { createAgentSession, type ExtensionFactory } from "@oh-my-soup/pi-coding-agent/sdk";
+import {
+	type CreateAgentSessionOptions,
+	createAgentSession as createSdkAgentSession,
+	type ExtensionFactory,
+} from "@oh-my-soup/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-soup/pi-utils";
+
+function createAgentSession(options: CreateAgentSessionOptions = {}) {
+	return createSdkAgentSession({
+		settings: Settings.isolated({}),
+		...options,
+	});
+}
 
 describe("createAgentSession deferred model pattern resolution", () => {
 	let tempDir: string;
@@ -117,10 +128,14 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			await buildSessionOptions("runtime-provider/runtime-model"),
 		);
 
-		expect(session.model).toBeDefined();
-		expect(session.model?.provider).toBe("runtime-provider");
-		expect(session.model?.id).toBe("runtime-model");
-		expect(modelFallbackMessage).toBeUndefined();
+		try {
+			expect(session.model).toBeDefined();
+			expect(session.model?.provider).toBe("runtime-provider");
+			expect(session.model?.id).toBe("runtime-model");
+			expect(modelFallbackMessage).toBeUndefined();
+		} finally {
+			await session.dispose();
+		}
 	});
 
 	test("resolves explicit dynamic-only modelPattern from fresh runtime cache", async () => {
@@ -164,8 +179,12 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			await buildSessionOptions("missing-provider/missing-model"),
 		);
 
-		expect(session.model).toBeUndefined();
-		expect(modelFallbackMessage).toBe('Model "missing-provider/missing-model" not found');
+		try {
+			expect(session.model).toBeUndefined();
+			expect(modelFallbackMessage).toBe('Model "missing-provider/missing-model" not found');
+		} finally {
+			await session.dispose();
+		}
 	});
 
 	test("uses auth fallback when deferred subagent modelPattern resolves without working credentials", async () => {

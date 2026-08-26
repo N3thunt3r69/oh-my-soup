@@ -379,6 +379,8 @@ pub mod matchers {
 					Ok(rel) => operand.join(rel),
 					Err(_) => return,
 				};
+				#[cfg(windows)]
+				let display = PathBuf::from(display.to_string_lossy().replace('\\', "/"));
 				self.display = Some(display);
 			}
 

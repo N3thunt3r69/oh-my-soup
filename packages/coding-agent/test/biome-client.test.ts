@@ -40,31 +40,6 @@ async function makeTempDir(): Promise<string> {
 	return dir;
 }
 
-async function createFakeBiomeCommand(
-	tempDir: string,
-	expectedInput: string,
-	formattedOutput: string,
-): Promise<string> {
-	const command = path.join(tempDir, "biome");
-	const expectedInputPath = path.join(tempDir, "expected-input.ts");
-	const formattedOutputPath = path.join(tempDir, "formatted-output.ts");
-	await Bun.write(expectedInputPath, expectedInput);
-	await Bun.write(formattedOutputPath, formattedOutput);
-	await Bun.write(
-		command,
-		`#!/bin/sh
-test "$1" = "format" || exit 7
-test "$2" = "--write" || exit 8
-test "$3" = "${path.join(tempDir, "example.ts")}" || exit 10
-cmp -s "$3" "${expectedInputPath}" || exit 9
-cp "${formattedOutputPath}" "$3"
-exit 0
-`,
-	);
-	await fs.chmod(command, 0o755);
-	return command;
-}
-
 function biomeConfig(command: string): ServerConfig {
 	return {
 		command: "biome",
@@ -76,13 +51,15 @@ function biomeConfig(command: string): ServerConfig {
 
 describe("BiomeClient format", () => {
 	test("formats the supplied content instead of stale on-disk content", async () => {
-		const tempDir = await makeTempDir();
+		const tempDir = await fs.mkdtemp(
+			path.join(repoRoot, "packages", "coding-agent", "src", "__biome_content_test__-"),
+		);
+		tempDirs.push(tempDir);
 		const targetFile = path.join(tempDir, "example.ts");
 		const unformatted = "export const value:number=1\n";
 		const formatted = "export const value: number = 1;\n";
 		await Bun.write(targetFile, "export const stale = true;\n");
-		const command = await createFakeBiomeCommand(tempDir, unformatted, formatted);
-		const result = await new BiomeClient(biomeConfig(command), tempDir).format(targetFile, unformatted);
+		const result = await new BiomeClient(biomeConfig(repoBiome), repoRoot).format(targetFile, unformatted);
 
 		expect(result).toBe(formatted);
 		expect(await Bun.file(targetFile).text()).toBe(formatted);
@@ -119,9 +96,7 @@ describe("BiomeClient format", () => {
 
 	test("returns the original content when Biome fails", async () => {
 		const tempDir = await makeTempDir();
-		const command = path.join(tempDir, "biome-failure");
-		await Bun.write(command, "#!/bin/sh\ncat >/dev/null\nexit 1\n");
-		await fs.chmod(command, 0o755);
+		const command = path.join(tempDir, "missing-biome");
 		const targetFile = path.join(tempDir, "example.ts");
 		const content = "export const value = 1;\n";
 

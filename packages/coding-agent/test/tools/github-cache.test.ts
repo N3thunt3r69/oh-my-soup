@@ -184,8 +184,10 @@ describe("github-cache db layer", () => {
 
 	it("does not chmod an existing cache parent directory", async () => {
 		const parent = path.join(tempDir, "caller-owned-parent");
-		await fs.mkdir(parent, { recursive: true, mode: 0o755 });
-		await fs.chmod(parent, 0o755);
+		await fs.mkdir(parent, { recursive: true });
+		const marker = path.join(parent, "caller-owned.txt");
+		await fs.writeFile(marker, "preserve me");
+		if (process.platform !== "win32") await fs.chmod(parent, 0o755);
 		process.env.OMS_GITHUB_CACHE_DB = path.join(parent, "github-cache.db");
 		resetCacheForTests();
 
@@ -193,7 +195,9 @@ describe("github-cache db layer", () => {
 
 		expect(db).not.toBeNull();
 		const stat = await fs.stat(parent);
-		expect(stat.mode & 0o777).toBe(0o755);
+		expect(stat.isDirectory()).toBe(true);
+		expect(await fs.readFile(marker, "utf8")).toBe("preserve me");
+		if (process.platform !== "win32") expect(stat.mode & 0o777).toBe(0o755);
 	});
 
 	it("preserves rows across openDb() and honors the configured hard TTL via per-lookup sweep", async () => {

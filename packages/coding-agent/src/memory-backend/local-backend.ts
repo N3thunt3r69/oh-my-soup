@@ -19,7 +19,7 @@ import type { MemoryBackend } from "./types";
 export const localBackend: MemoryBackend = {
 	id: "local",
 	start(options) {
-		startMemoryStartupTask(options);
+		void startMemoryStartupTask(options);
 	},
 	async buildDeveloperInstructions(agentDir, settings, session) {
 		return buildMemoryToolDeveloperInstructions(agentDir, settings, session);

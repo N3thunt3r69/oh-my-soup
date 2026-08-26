@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-soup/pi-utils";
@@ -6,9 +6,10 @@ import { Settings } from "../../src/config/settings";
 import { runEvalAgent } from "../../src/eval/agent-bridge";
 import { EVAL_TIMEOUT_PAUSE_OP, EVAL_TIMEOUT_RESUME_OP } from "../../src/eval/bridge-timeout";
 import { IdleTimeout } from "../../src/eval/idle-timeout";
-import { disposeAllVmContexts } from "../../src/eval/js/context-manager";
+import { disposeAllVmContexts, setJsEvalWorkerThreadForTests } from "../../src/eval/js/context-manager";
 import { executeJs } from "../../src/eval/js/executor";
 import { disposeAllKernelSessions, executePython } from "../../src/eval/py/executor";
+import { checkPythonKernelAvailability } from "../../src/eval/py/kernel";
 import { AgentProtocolHandler } from "../../src/internal-urls/agent-protocol";
 import { resetRegisteredArtifactDirsForTests } from "../../src/internal-urls/registry-helpers";
 import type { PlanModeState } from "../../src/plan-mode/state";
@@ -21,6 +22,12 @@ import * as isolationRunner from "../../src/task/isolation-runner";
 import { AgentOutputManager } from "../../src/task/output-manager";
 import type { AgentDefinition, AgentProgress, SingleResult, StructuredSubagentOutput } from "../../src/task/types";
 import type { ToolSession } from "../../src/tools";
+
+// These cases execute from fresh temp directories. Probe outside the project
+// tree so a repo-local .venv cannot produce a false-positive capability result.
+const pythonRuntimeAvailable = (
+	await checkPythonKernelAvailability(path.parse(process.cwd()).root, undefined, { forceProbe: true })
+).ok;
 
 const taskAgent = {
 	name: "task",
@@ -530,13 +537,20 @@ describe("runEvalAgent", () => {
 });
 
 describe("agent() through eval runtimes", () => {
-	// One shared JS worker backs every agent() JavaScript test below. Spawning a
-	// worker (thread + module-graph import) is fixed infrastructure cost, not
-	// behavior under test; reusing it keeps the suite fast. Each run still threads
-	// its own ToolSession (settings/mock are read live through the bridge per call)
-	// and top-level `const`/`let` are demoted to `var`, so reuse never leaks state
-	// these tests observe. Torn down in afterAll via disposeAllVmContexts().
+	// One shared Bun Worker backs every agent() JavaScript test below. The worker
+	// thread keeps this suite out of the test runner's cross-file subprocess
+	// reaper while preserving the isolated runtime boundary under test. Spawning
+	// it (thread + module-graph import) is fixed infrastructure cost, so reuse
+	// keeps the suite fast. Each run still threads its own ToolSession
+	// (settings/mock are read live through the bridge per call), and top-level
+	// `const`/`let` are demoted to `var`, so reuse never leaks state these tests
+	// observe. Torn down in afterAll via disposeAllVmContexts().
 	const sharedJsSessionId = "agent-bridge-shared-js";
+	let restoreJsEvalWorkerThread = false;
+
+	beforeAll(() => {
+		restoreJsEvalWorkerThread = setJsEvalWorkerThreadForTests(true);
+	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
@@ -544,8 +558,12 @@ describe("agent() through eval runtimes", () => {
 	});
 
 	afterAll(async () => {
-		await disposeAllVmContexts();
-		await disposeAllKernelSessions();
+		try {
+			await disposeAllVmContexts();
+			await disposeAllKernelSessions();
+		} finally {
+			setJsEvalWorkerThreadForTests(restoreJsEvalWorkerThread);
+		}
 	});
 
 	it("exposes agent() in JavaScript and parses structured output", async () => {
@@ -626,7 +644,7 @@ describe("agent() through eval runtimes", () => {
 		expect(result.output).toContain("boom");
 	});
 
-	it("exposes agent() in the Python runtime", async () => {
+	it.skipIf(!pythonRuntimeAvailable)("exposes agent() in the Python runtime", async () => {
 		using tempDir = TempDir.createSync("@oms-eval-agent-py-");
 		const { session, sessionFile, sessionId } = makeEvalSession(tempDir, "py-agent");
 		mockAgents();
@@ -656,10 +674,6 @@ describe("agent() through eval runtimes", () => {
 				toolSession: session,
 			},
 		);
-		if (result.exitCode === undefined && result.cancelled) {
-			expect(result.output).toBe("");
-			return; // kernel unavailable in this environment
-		}
 
 		expect(result.exitCode).toBe(0);
 		const lines = result.output.trim().split("\n");
@@ -670,132 +684,131 @@ describe("agent() through eval runtimes", () => {
 		expect(node.handle).toBe(`agent://${node.id}`);
 	});
 
-	it("bounds Python parallel() by the task.maxConcurrency setting while preserving order", async () => {
-		using tempDir = TempDir.createSync("@oms-eval-agent-py-parallel-");
-		const settings = Settings.isolated({
-			"async.enabled": false,
-			"task.isolation.mode": "none",
-			"task.enableLsp": true,
-			"task.maxConcurrency": 2,
-		});
-		const { session, sessionFile, sessionId } = makeEvalSession(tempDir, "py-agent-parallel", settings);
-		mockAgents();
-		const barrier = spyConcurrencyBarrier(2);
+	it.skipIf(!pythonRuntimeAvailable)(
+		"bounds Python parallel() by the task.maxConcurrency setting while preserving order",
+		async () => {
+			using tempDir = TempDir.createSync("@oms-eval-agent-py-parallel-");
+			const settings = Settings.isolated({
+				"async.enabled": false,
+				"task.isolation.mode": "none",
+				"task.enableLsp": true,
+				"task.maxConcurrency": 2,
+			});
+			const { session, sessionFile, sessionId } = makeEvalSession(tempDir, "py-agent-parallel", settings);
+			mockAgents();
+			const barrier = spyConcurrencyBarrier(2);
 
-		const result = await executePython(
-			'import json\nprint(json.dumps(parallel([lambda n=n: agent(n) for n in ["a", "b", "c", "d"]])))',
-			{ cwd: tempDir.path(), sessionId, sessionFile, kernelMode: "per-call", toolSession: session },
-		);
-		if (result.exitCode === undefined && result.cancelled) {
-			expect(result.output).toBe("");
-			return; // kernel unavailable in this environment
-		}
+			const result = await executePython(
+				'import json\nprint(json.dumps(parallel([lambda n=n: agent(n) for n in ["a", "b", "c", "d"]])))',
+				{ cwd: tempDir.path(), sessionId, sessionFile, kernelMode: "per-call", toolSession: session },
+			);
 
-		expect(result.exitCode).toBe(0);
-		expect(JSON.parse(result.output.trim())).toEqual(["a", "b", "c", "d"]);
-		expect(barrier.maxInFlight()).toBeGreaterThan(1);
-		expect(barrier.maxInFlight()).toBeLessThanOrEqual(2);
-	});
+			expect(result.exitCode).toBe(0);
+			expect(JSON.parse(result.output.trim())).toEqual(["a", "b", "c", "d"]);
+			expect(barrier.maxInFlight()).toBeGreaterThan(1);
+			expect(barrier.maxInFlight()).toBeLessThanOrEqual(2);
+		},
+	);
 
-	it("interrupting a Python parallel() fan-out aborts in-flight subagents and preserves session state", async () => {
-		using tempDir = TempDir.createSync("@oms-eval-agent-py-interrupt-");
-		const settings = Settings.isolated({
-			"async.enabled": false,
-			"task.isolation.mode": "none",
-			"task.enableLsp": true,
-			"task.maxConcurrency": 6,
-		});
-		const { session, sessionFile, sessionId } = makeEvalSession(tempDir, "py-agent-interrupt", settings);
-		mockAgents();
-		// Each kernel worker thread blocks in a synchronous `urllib` bridge call,
-		// joined by `parallel()`'s ThreadPoolExecutor exit. A turn cancel must
-		// reach the subagents those calls started — the bridge is handed the real
-		// signal, not the executor's kernel shield — while the kernel itself is
-		// still interrupted cleanly before `parallel()` launches another wave.
-		let inFlight = 0;
-		let completed = 0;
-		let abortedSubagents = 0;
-		let markSaturated: (() => void) | undefined;
-		const saturated = new Promise<void>(resolve => {
-			markSaturated = resolve;
-		});
-		// Mirrors the real executor: park until the run finishes *or* the caller's
-		// signal aborts. Nothing releases these agents, so the only way the cell
-		// can settle is the abort actually reaching them.
-		const runSpy = vi.spyOn(taskExecutor, "runSubprocess").mockImplementation(async options => {
-			// task.maxConcurrency=6 → six bridge calls block at once; signal then.
-			if (++inFlight >= 6) markSaturated?.();
-			const aborted = Promise.withResolvers<never>();
-			const onAbort = () => aborted.reject(new Error("subagent aborted"));
-			options.signal?.addEventListener("abort", onAbort, { once: true });
-			try {
-				await aborted.promise;
-			} catch {
-				abortedSubagents++;
-				return singleResult(options, { output: "", aborted: true, abortReason: "aborted by user" });
-			} finally {
-				options.signal?.removeEventListener("abort", onAbort);
-			}
-			completed++;
-			return singleResult(options, { output: options.assignment ?? "" });
-		});
+	it.skipIf(!pythonRuntimeAvailable)(
+		"interrupting a Python parallel() fan-out aborts in-flight subagents and preserves session state",
+		async () => {
+			using tempDir = TempDir.createSync("@oms-eval-agent-py-interrupt-");
+			const settings = Settings.isolated({
+				"async.enabled": false,
+				"task.isolation.mode": "none",
+				"task.enableLsp": true,
+				"task.maxConcurrency": 6,
+			});
+			const { session, sessionFile, sessionId } = makeEvalSession(tempDir, "py-agent-interrupt", settings);
+			mockAgents();
+			// Each kernel worker thread blocks in a synchronous `urllib` bridge call,
+			// joined by `parallel()`'s ThreadPoolExecutor exit. A turn cancel must
+			// reach the subagents those calls started — the bridge is handed the real
+			// signal, not the executor's kernel shield — while the kernel itself is
+			// still interrupted cleanly before `parallel()` launches another wave.
+			let inFlight = 0;
+			let completed = 0;
+			let abortedSubagents = 0;
+			let markSaturated: (() => void) | undefined;
+			const saturated = new Promise<void>(resolve => {
+				markSaturated = resolve;
+			});
+			// Mirrors the real executor: park until the run finishes *or* the caller's
+			// signal aborts. Nothing releases these agents, so the only way the cell
+			// can settle is the abort actually reaching them.
+			const runSpy = vi.spyOn(taskExecutor, "runSubprocess").mockImplementation(async options => {
+				// task.maxConcurrency=6 → six bridge calls block at once; signal then.
+				if (++inFlight >= 6) markSaturated?.();
+				const aborted = Promise.withResolvers<never>();
+				const onAbort = () => aborted.reject(new Error("subagent aborted"));
+				options.signal?.addEventListener("abort", onAbort, { once: true });
+				try {
+					await aborted.promise;
+				} catch {
+					abortedSubagents++;
+					return singleResult(options, { output: "", aborted: true, abortReason: "aborted by user" });
+				} finally {
+					options.signal?.removeEventListener("abort", onAbort);
+				}
+				completed++;
+				return singleResult(options, { output: options.assignment ?? "" });
+			});
 
-		// Seed persistent session state and confirm the kernel is reusable.
-		const seed = await executePython("PREP_MARKER = 4242", {
-			cwd: tempDir.path(),
-			sessionId,
-			sessionFile,
-			kernelMode: "session",
-			toolSession: session,
-		});
-		if (seed.exitCode === undefined && seed.cancelled) {
-			expect(seed.output).toBe("");
-			return; // kernel unavailable in this environment
-		}
-		expect(seed.exitCode).toBe(0);
-
-		const ac = new AbortController();
-		// Abort the instant all six worker threads are confirmed blocked in their
-		// bridge calls (condition-driven) instead of waiting a fixed wall second.
-		void saturated.then(() => ac.abort(new Error("external interrupt")));
-
-		const resultPromise = executePython(
-			"import json\nprint(json.dumps(parallel([lambda n=n: agent(str(n)) for n in range(12)])))",
-			{
+			// Seed persistent session state and confirm the kernel is reusable.
+			const seed = await executePython("PREP_MARKER = 4242", {
 				cwd: tempDir.path(),
 				sessionId,
 				sessionFile,
 				kernelMode: "session",
 				toolSession: session,
-				idleTimeoutMs: 60_000,
-				signal: ac.signal,
-			},
-		);
-		await saturated;
-		await Promise.resolve();
-		expect(completed).toBe(0);
-		const result = await resultPromise;
+			});
+			expect(seed.exitCode).toBe(0);
 
-		// The interrupt reached every in-flight subagent: nothing here released
-		// them, so the cell could only settle because the abort propagated.
-		expect(abortedSubagents).toBe(6);
-		expect(completed).toBe(0);
-		// Cancelled, but cleanly: no hard-kill, and no second fan-out wave started.
-		expect(result.cancelled).toBe(true);
-		expect(result.output).not.toContain("Python kernel shutdown");
-		expect(runSpy).toHaveBeenCalledTimes(6);
+			const ac = new AbortController();
+			// Abort the instant all six worker threads are confirmed blocked in their
+			// bridge calls (condition-driven) instead of waiting a fixed wall second.
+			void saturated.then(() => ac.abort(new Error("external interrupt")));
 
-		// The persistent kernel survived the interrupt: prior state is intact.
-		const after = await executePython("print(PREP_MARKER)", {
-			cwd: tempDir.path(),
-			sessionId,
-			sessionFile,
-			kernelMode: "session",
-			toolSession: session,
-		});
-		expect(after.exitCode).toBe(0);
-		expect(after.output.trim()).toBe("4242");
-	}, 30_000);
+			const resultPromise = executePython(
+				"import json\nprint(json.dumps(parallel([lambda n=n: agent(str(n)) for n in range(12)])))",
+				{
+					cwd: tempDir.path(),
+					sessionId,
+					sessionFile,
+					kernelMode: "session",
+					toolSession: session,
+					idleTimeoutMs: 60_000,
+					signal: ac.signal,
+				},
+			);
+			await saturated;
+			await Promise.resolve();
+			expect(completed).toBe(0);
+			const result = await resultPromise;
+
+			// The interrupt reached every in-flight subagent: nothing here released
+			// them, so the cell could only settle because the abort propagated.
+			expect(abortedSubagents).toBe(6);
+			expect(completed).toBe(0);
+			// Cancelled, but cleanly: no hard-kill, and no second fan-out wave started.
+			expect(result.cancelled).toBe(true);
+			expect(result.output).not.toContain("Python kernel shutdown");
+			expect(runSpy).toHaveBeenCalledTimes(6);
+
+			// The persistent kernel survived the interrupt: prior state is intact.
+			const after = await executePython("print(PREP_MARKER)", {
+				cwd: tempDir.path(),
+				sessionId,
+				sessionFile,
+				kernelMode: "session",
+				toolSession: session,
+			});
+			expect(after.exitCode).toBe(0);
+			expect(after.output.trim()).toBe("4242");
+		},
+		30_000,
+	);
 
 	it("streams enriched agent progress through onStatus before the cell finishes", async () => {
 		using tempDir = TempDir.createSync("@oms-eval-agent-progress-");
@@ -1430,9 +1443,9 @@ describe("runEvalAgent isolation", () => {
 			caught = err as Error;
 		}
 		expect(caught).toBeDefined();
-		const match = caught?.message.match(/(\/[^\s,]+?\.nested-0-sub_nested\.patch)/);
+		const match = caught?.message.match(/Captured nested patch preserved at (.+?\.nested-0-sub_nested\.patch)\./);
 		expect(match).not.toBeNull();
-		const persistedPath = match?.[1];
+		const persistedPath = match?.[1] ? path.normalize(match[1]) : undefined;
 		expect(persistedPath).toBeDefined();
 		const contents = await fs.readFile(persistedPath!, "utf-8");
 		expect(contents).toBe(nestedPatch);

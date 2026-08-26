@@ -20,6 +20,8 @@
 - `--stream` now secures existing stream directories before binding, accounts for the pending frame in its client backlog limit, and removes Unix socket paths during normal process exit.
 - Fixed adopted keep-alive agents remaining `running` in the registry after deferred turn settlement, and prevented stale detached or non-streaming refs from sustaining bare `hub wait` calls indefinitely ([#8634](https://github.com/can1357/oh-my-pi/issues/8634)).
 - Fixed `disasm open` appearing to hang or timing out on large existing IDA databases: managed IDALib workers now advertise loaded `.i64`/`.idb` targets without first draining the database's entire pending auto-analysis queue; raw input imports still wait for initial analysis.
+- Machine-global daemon brokers now detach into a hidden Windows process, so the browser relay survives the client that started it while another OMS process still holds the broker lease.
+- `oms gc --apply` now finalizes every history, stats, and WAL prepared statement before closing SQLite, preventing locked `history.db`/`stats.db` files and failed fixture or profile cleanup on Windows.
 
 ## [17.3.2] - 2026-08-16
 

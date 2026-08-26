@@ -225,6 +225,13 @@ export function getSegmenter(): Intl.Segmenter {
 // added back so width matches the native truncate/slice/wrap helpers.
 const OSC66_SPAN_REGEX = /\x1b\]66;([^;]*);([\s\S]*?)(?:\x07|\x1b\\)/g;
 const OSC66_PREFIX = "\x1b]66;";
+// APC sequences (`ESC _ ... ST|BEL`) — Kitty graphics commands such as the
+// virtual-placement prefix on Unicode-placeholder image lines, or the TUI's
+// BEL-terminated cursor marker. `Bun.stringWidth` strips CSI/OSC but counts APC
+// payloads as printable text, so they are removed before measuring (they occupy
+// zero cells — matching the native width engine in pi-natives/text.rs).
+const APC_SPAN_REGEX = /\x1b_[\s\S]*?(?:\x07|\x1b\\)/g;
+const APC_PREFIX = "\x1b_";
 const ESC = "\x1b";
 const TAB = "\t";
 const LONG_WIDTH_FAST_PATH_MIN = 128;
@@ -288,11 +295,12 @@ function correctHangulCompatibilityJamoWidth(width: number, str: string): number
 }
 
 /**
- * Visible width of a string in terminal columns, excluding ANSI/OSC escapes.
+ * Visible width of a string in terminal columns, excluding ANSI/OSC/APC escapes.
  *
  * `Bun.stringWidth` does the heavy lifting (UAX#11 width tables + ANSI/OSC
- * stripping); this adds the two corrections it omits — tabs (expanded to
- * `tabWidth` cells) and OSC 66 text-sizing payloads (scaled by `s=`).
+ * stripping); this adds the corrections it omits — tabs (expanded to
+ * `tabWidth` cells), OSC 66 text-sizing payloads (scaled by `s=`), and APC
+ * sequences (counted as printable by Bun, actually zero cells).
  */
 export function visibleWidth(str: string): number {
 	if (!str) return 0;
@@ -343,14 +351,21 @@ export function visibleWidth(str: string): number {
 	// `Bun.stringWidth` is a JSC builtin (no per-call N-API number box, unlike
 	// the native scanner that traps under Bun 1.3.x GC/N-API load). It strips
 	// CSI/OSC to zero cells and shares the native engine's UAX#11 width tables.
-	let width = Bun.stringWidth(str, STRING_WIDTH_OPTS);
+	const measurable = str.includes(APC_PREFIX, i) ? str.replace(APC_SPAN_REGEX, "") : str;
+	if (measurable !== str && tabCount > 0) {
+		tabCount = 0;
+		for (let tabIndex = measurable.indexOf(TAB); tabIndex !== -1; tabIndex = measurable.indexOf(TAB, tabIndex + 1)) {
+			tabCount++;
+		}
+	}
+	let width = Bun.stringWidth(measurable, STRING_WIDTH_OPTS);
 	if (tabCount > 0) width += tabCount * DEFAULT_TAB_WIDTH;
 
 	// OSC 66: add back each stripped span as `scale * (explicit w ?? payload
 	// width)`. Matched rather than replaced to avoid reallocating the string.
-	if (str.includes(OSC66_PREFIX, i)) {
+	if (measurable.includes(OSC66_PREFIX)) {
 		OSC66_SPAN_REGEX.lastIndex = 0;
-		for (let m = OSC66_SPAN_REGEX.exec(str); m !== null; m = OSC66_SPAN_REGEX.exec(str)) {
+		for (let m = OSC66_SPAN_REGEX.exec(measurable); m !== null; m = OSC66_SPAN_REGEX.exec(measurable)) {
 			let scale = 1;
 			let explicit: number | undefined;
 			for (const part of m[1].split(":")) {
@@ -368,7 +383,7 @@ export function visibleWidth(str: string): number {
 		}
 	}
 
-	return correctHangulCompatibilityJamoWidth(width, str);
+	return correctHangulCompatibilityJamoWidth(width, measurable);
 }
 
 /**

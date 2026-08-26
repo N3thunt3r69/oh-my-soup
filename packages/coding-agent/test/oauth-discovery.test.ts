@@ -656,18 +656,34 @@ describe("bounded discovery fetches", () => {
 	};
 
 	it("aborts hanging well-known discovery fetches instead of stalling", async () => {
-		const oauth = await discoverOAuthEndpoints("https://mcp.example.test/mcp", undefined, undefined, {
-			fetch: hangingFetch,
-			signal: AbortSignal.timeout(50),
+		const controller = new AbortController();
+		const started = Promise.withResolvers<void>();
+		const fetchImpl: FetchImpl = (input, init) => {
+			started.resolve();
+			return hangingFetch(input, init);
+		};
+		const pending = discoverOAuthEndpoints("https://mcp.example.test/mcp", undefined, undefined, {
+			fetch: fetchImpl,
+			signal: controller.signal,
 		});
-		expect(oauth).toBeNull();
+		await started.promise;
+		controller.abort();
+		expect(await pending).toBeNull();
 	});
 
 	it("aborts a hanging resource_metadata fetch and returns undefined", async () => {
-		const scopes = await fetchResourceMetadataScopes(
-			"https://mcp.example.test/.well-known/oauth-protected-resource",
-			{ fetch: hangingFetch, signal: AbortSignal.timeout(50) },
-		);
-		expect(scopes).toBeUndefined();
+		const controller = new AbortController();
+		const started = Promise.withResolvers<void>();
+		const fetchImpl: FetchImpl = (input, init) => {
+			started.resolve();
+			return hangingFetch(input, init);
+		};
+		const pending = fetchResourceMetadataScopes("https://mcp.example.test/.well-known/oauth-protected-resource", {
+			fetch: fetchImpl,
+			signal: controller.signal,
+		});
+		await started.promise;
+		controller.abort();
+		expect(await pending).toBeUndefined();
 	});
 });

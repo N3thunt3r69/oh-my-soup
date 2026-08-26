@@ -34,6 +34,7 @@ export type TerminalId =
 	| "vscode"
 	| "alacritty"
 	| "warp"
+	| "orca"
 	| "base"
 	| "trueColor";
 
@@ -107,8 +108,8 @@ export class TerminalInfo {
 		/** Renders the Kitty OSC 66 text-sizing protocol (scaled spans). Kitty only. */
 		public readonly textSizing: boolean = false,
 		/**
-		 * Hangul Compatibility Jamo (U+3131..=U+318E) cell width. Ghostty follows
-		 * UAX#11 (2 cells); Warp paints 1; "platform" keeps the OS default
+		 * Hangul Compatibility Jamo (U+3131..=U+318E) cell width. Ghostty and Orca
+		 * follow UAX#11 (2 cells); Warp paints 1; "platform" keeps the OS default
 		 * (macOS narrow, otherwise UAX#11).
 		 */
 		public readonly hangulJamoWidth: HangulCompatibilityJamoWidth = "platform",
@@ -221,6 +222,16 @@ function getForcedImageProtocol(): ImageProtocol | null | undefined {
 	if (raw === "sixel") return ImageProtocol.Sixel;
 	if (raw === "off" || raw === "none" || raw === "0" || raw === "false") return null;
 	return null;
+}
+
+/**
+ * Whether `PI_FORCE_IMAGE_PROTOCOL` pins the image protocol, including its
+ * `off`/`none` kill switch. A runtime capability probe must not override an
+ * explicit user choice: a forced protocol is already applied to {@link TERMINAL},
+ * and a forced "off" leaves `imageProtocol` null on purpose.
+ */
+export function isImageProtocolForced(): boolean {
+	return getForcedImageProtocol() !== undefined;
 }
 
 function parseMajorMinorVersion(versionRaw?: string): { major: number; minor: number } | null {
@@ -477,6 +488,7 @@ const KNOWN_TERMINALS = Object.freeze({
 	iterm2: new TerminalInfo("iterm2", ImageProtocol.Iterm2, true, true, NotifyProtocol.Osc9),
 	vscode: new TerminalInfo("vscode", null, true, true, NotifyProtocol.Bell),
 	alacritty: new TerminalInfo("alacritty", null, true, true, NotifyProtocol.Bell),
+	orca: new TerminalInfo("orca", null, true, false, NotifyProtocol.Bell, false, false, false, 2),
 	// Warp identifies via TERM_PROGRAM=WarpTerminal and ships the Kitty graphics
 	// protocol on macOS/Linux (direct placement only — no Unicode placeholders, so
 	// detectKittyUnicodePlaceholdersSupport correctly excludes it). It does not
@@ -518,6 +530,7 @@ export function detectTerminalId(env: NodeJS.ProcessEnv = Bun.env): TerminalId {
 		if (caseEq(TERM_PROGRAM, "vscode")) return "vscode";
 		if (caseEq(TERM_PROGRAM, "alacritty")) return "alacritty";
 		if (caseEq(TERM_PROGRAM, "warpterminal")) return "warp";
+		if (caseEq(TERM_PROGRAM, "orca")) return "orca";
 	}
 
 	if (TERM?.toLowerCase().includes("ghostty")) return "ghostty";

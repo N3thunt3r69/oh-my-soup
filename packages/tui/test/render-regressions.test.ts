@@ -9,6 +9,7 @@ import {
 	TERMINAL,
 	TUI,
 } from "@oh-my-soup/pi-tui";
+import { isConPTYHosted } from "@oh-my-soup/pi-tui/terminal";
 import { VirtualTerminal } from "./virtual-terminal";
 
 class MutableLinesComponent implements Component {
@@ -162,6 +163,15 @@ async function settle(term: VirtualTerminal): Promise<void> {
 // end state wait past that window. These are integration tests against the real
 // render scheduler, so the window is driven with a real delay, not fake timers.
 async function settleResize(term: VirtualTerminal): Promise<void> {
+	await Bun.sleep(160);
+	await settle(term);
+}
+
+// These integration tests use TUI's real render scheduler; its production
+// ConPTY guard is keyed to a monotonic 150 ms host-drain window and exposes no
+// completion signal, so wait past that window only on affected hosts.
+async function settleConPTY(term: VirtualTerminal): Promise<void> {
+	if (!isConPTYHosted()) return;
 	await Bun.sleep(160);
 	await settle(term);
 }
@@ -1081,6 +1091,7 @@ describe("TUI terminal-state regressions", () => {
 				component.setLines(rows("row-", 24));
 				tui.requestRender();
 				await settle(term);
+				await settleConPTY(term);
 
 				const viewport = visible(term).filter(line => line.trim().length > 0);
 				expect(viewport).toHaveLength(6);
@@ -2124,6 +2135,7 @@ describe("TUI terminal-state regressions", () => {
 				component.setLines([...finalFrame, ...rows("tail-", 5)]);
 				tui.requestRender();
 				await settle(term);
+				await settleConPTY(term);
 
 				expect(visible(term).map(line => line.trim())).toEqual(rows("tail-", 5));
 				const grownHistory = term
@@ -2517,6 +2529,7 @@ describe("TUI terminal-state regressions", () => {
 				component.setLines(short);
 				tui.requestRender();
 				await settle(term);
+				await settleConPTY(term);
 
 				expect(visible(term).map(line => line.trim())).toEqual([
 					"short-5",
@@ -3214,6 +3227,7 @@ describe("TUI terminal-state regressions", () => {
 				await settle(term);
 				handle.hide();
 				await settle(term);
+				await settleConPTY(term);
 
 				expect(term.getScrollBuffer().some(line => line.includes("OV_SENTINEL_4_"))).toBeFalse();
 				expect(visible(term).some(line => line.includes("OV_SENTINEL_4_"))).toBeFalse();

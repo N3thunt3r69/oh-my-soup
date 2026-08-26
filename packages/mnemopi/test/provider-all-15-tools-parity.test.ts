@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleToolCall, TOOLS } from "@oh-my-soup/pi-mnemopi/mcp-tools";
+import { removeSyncWithRetries } from "@oh-my-soup/pi-utils";
 
 let dataDir: string;
 
@@ -15,7 +16,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	rmSync(dataDir, { recursive: true, force: true });
+	removeSyncWithRetries(dataDir);
 	delete process.env.MNEMOPI_DATA_DIR;
 	delete process.env.MNEMOPI_NO_EMBEDDINGS;
 	delete process.env.MNEMOPI_MCP_BANK;
@@ -138,7 +139,7 @@ describe("provider all-tools parity", () => {
 		expect(validate.status).toBe("validation_attest");
 		const diagnose = await handleToolCall("mnemopi_diagnose", { bank: "ops" });
 		expect(diagnose.status).toBe("ok");
-		expect(diagnose.db_path).toContain("banks/ops/mnemopi.db");
+		expect(diagnose.db_path).toContain(join("banks", "ops", "mnemopi.db"));
 		const graphQuery = await handleToolCall("mnemopi_graph_query", { seed_memory_id: memoryId, bank: "ops" });
 		expect(graphQuery).toMatchObject({
 			status: "ok",

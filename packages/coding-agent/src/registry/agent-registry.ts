@@ -289,10 +289,14 @@ export class AgentRegistry {
 
 	/** Mirror a session's authoritative run-state notifications into its owned registry ref. */
 	syncSessionStatus(id: string, session: AgentSession): () => void {
-		const unsubscribe = session.subscribeRunState(status => {
-			this.setStatus(id, status, session);
-		});
-		return unsubscribe;
+		// Partial session implementations used by embedders and focused executor
+		// tests may not expose run-state notifications. Registry mirroring is
+		// observational, so absence degrades to a no-op rather than aborting work.
+		return (
+			session.subscribeRunState?.(status => {
+				this.setStatus(id, status, session);
+			}) ?? (() => {})
+		);
 	}
 
 	onChange(listener: RegistryListener): () => void {

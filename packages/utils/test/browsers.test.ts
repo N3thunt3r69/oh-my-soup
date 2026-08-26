@@ -69,7 +69,7 @@ describe("Chrome-for-Testing layout goldens", () => {
 					buildId: BUILD_ID,
 					cacheDir: "/cache",
 				}),
-			).toBe(golden.executable);
+			).toBe(path.normalize(golden.executable));
 		});
 	}
 });
@@ -119,11 +119,12 @@ test("install streams and extracts stored, deflated, nested, executable, and sym
 		});
 		const executable = await fs.readFile(installed.executablePath, "utf8");
 		expect(executable).toBe("#!/bin/sh\necho synthetic chrome\n");
-		expect((await fs.stat(installed.executablePath)).mode & 0o777).toBe(0o755);
+		if (process.platform !== "win32") expect((await fs.stat(installed.executablePath)).mode & 0o777).toBe(0o755);
 		expect(await fs.readFile(path.join(installed.path, "chrome-linux64/nested/data.txt"), "utf8")).toBe(
 			"nested fixture\n",
 		);
-		expect((await fs.stat(path.join(installed.path, "chrome-linux64/nested/data.txt"))).mode & 0o777).toBe(0o640);
+		if (process.platform !== "win32")
+			expect((await fs.stat(path.join(installed.path, "chrome-linux64/nested/data.txt"))).mode & 0o777).toBe(0o640);
 		expect(await fs.readlink(path.join(installed.path, "chrome-linux64/chrome-link"))).toBe("chrome");
 		expect(progress.length).toBeGreaterThan(0);
 		expect(progress.at(-1)?.downloadedBytes).toBe(fixture.size);

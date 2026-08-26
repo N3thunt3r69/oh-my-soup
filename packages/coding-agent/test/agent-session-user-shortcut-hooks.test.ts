@@ -5,12 +5,17 @@ import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import * as pythonExecutor from "@oh-my-soup/pi-coding-agent/eval/py/executor";
+import { checkPythonKernelAvailability } from "@oh-my-soup/pi-coding-agent/eval/py/kernel";
 import * as bashExecutor from "@oh-my-soup/pi-coding-agent/exec/bash-executor";
 import type { ExtensionRunner } from "@oh-my-soup/pi-coding-agent/extensibility/extensions";
 import { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-soup/pi-utils";
+
+const pythonRuntimeAvailable = (
+	await checkPythonKernelAvailability(path.parse(process.cwd()).root, undefined, { forceProbe: true })
+).ok;
 
 describe("AgentSession user shortcut hooks", () => {
 	let tempDir: TempDir;
@@ -179,7 +184,7 @@ describe("AgentSession user shortcut hooks", () => {
 		).toBe(true);
 	});
 
-	it("shares Python state between eval and user shortcut execution", async () => {
+	it.skipIf(!pythonRuntimeAvailable)("shares Python state between eval and user shortcut execution", async () => {
 		createSession();
 		const evalSessionId = session.getEvalSessionId();
 		if (!evalSessionId) throw new Error("Expected eval session ID");

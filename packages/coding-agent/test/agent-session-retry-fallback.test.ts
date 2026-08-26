@@ -10,6 +10,7 @@ import {
 	type ModelUsageHealth,
 	type ProviderSessionState,
 } from "@oh-my-soup/pi-ai";
+import * as AIError from "@oh-my-soup/pi-ai/error";
 import { createMockModel } from "@oh-my-soup/pi-ai/providers/mock";
 import { buildModel } from "@oh-my-soup/pi-catalog/build";
 import { writeModelCache } from "@oh-my-soup/pi-catalog/model-cache";
@@ -58,7 +59,12 @@ function getLastAssistantMessage(session: AgentSession): AssistantMessage {
 	return lastMessage;
 }
 
-function createFallbackAgent(primaryModel: Model, requestedModels: string[]): Agent {
+function createFallbackAgent(
+	primaryModel: Model,
+	requestedModels: string[],
+	options: { firstError?: string | Error } = {},
+): Agent {
+	const firstError = options.firstError ?? "rate limit exceeded retry-after-ms=200";
 	const mock = createMockModel();
 	let primaryAttempts = 0;
 	return new Agent({
@@ -73,7 +79,7 @@ function createFallbackAgent(primaryModel: Model, requestedModels: string[]): Ag
 			requestedModels.push(`${model.provider}/${model.id}`);
 			if (model.provider === primaryModel.provider && model.id === primaryModel.id && primaryAttempts === 0) {
 				primaryAttempts += 1;
-				mock.push({ throw: "rate limit exceeded retry-after-ms=200" });
+				mock.push({ throw: firstError });
 			} else {
 				mock.push({ content: [`ok:${model.provider}/${model.id}`] });
 			}
@@ -238,6 +244,46 @@ describe("AgentSession retry fallback", () => {
 				role: "default",
 			},
 		]);
+	});
+
+	it("keeps non-Gemini empty-body errors on the model-fallback path", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled empty-body fallback models");
+		}
+
+		const requestedModels: string[] = [];
+		const agent = createFallbackAgent(primaryModel, requestedModels, {
+			firstError: new AIError.ProviderResponseError("Devin API error: empty response body", {
+				provider: "devin",
+				kind: "empty-body",
+			}),
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.fallbackChains": {
+				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		await session.prompt("Recover the empty provider body");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+		]);
+		expect(session.model?.provider).toBe(fallbackModel.provider);
+		expect(session.model?.id).toBe(fallbackModel.id);
 	});
 
 	it("forwards retry fallback events to extension handlers", async () => {
@@ -1837,6 +1883,82 @@ describe("AgentSession retry fallback", () => {
 		]);
 		expect(session.model?.provider).toBe(fallbackModel.provider);
 		expect(getLastAssistantMessage(session).stopReason).toBe("stop");
+	});
+
+	it("surfaces immutable Anthropic thinking errors without retry fallback", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("anthropic", "claude-opus-4-1");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled Anthropic test models to exist");
+		}
+
+		const immutableThinkingError =
+			"400 invalid_request_error: messages.1.content.5: `thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified";
+		const mock = createMockModel();
+		const requestedModels: string[] = [];
+		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		let requestCount = 0;
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (model, context, options) => {
+				requestCount++;
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (requestCount === 1) {
+					mock.push({
+						content: [
+							{ type: "thinking", thinking: "Signed Sonnet reasoning.", thinkingSignature: "sonnet-signature" },
+							"Seeded turn",
+						],
+					});
+				} else {
+					mock.push({ throw: immutableThinkingError });
+				}
+				return mock.stream(model, context, options);
+			},
+		});
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.fallbackChains": {
+				"anthropic/*": [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const { retryStartEvents } = trackRetryEvents(session);
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") {
+				fallbackAppliedEvents.push(event);
+			}
+		});
+
+		await session.prompt("Seed signed thinking");
+		await session.waitForIdle();
+		await session.prompt("Continue");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${primaryModel.provider}/${primaryModel.id}`,
+		]);
+		expect(fallbackAppliedEvents).toEqual([]);
+		expect(retryStartEvents).toEqual([]);
+		expect(session.model?.id).toBe(primaryModel.id);
+		expect(getLastAssistantMessage(session)).toMatchObject({
+			stopReason: "error",
+			errorMessage: immutableThinkingError,
+		});
 	});
 
 	it("surfaces a non-retryable error without same-model retries when no fallback candidate has a credential", async () => {
@@ -4229,7 +4351,7 @@ describe("AgentSession retry fallback", () => {
 		expect(modelRegistry.isSelectorSuppressed("openai/gpt-4o")).toBe(false);
 	});
 
-	it("auto-retries Gemini MALFORMED_FUNCTION_CALL transient errors", async () => {
+	it("auto-retries Gemini MALFORMED_FUNCTION_CALL after an unexecuted tool call", async () => {
 		const model = getBundledModel("google", "gemini-1.5-flash");
 		if (!model) {
 			throw new Error("Expected bundled Google test model to exist");
@@ -4237,11 +4359,30 @@ describe("AgentSession retry fallback", () => {
 
 		const malformedError = "Generation failed with finish reason: MALFORMED_FUNCTION_CALL";
 		const requestedModels: string[] = [];
+		let toolExecutions = 0;
+		const toolSchema = type({ value: type("string") });
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "record",
+			label: "Record",
+			description: "Record a value",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				toolExecutions += 1;
+				return { content: [{ type: "text", text: params.value }], details: params };
+			},
+		};
 
 		const mock = createMockModel({
 			responses: [
 				{
-					content: [{ type: "thinking", thinking: "Thinking before malformed function call..." }],
+					content: [
+						{
+							type: "toolCall",
+							id: "malformed-call",
+							name: "record",
+							arguments: { value: "must-not-execute" },
+						},
+					],
 					stopReason: "error",
 					errorMessage: malformedError,
 				},
@@ -4253,7 +4394,7 @@ describe("AgentSession retry fallback", () => {
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
-				tools: [],
+				tools: [tool],
 				messages: [],
 			},
 			streamFn: (requestedModel, context, options) => {
@@ -4280,15 +4421,28 @@ describe("AgentSession retry fallback", () => {
 		await session.prompt("recover from Gemini malformed error");
 		await session.waitForIdle();
 
-		expect(mock.calls).toHaveLength(2);
+		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
+		expect(toolExecutions).toBe(0);
 		expect(retryStartEvents).toHaveLength(1);
 		expect(retryEndEvents).toHaveLength(1);
-		expect(session.agent.state.messages).toHaveLength(2);
-		const assistantMsg = session.agent.state.messages[1];
-		if (assistantMsg.role !== "assistant") {
-			throw new Error(`Expected assistant message, got ${assistantMsg.role}`);
+		const messages = session.agent.state.messages;
+		expect(messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+		const failedAssistant = messages[1];
+		if (failedAssistant.role !== "assistant") {
+			throw new Error(`Expected failed assistant message, got ${failedAssistant.role}`);
 		}
-		const contentBlock = assistantMsg.content[0];
+		expect(failedAssistant.errorMessage).toBe(malformedError);
+		const syntheticResult = messages[2];
+		if (syntheticResult.role !== "toolResult") {
+			throw new Error(`Expected synthetic tool result, got ${syntheticResult.role}`);
+		}
+		expect(syntheticResult.toolCallId).toBe("malformed-call");
+		expect(syntheticResult.details).toMatchObject({ executed: false, source: "assistant_stop_error" });
+		const recoveredAssistant = messages[3];
+		if (recoveredAssistant.role !== "assistant") {
+			throw new Error(`Expected recovered assistant message, got ${recoveredAssistant.role}`);
+		}
+		const contentBlock = recoveredAssistant.content[0];
 		if (contentBlock.type !== "text") {
 			throw new Error(`Expected text content block, got ${contentBlock.type}`);
 		}

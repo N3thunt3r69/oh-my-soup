@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { $which } from "@oh-my-soup/pi-utils";
 import { PYTHON_PRELUDE } from "../../../src/eval/py/prelude";
+import { filterEnv, resolvePythonRuntime } from "../../../src/eval/py/runtime";
 
-const pythonPath = Bun.env.PYTHON ?? ($which("python3") ? "python3" : "python");
+const pythonRuntime = resolvePythonRuntime(process.cwd(), filterEnv(process.env));
+const pythonPath = pythonRuntime.pythonPath;
 
 async function runPrelude(
 	code: string,
@@ -16,7 +17,7 @@ async function runPrelude(
 	const proc = Bun.spawn([pythonPath, "-c", script], {
 		stdout: "pipe",
 		stderr: "pipe",
-		env: { ...process.env, ...env },
+		env: { ...pythonRuntime.env, ...env },
 	});
 	const [stdout, stderr, exitCode] = await Promise.all([
 		new Response(proc.stdout).text(),

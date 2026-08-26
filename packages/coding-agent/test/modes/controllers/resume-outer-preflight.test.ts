@@ -63,6 +63,9 @@ async function createMode(opts: { flushFails?: boolean } = {}): Promise<{
 		mode,
 		session,
 		cleanup: async () => {
+			mode.stop();
+			await session.dispose();
+			authStorage.close();
 			resetSettingsForTest();
 			await tempDir.remove();
 		},

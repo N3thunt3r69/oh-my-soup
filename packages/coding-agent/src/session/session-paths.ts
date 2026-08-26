@@ -42,6 +42,13 @@ function encodeRelativeSessionDirName(prefix: string, relative: string): string 
 	return encoded ? (prefix.endsWith("-") ? `${prefix}${encoded}` : `${prefix}-${encoded}`) : prefix;
 }
 
+function isWithinPathRoot(relativePath: string): boolean {
+	return (
+		relativePath === "" ||
+		(relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath))
+	);
+}
+
 /**
  * Reconstruct the short-lived hashed session dir name used by 17.2.5-17.2.8
  * (reverted PR #7397): `<scope>-<readable>-<sha256hex>` keyed by the canonical
@@ -74,12 +81,14 @@ function getDefaultSessionDirName(cwd: string): {
 	const tempRelative = path.relative(canonicalTempRoot, canonicalCwd);
 	let encodedDirName: string;
 	let scope: "home" | "tmp" | "abs";
-	if (homeRelative === "" || (!homeRelative.startsWith("..") && !path.isAbsolute(homeRelative))) {
-		encodedDirName = encodeRelativeSessionDirName("-", homeRelative);
-		scope = "home";
-	} else if (tempRelative === "" || (!tempRelative.startsWith("..") && !path.isAbsolute(tempRelative))) {
+	if (isWithinPathRoot(tempRelative)) {
+		// On Windows the temp root commonly lives below the user's home directory.
+		// Classify it first so temp sessions keep the platform-independent -tmp scheme.
 		encodedDirName = encodeRelativeSessionDirName("-tmp", tempRelative);
 		scope = "tmp";
+	} else if (isWithinPathRoot(homeRelative)) {
+		encodedDirName = encodeRelativeSessionDirName("-", homeRelative);
+		scope = "home";
 	} else {
 		encodedDirName = encodeLegacyAbsoluteSessionDirName(canonicalCwd);
 		scope = "abs";
@@ -188,10 +197,13 @@ export function computeDefaultSessionDir(
 	sessionsRoot: string = getSessionsDir(),
 ): string {
 	const { encodedDirName, hashedDirName, resolvedCwd } = getDefaultSessionDirName(cwd);
-	migrateHomeSessionDirs(sessionsRoot);
 	const sessionDir = path.join(sessionsRoot, encodedDirName);
+	// Migrate this cwd before the root-wide home migration. On Windows the temp
+	// root is commonly nested under home, and the generic sweep would otherwise
+	// misclassify its legacy absolute directory as a home-relative directory.
 	migrateLegacyAbsoluteSessionDir(resolvedCwd, sessionDir, sessionsRoot);
 	migrateHashedSessionDir(hashedDirName, sessionDir, sessionsRoot);
+	migrateHomeSessionDirs(sessionsRoot);
 	storage.ensureDirSync(sessionDir);
 	return sessionDir;
 }

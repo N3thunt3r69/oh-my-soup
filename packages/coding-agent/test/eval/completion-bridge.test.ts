@@ -13,8 +13,13 @@ import { IdleTimeout } from "../../src/eval/idle-timeout";
 import { disposeAllVmContexts } from "../../src/eval/js/context-manager";
 import { executeJs } from "../../src/eval/js/executor";
 import { disposeAllKernelSessions, type PythonResult } from "../../src/eval/py/executor";
+import { checkPythonKernelAvailability } from "../../src/eval/py/kernel";
 import type { ToolSession } from "../../src/tools";
 import { ToolError } from "../../src/tools/tool-errors";
+
+const pythonRuntimeAvailable = (
+	await checkPythonKernelAvailability(path.parse(process.cwd()).root, undefined, { forceProbe: true })
+).ok;
 
 function makeModel(provider: string, id: string, extra: Partial<Model<Api>> = {}): Model<Api> {
 	return {
@@ -388,7 +393,7 @@ describe("completion() through eval runtimes", () => {
 		expect(JSON.parse(result.output.trim())).toEqual({ ok: true, n: 3 });
 	});
 
-	it("exposes completion() in the Python runtime", async () => {
+	it.skipIf(!pythonRuntimeAvailable)("exposes completion() in the Python runtime", async () => {
 		const tempDir = TempDir.createSync("@oms-eval-completion-py-");
 		try {
 			const result = await runPythonCompletionInSubprocess({ structured: false, tempDir });
@@ -399,7 +404,7 @@ describe("completion() through eval runtimes", () => {
 		}
 	});
 
-	it("parses structured completion() output in the Python runtime", async () => {
+	it.skipIf(!pythonRuntimeAvailable)("parses structured completion() output in the Python runtime", async () => {
 		const tempDir = TempDir.createSync("@oms-eval-completion-py-struct-");
 		try {
 			const result = await runPythonCompletionInSubprocess({ structured: true, tempDir });

@@ -597,7 +597,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
 			conversationBlobStores.set(conversationId, blobStore);
 			const cachedState = conversationStateCache.get(conversationId);
-			const { requestBytes, conversationState } = buildGrpcRequest(model, context, options, {
+			const { requestBytes, conversationState } = await buildGrpcRequest(model, context, options, {
 				conversationId,
 				blobStore,
 				conversationState: cachedState,
@@ -4602,7 +4602,7 @@ function extractImages(content: (TextContent | ImageContent)[]) {
 		);
 }
 
-function buildGrpcRequest(
+export async function buildGrpcRequest(
 	model: Model<"cursor-agent">,
 	context: Context,
 	options: CursorOptions | undefined,
@@ -4611,11 +4611,11 @@ function buildGrpcRequest(
 		blobStore: Map<string, Uint8Array>;
 		conversationState?: ConversationStateStructure;
 	},
-): {
+): Promise<{
 	requestBytes: Uint8Array;
 	blobStore: Map<string, Uint8Array>;
 	conversationState: ConversationStateStructure;
-} {
+}> {
 	const blobStore = state.blobStore;
 
 	const systemPromptIds = buildCursorSystemPromptJsons(context.systemPrompt).map(json =>
@@ -4721,7 +4721,7 @@ function buildGrpcRequest(
 		maxMode: cursorMaxMode,
 	});
 
-	const runRequest = create(AgentRunRequestSchema, {
+	let runRequest = create(AgentRunRequestSchema, {
 		conversationState,
 		action,
 		modelDetails,
@@ -4729,13 +4729,15 @@ function buildGrpcRequest(
 		conversationId: state.conversationId,
 	});
 
-	options?.onPayload?.(runRequest, model);
-
-	// Tools are sent later via requestContext (exec handshake)
-
+	// Apply customSystemPrompt before the hook so a replacement remains the
+	// final wire payload. The hook may inspect, override, or drop the option.
 	if (options?.customSystemPrompt) {
 		runRequest.customSystemPrompt = options.customSystemPrompt;
 	}
+
+	// Tools are sent later via requestContext (exec handshake)
+	const replacementRequest = await options?.onPayload?.(runRequest, model);
+	if (replacementRequest !== undefined) runRequest = replacementRequest as typeof runRequest;
 
 	const clientMessage = create(AgentClientMessageSchema, {
 		message: { case: "runRequest", value: runRequest },

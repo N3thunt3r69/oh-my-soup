@@ -3,11 +3,20 @@ import path from "node:path";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
 
 /** Project type detection result */
-interface ProjectType {
+export interface ProjectType {
 	type: "rust" | "typescript" | "go" | "python" | "unknown";
 	command?: string[];
 	description: string;
 }
+
+/**
+ * How many workspace checkers may run at once.
+ *
+ * Checkers like `cargo check` and `tsc` are each CPU- and memory-hungry and
+ * already parallelize internally, so a polyglot root runs them a couple at a
+ * time rather than launching every toolchain at once.
+ */
+const MAX_CONCURRENT_CHECKERS = 2;
 
 /** Convert a `go.work` use directory into the package pattern `go build` needs. */
 function goWorkspaceBuildPattern(diskPath: string): string | null {
@@ -80,55 +89,109 @@ async function resolveGoWorkspaceDiagnosticsCommand(cwd: string, signal?: AbortS
 	}
 }
 
-/** Detect project type from root markers */
-async function detectProjectType(cwd: string, signal?: AbortSignal): Promise<ProjectType> {
-	// Check for Rust (Cargo.toml)
+/**
+ * Detect every project type present at the workspace root.
+ *
+ * Detection used to return on the first matching marker, so a polyglot root
+ * (for example `Cargo.toml` alongside `tsconfig.json`) only ever ran the
+ * highest-priority checker and silently skipped the rest. Every marker is
+ * collected instead, in the original priority order, so single-language roots
+ * keep their exact previous result while polyglot roots check everything.
+ *
+ * `go.work` still wins over `go.mod` and `pyproject.toml` over
+ * `pyrightconfig.json` — those pairs are two markers for one toolchain, not
+ * two separate languages.
+ */
+export async function detectProjectTypes(cwd: string, signal?: AbortSignal): Promise<ProjectType[]> {
+	const detected: ProjectType[] = [];
+
 	if (fs.existsSync(path.join(cwd, "Cargo.toml"))) {
-		return { type: "rust", command: ["cargo", "check", "--message-format=short"], description: "Rust (cargo check)" };
+		const command = ["cargo", "check", "--message-format=short"];
+		detected.push({ type: "rust", command, description: "Rust (cargo check)" });
 	}
 
-	// Check for TypeScript (tsconfig.json)
 	if (fs.existsSync(path.join(cwd, "tsconfig.json"))) {
-		return { type: "typescript", command: ["npx", "tsc", "--noEmit"], description: "TypeScript (tsc --noEmit)" };
+		const command = ["npx", "tsc", "--noEmit"];
+		detected.push({ type: "typescript", command, description: "TypeScript (tsc --noEmit)" });
 	}
 
-	// Check for Go workspaces before single-module Go projects.
 	if (fs.existsSync(path.join(cwd, "go.work"))) {
-		return {
+		detected.push({
 			type: "go",
 			command: await resolveGoWorkspaceDiagnosticsCommand(cwd, signal),
 			description: "Go workspace (go build)",
-		};
+		});
+	} else if (fs.existsSync(path.join(cwd, "go.mod"))) {
+		detected.push({ type: "go", command: ["go", "build", "./..."], description: "Go (go build)" });
 	}
 
-	// Check for Go (go.mod)
-	if (fs.existsSync(path.join(cwd, "go.mod"))) {
-		return { type: "go", command: ["go", "build", "./..."], description: "Go (go build)" };
-	}
-
-	// Check for Python (pyproject.toml or pyrightconfig.json)
 	if (fs.existsSync(path.join(cwd, "pyproject.toml")) || fs.existsSync(path.join(cwd, "pyrightconfig.json"))) {
-		return { type: "python", command: ["pyright"], description: "Python (pyright)" };
+		detected.push({ type: "python", command: ["pyright"], description: "Python (pyright)" });
 	}
 
-	return { type: "unknown", description: "Unknown project type" };
+	if (detected.length === 0) {
+		return [{ type: "unknown", description: "Unknown project type" }];
+	}
+	return detected;
 }
 
-/** Run workspace diagnostics command and parse output */
-export async function runWorkspaceDiagnostics(
-	cwd: string,
-	signal?: AbortSignal,
-): Promise<{ output: string; projectType: ProjectType }> {
-	throwIfAborted(signal);
-	const projectType = await detectProjectType(cwd, signal);
-	if (!projectType.command) {
-		return {
-			output: `Cannot detect project type. Supported: Rust (Cargo.toml), TypeScript (tsconfig.json), Go (go.work/go.mod), Python (pyproject.toml)`,
-			projectType,
-		};
+/** Interpret an empty checker result without mistaking a crash for a clean workspace. */
+export function interpretEmptyDiagnosticsResult(
+	exitCode: number,
+	signalCode: string | null,
+	command: readonly string[],
+): string {
+	if (exitCode === 0) return "No issues found";
+	const detail = signalCode ? `was killed by ${signalCode}` : `exited with code ${exitCode}`;
+	return `Failed to run ${command.join(" ")}: the checker ${detail} without reporting anything, so the workspace was not verified`;
+}
+
+/** Join per-language descriptions for the aggregate header. */
+export function combineProjectDescriptions(projectTypes: readonly ProjectType[]): string {
+	return projectTypes.map(projectType => projectType.description).join(" + ");
+}
+
+/**
+ * Label each section when more than one checker ran.
+ *
+ * A single detected language keeps the bare output it has always produced, so
+ * existing callers and their expectations are untouched.
+ */
+export function combineDiagnosticsOutputs(sections: readonly { description: string; output: string }[]): string {
+	if (sections.length === 1) return sections[0]?.output ?? "";
+	return sections.map(section => `=== ${section.description} ===\n${section.output}`).join("\n\n");
+}
+
+/** Run a bounded number of tasks at a time, preserving input order in the results. */
+async function mapWithConcurrency<T, R>(
+	items: readonly T[],
+	limit: number,
+	run: (item: T) => Promise<R>,
+): Promise<R[]> {
+	const results: R[] = new Array(items.length);
+	let cursor = 0;
+
+	const worker = async (): Promise<void> => {
+		while (true) {
+			const index = cursor++;
+			const item = items[index];
+			if (index >= items.length || item === undefined) return;
+			results[index] = await run(item);
+		}
+	};
+
+	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+	return results;
+}
+
+/** Run one language's checker and render its output. */
+async function runProjectDiagnostics(cwd: string, projectType: ProjectType, signal?: AbortSignal): Promise<string> {
+	const command = projectType.command;
+	if (!command) {
+		return "Cannot detect project type. Supported: Rust (Cargo.toml), TypeScript (tsconfig.json), Go (go.work/go.mod), Python (pyproject.toml)";
 	}
 	try {
-		const proc = Bun.spawn(projectType.command, {
+		const proc = Bun.spawn(command, {
 			cwd,
 			stdout: "pipe",
 			stderr: "pipe",
@@ -146,18 +209,19 @@ export async function runWorkspaceDiagnostics(
 				new Response(proc.stdout).text(),
 				new Response(proc.stderr).text(),
 			]);
-			await proc.exited;
+			const exitCode = await proc.exited;
 			throwIfAborted(signal);
 			const combined = (stdout + stderr).trim();
 			if (!combined) {
-				return { output: "No issues found", projectType };
+				return interpretEmptyDiagnosticsResult(exitCode, proc.signalCode, command);
 			}
-			// Limit output length
+			// Limit output length per language so a noisy checker cannot crowd
+			// its siblings out of a polyglot report.
 			const lines = combined.split("\n");
 			if (lines.length > 50) {
-				return { output: `${lines.slice(0, 50).join("\n")}\n[…${lines.length - 50}ln elided…]`, projectType };
+				return `${lines.slice(0, 50).join("\n")}\n[…${lines.length - 50}ln elided…]`;
 			}
-			return { output: combined, projectType };
+			return combined;
 		} finally {
 			signal?.removeEventListener("abort", abortHandler);
 		}
@@ -165,6 +229,25 @@ export async function runWorkspaceDiagnostics(
 		if (signal?.aborted) {
 			throw new ToolAbortError();
 		}
-		return { output: `Failed to run ${projectType.command.join(" ")}: ${e}`, projectType };
+		return `Failed to run ${command.join(" ")}: ${e}`;
 	}
+}
+
+/** Run every detected workspace checker and combine their output. */
+export async function runWorkspaceDiagnostics(
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<{ output: string; projectType: ProjectType; projectTypes: ProjectType[] }> {
+	throwIfAborted(signal);
+	const projectTypes = await detectProjectTypes(cwd, signal);
+	const primary = projectTypes[0] ?? { type: "unknown" as const, description: "Unknown project type" };
+	const projectType =
+		projectTypes.length > 1 ? { ...primary, description: combineProjectDescriptions(projectTypes) } : primary;
+
+	const outputs = await mapWithConcurrency(projectTypes, MAX_CONCURRENT_CHECKERS, async detectedType => ({
+		description: detectedType.description,
+		output: await runProjectDiagnostics(cwd, detectedType, signal),
+	}));
+
+	return { output: combineDiagnosticsOutputs(outputs), projectType, projectTypes };
 }

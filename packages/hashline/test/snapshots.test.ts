@@ -69,6 +69,26 @@ describe("InMemorySnapshotStore", () => {
 		expect(store.head(PATH)).toBeNull();
 	});
 
+	// A tag minted early in a wide session remains recognizable through the
+	// 256-path default, then ages out when the LRU exceeds that bound.
+	it("keeps an early tag resolvable through the default path capacity", () => {
+		const store = new InMemorySnapshotStore();
+		const tag = store.record(PATH, "first\n");
+		for (let i = 0; i < 255; i++) store.record(`/w/other-${i}.ts`, `content ${i}\n`);
+		expect(store.byHash(PATH, tag)?.text).toBe("first\n");
+		const overflow = new InMemorySnapshotStore();
+		const overflowTag = overflow.record(PATH, "first\n");
+		for (let i = 0; i < 256; i++) overflow.record(`/w/other-${i}.ts`, `content ${i}\n`);
+		expect(overflow.byHash(PATH, overflowTag)).toBeNull();
+	});
+
+	it("still retains only four versions per path by default", () => {
+		const store = new InMemorySnapshotStore();
+		const tags = ["A\n", "B\n", "C\n", "D\n", "E\n"].map(text => store.record(PATH, text));
+		expect(tags.slice(1).every(tag => store.byHash(PATH, tag) !== null)).toBe(true);
+		expect(store.byHash(PATH, tags[0]!)).toBeNull();
+	});
+
 	it("rejects cross-path lookups", () => {
 		const store = new InMemorySnapshotStore();
 		const tag = store.record(PATH, "shared\n");

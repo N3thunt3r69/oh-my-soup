@@ -3,7 +3,8 @@
  * Replaces per-provider JSON files with a single cache.db.
  */
 import { Database } from "bun:sqlite";
-import { getModelDbPath } from "@oh-my-soup/pi-utils";
+import { renameSync } from "node:fs";
+import { getModelDbPath, isEnoent, isSqliteCorruptionError, logger } from "@oh-my-soup/pi-utils";
 import type { Api, Model, ModelSpec } from "./types";
 
 // Rows persist ModelSpec JSON (sparse `compat`, never the resolved record);
@@ -64,54 +65,123 @@ interface CacheEntry<TApi extends Api = Api> {
 let sharedDb: Database | null = null;
 let sharedDbPath: string | null = null;
 
-function openDb(resolvedPath: string): Database {
-	const db = new Database(resolvedPath, { create: true });
-	// Install the busy handler BEFORE any lock-taking statement. See
-	// https://github.com/can1357/oh-my-pi/issues/2421.
-	db.run("PRAGMA busy_timeout = 3000");
-	// Schema invalidation can delete rows containing credentials written by old
-	// versions. Overwrite deleted SQLite cells instead of leaving their bytes in
-	// free pages where a raw scan of models.db can still recover them (#5780).
-	db.run("PRAGMA secure_delete = ON");
-	db.run("PRAGMA journal_mode = WAL");
-	db.run(`
-		CREATE TABLE IF NOT EXISTS model_cache (
-			provider_id TEXT PRIMARY KEY,
-			version INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL,
-			authoritative INTEGER NOT NULL DEFAULT 0,
-			static_fingerprint TEXT NOT NULL DEFAULT '',
-			header_omitted_model_ids TEXT NOT NULL DEFAULT '[]',
-			unrestorable_header_model_ids TEXT NOT NULL DEFAULT '[]',
-			header_restore_version INTEGER NOT NULL DEFAULT 0,
-			models TEXT NOT NULL
-		)
-	`);
-	migrateCacheSchema(db);
-	return db;
+/** Close the process-shared model cache handle, if open. */
+export function closeSharedModelCache(): void {
+	if (!sharedDb) return;
+	const db = sharedDb;
+	sharedDb = null;
+	sharedDbPath = null;
+	db.close();
 }
 
-function getSharedDb(): Database {
-	const resolvedPath = getModelDbPath();
+function openDb(resolvedPath: string): Database {
+	const db = new Database(resolvedPath, { create: true });
+	try {
+		// Install the busy handler BEFORE any lock-taking statement. See
+		// https://github.com/can1357/oh-my-pi/issues/2421.
+		db.run("PRAGMA busy_timeout = 3000");
+		// Schema invalidation can delete rows containing credentials written by old
+		// versions. Overwrite deleted SQLite cells instead of leaving their bytes in
+		// free pages where a raw scan of models.db can still recover them (#5780).
+		db.run("PRAGMA secure_delete = ON");
+		db.run("PRAGMA journal_mode = WAL");
+		db.run(`
+			CREATE TABLE IF NOT EXISTS model_cache (
+				provider_id TEXT PRIMARY KEY,
+				version INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				authoritative INTEGER NOT NULL DEFAULT 0,
+				static_fingerprint TEXT NOT NULL DEFAULT '',
+				header_omitted_model_ids TEXT NOT NULL DEFAULT '[]',
+				unrestorable_header_model_ids TEXT NOT NULL DEFAULT '[]',
+				header_restore_version INTEGER NOT NULL DEFAULT 0,
+				models TEXT NOT NULL
+			)
+		`);
+		migrateCacheSchema(db);
+		return db;
+	} catch (err) {
+		// SQLite opens the file before PRAGMAs validate it. Closing here releases
+		// the handle so a corrupt database can be renamed on Windows.
+		db.close();
+		throw err;
+	}
+}
+
+function getSharedDb(resolvedPath: string): Database {
 	if (sharedDb && sharedDbPath === resolvedPath) {
 		return sharedDb;
 	}
-	if (sharedDb) {
-		sharedDb.close();
-	}
+	if (sharedDb) closeSharedModelCache();
 	const db = openDb(resolvedPath);
 	sharedDb = db;
 	sharedDbPath = resolvedPath;
 	return db;
 }
 
-function withModelCacheDb<T>(dbPath: string | undefined, useDb: (db: Database) => T): T {
-	if (!dbPath) return useDb(getSharedDb());
-	const db = openDb(dbPath);
+function runModelCacheDb<T>(resolvedPath: string, shared: boolean, useDb: (db: Database) => T): T {
+	if (shared) return useDb(getSharedDb(resolvedPath));
+	const db = openDb(resolvedPath);
 	try {
 		return useDb(db);
 	} finally {
 		db.close();
+	}
+}
+
+// Paths already reported corrupt this process: the first unrecoverable failure
+// is logged at `error`, later heals at `debug`, so a dying disk cannot spam.
+const reportedCorruptPaths = new Set<string>();
+
+/**
+ * Move a physically corrupt `models.db` (plus its `-wal`/`-shm` sidecars) aside
+ * so {@link openDb} can recreate a fresh cache at the original path. Each rename
+ * is atomic and happens only after the owning handle is closed, which is required
+ * on Windows. A vanished file means a peer process already healed it; any other
+ * rename failure is left for {@link openDb} to surface.
+ */
+function quarantineCorruptModelCache(resolvedPath: string): void {
+	const stamp = Date.now();
+	for (const suffix of ["", "-wal", "-shm"]) {
+		try {
+			renameSync(`${resolvedPath}${suffix}`, `${resolvedPath}.corrupt-${stamp}${suffix}`);
+		} catch (err) {
+			if (!isEnoent(err)) {
+				logger.debug("model cache: could not quarantine corrupt file", { path: `${resolvedPath}${suffix}` });
+			}
+		}
+	}
+}
+
+/**
+ * Recover from unrecoverable `models.db` corruption: drop the cached handle,
+ * quarantine the broken files, and let the next open recreate the cache. A
+ * corrupt cache would otherwise be re-queried on every read/write forever,
+ * permanently masking a successful live catalog. Only
+ * {@link isSqliteCorruptionError} codes reach here; BUSY/permission errors keep
+ * their existing best-effort paths.
+ */
+function healCorruptModelCache(resolvedPath: string, shared: boolean, err: unknown): void {
+	if (shared && sharedDb) closeSharedModelCache();
+	quarantineCorruptModelCache(resolvedPath);
+	const code = err && typeof err === "object" && "code" in err ? err.code : undefined;
+	if (reportedCorruptPaths.has(resolvedPath)) {
+		logger.debug("model cache: re-healed corrupt database", { path: resolvedPath, code });
+	} else {
+		reportedCorruptPaths.add(resolvedPath);
+		logger.error("model cache corrupt; quarantined and recreated a fresh cache", { path: resolvedPath, code });
+	}
+}
+
+function withModelCacheDb<T>(dbPath: string | undefined, useDb: (db: Database) => T): T {
+	const resolvedPath = dbPath ?? getModelDbPath();
+	const shared = dbPath === undefined;
+	try {
+		return runModelCacheDb(resolvedPath, shared, useDb);
+	} catch (err) {
+		if (!isSqliteCorruptionError(err)) throw err;
+		healCorruptModelCache(resolvedPath, shared, err);
+		return runModelCacheDb(resolvedPath, shared, useDb);
 	}
 }
 

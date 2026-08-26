@@ -94,6 +94,10 @@ export async function removeWithRetries(target: string): Promise<void> {
 			return;
 		} catch (err) {
 			if (!shouldRetryRemove(err, attempt)) throw err;
+			// Bun's sqlite3_close_v2 can retain a Windows file handle until its
+			// prepared-statement wrappers are collected. Retry turns are the safe
+			// point to force that finalization.
+			Bun.gc(true);
 			await Bun.sleep(kRemoveRetryDelayMs);
 		}
 	}
@@ -106,6 +110,7 @@ export function removeSyncWithRetries(target: string): void {
 			return;
 		} catch (err) {
 			if (!shouldRetryRemove(err, attempt)) throw err;
+			Bun.gc(true);
 			sleepSync(kRemoveRetryDelayMs);
 		}
 	}

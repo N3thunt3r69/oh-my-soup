@@ -1865,6 +1865,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const customTools: CustomTool[] = [];
 		const initialMcpManagerTools: CustomTool[] = [];
 		let startDeferredMCPDiscovery: ((liveSession: AgentSession) => void) | undefined;
+		let deferredMCPDiscoveryTask: Promise<void> | undefined;
 		const startupQuiet = settings.get("startup.quiet");
 		const onMCPStatus = (event: McpConnectionStatusEvent) => {
 			if (!options.hasUI || startupQuiet) return;
@@ -1892,7 +1893,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 				const deferredMCPManager = mcpManager;
 				startDeferredMCPDiscovery = liveSession => {
-					void (async () => {
+					deferredMCPDiscoveryTask = (async () => {
 						try {
 							const mcpResult = await logger.time("discoverAndLoadMCPTools", () =>
 								deferredMCPManager.discoverAndConnect(mcpDiscoverOptions),
@@ -3400,6 +3401,18 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Owned only when this session created the manager; subagents receive a
 		// parent's manager via `options.mcpManager` and MUST NOT disconnect it.
 		const ownedMcpManager = options.mcpManager ? undefined : mcpManager;
+		const disconnectOwnedMcpManager = ownedMcpManager
+			? async () => {
+					// Disconnect first to invalidate in-flight connects, then await
+					// deferred discovery so it cannot spawn a child after dispose resolves.
+					await ownedMcpManager.disconnectAll();
+					await deferredMCPDiscoveryTask;
+					await ownedMcpManager.disconnectAll();
+					if (MCPManager.instance() === ownedMcpManager) {
+						MCPManager.setInstance(undefined);
+					}
+				}
+			: undefined;
 		// A resumed session already has advisor turns on disk; without this the status
 		// line would restart its `(adv)` total at zero for the rest of the session.
 		const initialAdvisorCosts = await loadAdvisorTranscriptCosts(sessionManager.getSessionFile());
@@ -3490,7 +3503,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						return out;
 					}
 				: undefined,
-			disconnectOwnedMcpManager: ownedMcpManager ? () => ownedMcpManager.disconnectAll() : undefined,
+			disconnectOwnedMcpManager,
 			ttsrManager,
 			obfuscator,
 			agentId: resolvedAgentId,
@@ -3707,6 +3720,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					await searchBrowserReleaseTail;
 					for (const callback of disposeCallbacks) callback();
 					disposeCallbacks.clear();
+					if (ownsAuthStorage) authStorage.close();
 					// Drop refs so the process-global postmortem list doesn't retain
 					// the bridge closure past explicit dispose.
 					unsubscribeMcpNotifications = undefined;

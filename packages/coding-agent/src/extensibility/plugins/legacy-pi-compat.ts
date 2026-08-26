@@ -1052,19 +1052,17 @@ export async function __rewriteLegacyExtensionSourceForTests(
 }
 
 /**
- * Build the import specifier for a graph-resolved absolute path. POSIX
- * emits a bare filesystem path with an optional `?mtime=<tag>` (Bun keys
- * query strings for bare-path specifiers), so same-process extension
- * reloads pick up edits to package-alias (`#foo/*`) and extension-local
- * bare deps. Windows and bundled virtual specifiers keep the current
- * `file://` / virtual form — Bun ignores queries on `file://` URLs, so
- * cache-bust does not reach Windows extensions until Bun changes that.
+ * Build the import specifier for a graph-resolved absolute path. When a
+ * cache-bust tag is present, emit the raw filesystem path: Bun keys query
+ * strings for bare-path specifiers on every platform but ignores them on
+ * `file://` URLs. Query-free and bundled imports retain their canonical URL or
+ * virtual forms.
  */
 function toGraphImportSpecifier(resolvedPath: string, mtimeTag: string | null): string {
 	if (isBundledVirtualSpecifier(resolvedPath)) {
 		return resolvedPath;
 	}
-	if (process.platform === "win32" || !mtimeTag) {
+	if (!mtimeTag) {
 		return url.pathToFileURL(stripWindowsExtendedLengthPathPrefix(resolvedPath)).href;
 	}
 	return `${stripWindowsExtendedLengthPathPrefix(resolvedPath)}?mtime=${mtimeTag}`;
@@ -2548,13 +2546,12 @@ export async function loadLegacyPiModule(resolvedPath: string): Promise<unknown>
 	const pendingSources = await ensureExtensionGraphHook(entryRealPath);
 	try {
 		// Dynamic import is required: legacy extension entry paths are user/plugin supplied at runtime.
-		// On POSIX, use the raw filesystem path so Bun keys the `?mtime`
-		// suffix as part of the module identity; Bun ignores query strings on
-		// `file://` specifiers, which would serve stale edited source.
-		const entrySpecifier =
-			process.platform === "win32" || isBundledVirtualSpecifier(entryRealPath)
-				? toImportSpecifier(entryRealPath)
-				: entryRealPath;
+		// Use the raw filesystem path so Bun keys the `?mtime` suffix as part of
+		// the module identity. Bun ignores query strings on `file://` specifiers,
+		// which would serve stale edited source on Windows as well as POSIX.
+		const entrySpecifier = isBundledVirtualSpecifier(entryRealPath)
+			? toImportSpecifier(entryRealPath)
+			: entryRealPath;
 		return await import(`${entrySpecifier}?mtime=${nextLegacyPiLoadTag()}`);
 	} finally {
 		// Drop whatever the initial import didn't consume: graph modules only

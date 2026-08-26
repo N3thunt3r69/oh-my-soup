@@ -25,7 +25,7 @@ function restoreProperty(target: object, key: string, descriptor: PropertyDescri
 	delete (target as Record<string, unknown>)[key];
 }
 
-describe("ProcessTerminal disconnect with a revoked pty", () => {
+describe.skipIf(process.platform === "win32")("ProcessTerminal disconnect with a revoked pty", () => {
 	let previousHeadless: boolean;
 	let signals: string[];
 

@@ -537,15 +537,15 @@ export async function recoverOrphanedBackups(sessionDir: string, storage: Sessio
 	// For each primary path, pick the newest backup (highest mtime) as the recovery source.
 	const candidates = new Map<string, { backup: string; mtimeMs: number }>();
 	for (const backup of backups) {
-		const name = path.basename(backup);
-		// Expect "<primary>.<snowflake>.bak" where <primary> ends in ".jsonl".
-		if (!name.endsWith(".bak")) continue;
-		const trimmed = name.slice(0, -".bak".length);
+		// Derive the primary from the full backup path instead of rebuilding it
+		// with platform separators; in-memory/custom storage may preserve a
+		// different separator style than node:path uses on the host.
+		if (!backup.endsWith(".bak")) continue;
+		const trimmed = backup.slice(0, -".bak".length);
 		const dotIdx = trimmed.lastIndexOf(".");
 		if (dotIdx <= 0) continue;
-		const primaryName = trimmed.slice(0, dotIdx);
-		if (!primaryName.endsWith(".jsonl")) continue;
-		const primaryPath = path.join(sessionDir, primaryName);
+		const primaryPath = trimmed.slice(0, dotIdx);
+		if (!primaryPath.endsWith(".jsonl")) continue;
 		let mtimeMs = 0;
 		try {
 			mtimeMs = storage.statSync(backup).mtimeMs;

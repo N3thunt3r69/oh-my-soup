@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import type { Usage } from "@oh-my-soup/pi-ai";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 import { SqlSessionStorage } from "@oh-my-soup/pi-coding-agent/session/sql-session-storage";
@@ -27,9 +28,10 @@ describe("SessionManager + SqlSessionStorage (SQLite)", () => {
 	it("persists appended assistant messages into SQL and reloads via open()", async () => {
 		const client = new SQL("sqlite::memory:");
 		const storage = await SqlSessionStorage.create({ client });
-		const sessionDir = "/sessions/proj";
+		const sessionDir = path.resolve("/sessions/proj");
+		const cwd = path.resolve("/cwd");
 
-		const manager = SessionManager.create("/cwd", sessionDir, storage);
+		const manager = SessionManager.create(cwd, sessionDir, storage);
 		manager.appendMessage({
 			role: "assistant",
 			provider: "anthropic",
@@ -80,9 +82,10 @@ describe("SessionManager + SqlSessionStorage (SQLite)", () => {
 	it("SessionManager.list returns SQL-backed sessions for the cwd", async () => {
 		const client = new SQL("sqlite::memory:");
 		const storage = await SqlSessionStorage.create({ client });
-		const sessionDir = "/sessions/list-proj";
+		const sessionDir = path.resolve("/sessions/list-proj");
+		const cwd = path.resolve("/cwd");
 
-		const a = SessionManager.create("/cwd", sessionDir, storage);
+		const a = SessionManager.create(cwd, sessionDir, storage);
 		a.appendMessage({
 			role: "assistant",
 			provider: "anthropic",
@@ -97,7 +100,7 @@ describe("SessionManager + SqlSessionStorage (SQLite)", () => {
 		await storage.drain();
 		await a.close();
 
-		const b = SessionManager.create("/cwd", sessionDir, storage);
+		const b = SessionManager.create(cwd, sessionDir, storage);
 		b.appendMessage({
 			role: "assistant",
 			provider: "anthropic",
@@ -117,7 +120,7 @@ describe("SessionManager + SqlSessionStorage (SQLite)", () => {
 		expect(aFile).toBeDefined();
 		expect(bFile).toBeDefined();
 
-		const sessions = await SessionManager.list("/cwd", sessionDir, storage);
+		const sessions = await SessionManager.list(cwd, sessionDir, storage);
 		const sessionFiles = sessions.map(s => s.path).sort();
 		expect(sessionFiles).toContain(aFile as string);
 		expect(sessionFiles).toContain(bFile as string);

@@ -170,7 +170,8 @@ describe("SessionManager temp cwd session dirs", () => {
 	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 	function expectedTempSessionDirName(tempCwd: string): string {
-		return `-tmp-${path.relative(os.tmpdir(), path.resolve(tempCwd)).replace(/[/\\:]/g, "-")}`;
+		const relative = path.relative(resolveEquivalentPath(os.tmpdir()), resolveEquivalentPath(path.resolve(tempCwd)));
+		return relative ? `-tmp-${relative.split(path.sep).join("-")}` : "-tmp";
 	}
 
 	function toLegacyAbsoluteSessionDirName(cwd: string): string {
@@ -225,7 +226,7 @@ describe("SessionManager temp cwd session dirs", () => {
 		expect(fs.existsSync(path.join(expectedDir, "carried.jsonl"))).toBe(true);
 	});
 
-	it("migrates hashed-scheme session dirs back into legacy names", () => {
+	it("migrates hashed-scheme session dirs into canonical -tmp names", () => {
 		const tempCwd = path.join(testAgentDir, `hashed-cwd-${Snowflake.next()}`);
 		fs.mkdirSync(tempCwd, { recursive: true });
 

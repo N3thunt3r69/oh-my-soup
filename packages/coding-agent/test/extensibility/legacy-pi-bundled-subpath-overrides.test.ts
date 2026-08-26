@@ -131,7 +131,7 @@ process.stdout.write(JSON.stringify([
 		}
 		expect(stderr).toBe("");
 		expect(exitCode).toBe(0);
-		expect(JSON.parse(stdout)).toEqual(["a\\.b\\*c", path.join("src", "*.ts")]);
+		expect(JSON.parse(stdout)).toEqual(["a\\.b\\*c", "src/*.ts"]);
 
 		const overrides = __buildLegacyPiPackageRootOverrides(true, bundledModuleKeys);
 		expect(overrides[key]).toBe(`oms-legacy-pi-bundled:${key}`);

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getProjectDir, setProjectDir } from "@oh-my-soup/pi-utils";
+import { getProjectDir, removeWithRetries, setProjectDir } from "@oh-my-soup/pi-utils";
 import { Settings, settings } from "../../../../src/config/settings";
 import { StatusLineComponent } from "../../../../src/modes/components/status-line/component";
 import { getThemeByName, setThemeInstance } from "../../../../src/modes/theme/theme";
@@ -64,13 +64,13 @@ beforeAll(async () => {
 	tmpB = fs.mkdtempSync(path.join(os.tmpdir(), "jjcache-b-"));
 });
 
-afterAll(() => {
+afterAll(async () => {
 	settings.clearOverride("statusLine.preset");
 	settings.clearOverride("statusLine.leftSegments");
 	settings.clearOverride("statusLine.rightSegments");
 	setProjectDir(originalProjectDir);
-	fs.rmSync(tmpA, { recursive: true, force: true });
-	fs.rmSync(tmpB, { recursive: true, force: true });
+	await removeWithRetries(tmpA);
+	await removeWithRetries(tmpB);
 });
 
 beforeEach(() => {

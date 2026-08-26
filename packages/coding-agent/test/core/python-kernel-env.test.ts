@@ -98,6 +98,17 @@ describe("enumeratePythonRuntimes", () => {
 		expect(resolvePythonRuntime(path.join(path.sep, "work"), {}).pythonPath).toBe(systemPy);
 	});
 
+	it("discovers a versioned system interpreter when python aliases are absent", () => {
+		const versionedPy = path.join(path.sep, "usr", "bin", "python3.12");
+		vi.spyOn(piUtils, "getPythonEnvDir").mockReturnValue(managedDir);
+		vi.spyOn(piUtils, "$which").mockImplementation(bin => (bin === "python3.12" ? versionedPy : null));
+		vi.spyOn(fs, "existsSync").mockReturnValue(false);
+
+		expect(enumeratePythonRuntimes(path.join(path.sep, "work"), {}).map(runtime => runtime.pythonPath)).toEqual([
+			versionedPy,
+		]);
+	});
+
 	it("resolves an explicit interpreter without falling through to discovery", () => {
 		vi.spyOn(piUtils, "getPythonEnvDir").mockReturnValue(managedDir);
 		vi.spyOn(piUtils, "$which").mockImplementation(bin => (bin === "python" ? systemPy : null));
@@ -139,15 +150,11 @@ describe("enumeratePythonRuntimes", () => {
 	});
 
 	it("resolves a relative explicit interpreter against cwd", () => {
-		vi.spyOn(fs, "existsSync").mockReturnValue(false);
+		const cwd = path.resolve(path.sep, "work");
 
-		const runtime = resolveExplicitPythonRuntime(
-			path.join(".venv", "bin", "python"),
-			path.join(path.sep, "work"),
-			{},
-		);
+		const runtime = resolveExplicitPythonRuntime(path.join(".venv", "bin", "python"), cwd, {});
 
-		expect(runtime.pythonPath).toBe(path.join(path.sep, "work", ".venv", "bin", "python"));
+		expect(runtime.pythonPath).toBe(path.join(cwd, ".venv", "bin", "python"));
 	});
 
 	it("throws from resolvePythonRuntime when no interpreter can be found", () => {

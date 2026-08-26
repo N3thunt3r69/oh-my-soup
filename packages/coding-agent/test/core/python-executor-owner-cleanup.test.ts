@@ -202,11 +202,10 @@ describe("python executor owner cleanup", () => {
 				return { confirmed: true };
 			}
 			const { promise, reject } = Promise.withResolvers<KernelShutdownResult>();
-			const timer = setTimeout(
+			setTimeout(
 				() => reject(new DOMException("Python kernel shutdown timed out", "TimeoutError")),
 				options?.timeoutMs ?? 0,
 			);
-			timer.unref?.();
 			return await promise;
 		});
 		vi.spyOn(pythonKernel, "checkPythonKernelAvailability").mockResolvedValue({ ok: true });

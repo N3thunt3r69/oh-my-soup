@@ -42,7 +42,6 @@ function rejectOnStartupCancellation(options: KernelStartOptions): Promise<never
 		timeout = setTimeout(() => {
 			finish(createCancellationError("TimeoutError", "Python kernel startup timed out"));
 		}, remainingMs);
-		timeout.unref();
 	}
 
 	return promise;

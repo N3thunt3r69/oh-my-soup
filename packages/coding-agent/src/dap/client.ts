@@ -126,9 +126,10 @@ export class DapClient {
 			detached: true,
 		});
 		const client = new DapClient(adapter, cwd, proc);
-		proc.exited.then(() => {
-			client.#handleProcessExit();
-		});
+		void proc.exited.then(
+			() => client.#handleProcessExit(),
+			() => client.#handleProcessExit(),
+		);
 		void client.#startMessageReader();
 		return client;
 	}
@@ -204,7 +205,10 @@ export class DapClient {
 			await waitForTcpServerListening(proc, port, readyTimeoutMs);
 			const { readable, writeSink, socket } = await waitForTcpTransport(host, port, readyTimeoutMs, proc);
 			const client = new DapClient(adapter, cwd, proc, { readable, writeSink, socket, port });
-			proc.exited.then(() => client.#handleProcessExit());
+			void proc.exited.then(
+				() => client.#handleProcessExit(),
+				() => client.#handleProcessExit(),
+			);
 			void client.#startMessageReader();
 			return client;
 		} catch (error) {
@@ -262,7 +266,10 @@ export class DapClient {
 			await waitForCondition(() => isUnixSocketReady(socketPath), timeoutMs, proc);
 			const { readable, writeSink, socket } = await connectSocket({ unix: socketPath }, timeoutMs);
 			const client = new DapClient(adapter, cwd, proc, { readable, writeSink, socket });
-			proc.exited.then(() => client.#handleProcessExit());
+			void proc.exited.then(
+				() => client.#handleProcessExit(),
+				() => client.#handleProcessExit(),
+			);
 			void client.#startMessageReader();
 			return client;
 		} catch (error) {
@@ -305,7 +312,6 @@ export class DapClient {
 
 		const port = server.port;
 		const proc = ptree.spawn([adapter.resolvedCommand, ...adapter.args, `--client-addr=127.0.0.1:${port}`], {
-			cwd,
 			stdin: "pipe",
 			env,
 			detached: true,
@@ -323,7 +329,10 @@ export class DapClient {
 			const rawSocket = await Promise.race([connPromise, timeoutPromise]);
 			const { readable, writeSink, socket } = wrapBunSocket(rawSocket);
 			const client = new DapClient(adapter, cwd, proc, { readable, writeSink, socket });
-			proc.exited.then(() => client.#handleProcessExit());
+			void proc.exited.then(
+				() => client.#handleProcessExit(),
+				() => client.#handleProcessExit(),
+			);
 			void client.#startMessageReader();
 			return client;
 		} catch (error) {

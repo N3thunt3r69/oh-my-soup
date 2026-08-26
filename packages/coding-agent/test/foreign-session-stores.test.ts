@@ -30,7 +30,7 @@ async function createClaudeFixture(): Promise<{ info: ForeignSessionInfo; store:
 	const root = path.join(tempRoot, ".claude");
 	const cwd = path.join(tempRoot, "project-with-hyphen");
 	const id = "11111111-1111-4111-8111-111111111111";
-	const projectDirectory = cwd.replaceAll(path.sep, "-");
+	const projectDirectory = cwd.replace(/[/\\:]/g, "-");
 	const sessionPath = path.join(root, "projects", projectDirectory, `${id}.jsonl`);
 	await writeJsonl(path.join(root, "history.jsonl"), [
 		{ sessionId: id, timestamp: 1_767_225_600_000, display: "First prompt", project: cwd },
@@ -109,7 +109,8 @@ describe("ClaudeSessionStore", () => {
 		const root = path.join(tempRoot, ".claude");
 		const cwd = path.join(tempRoot, "legacy");
 		const id = "22222222-2222-4222-8222-222222222222";
-		const sessionPath = path.join(root, ".projects", cwd.replaceAll(path.sep, "-"), `${id}.jsonl`);
+		const sessionPath = path.join(root, ".projects", cwd.replace(/[/\\:]/g, "-"), `${id}.jsonl`);
+		await Bun.write(path.join(tempRoot, ".claude.json"), JSON.stringify({ projects: { [cwd]: {} } }));
 		await writeJsonl(path.join(root, "history.jsonl"), [
 			{ session_id: id, ts: 1_735_689_600_000, text: "Legacy prompt" },
 		]);
@@ -129,6 +130,7 @@ describe("ClaudeSessionStore", () => {
 		expect(sessions).toHaveLength(1);
 		expect(sessions[0]?.firstMessage).toBe("Legacy prompt");
 		expect(sessions[0]?.created.toISOString()).toBe("2025-01-01T00:00:00.000Z");
+		expect(sessions[0]?.cwd).toBe(cwd);
 	});
 });
 

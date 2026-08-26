@@ -450,7 +450,19 @@ export async function getDiagnosticsForFile(
 export enum FileFormatResult {
 	UNCHANGED = "unchanged",
 	FORMATTED = "formatted",
+	FAILED = "failed",
+	UNSUPPORTED = "unsupported",
 }
+
+/**
+ * Result from formatContent, distinguishing successful formatting
+ * (formatted or unchanged) from a failure or unsupported file type.
+ */
+export type FormatContentResult = {
+	content: string;
+	failed: boolean;
+	unsupported: boolean;
+};
 
 /**
  * Format content using LSP or custom linter client.
@@ -459,7 +471,7 @@ export enum FileFormatResult {
  * @param content - Content to format
  * @param cwd - Working directory for LSP config resolution
  * @param servers - Servers to try formatting with
- * @returns Formatted content, or original if no formatter available
+ * @returns Formatted content and its success/failure classification
  */
 export async function formatContent(
 	absolutePath: string,
@@ -467,32 +479,32 @@ export async function formatContent(
 	cwd: string,
 	servers: Array<[string, ServerConfig]>,
 	signal?: AbortSignal,
-): Promise<string> {
+): Promise<FormatContentResult> {
 	if (servers.length === 0) {
-		return content;
+		return { content, failed: false, unsupported: true };
 	}
 
 	const uri = fileToUri(absolutePath);
+	let hadFailure = false;
 
 	for (const [serverName, serverConfig] of servers) {
 		try {
 			throwIfAborted(signal);
-			// Use custom linter client if configured
 			if (serverConfig.createClient) {
 				const linterClient = getLinterClient(serverName, serverConfig, cwd);
-				return await linterClient.format(absolutePath, content);
+				const formattedContent = await linterClient.format(absolutePath, content);
+				return { content: formattedContent, failed: false, unsupported: false };
 			}
 
-			// Default: use LSP
+			// Initialization failures are formatter failures; a successfully
+			// initialized server without formatting support is unsupported.
 			const client = await getOrCreateClient(serverConfig, cwd, undefined, signal);
 			throwIfAborted(signal);
 
-			const caps = client.serverCapabilities;
-			if (!caps?.documentFormattingProvider) {
+			if (!client.serverCapabilities?.documentFormattingProvider) {
 				continue;
 			}
 
-			// Request formatting (content already synced)
 			const edits = (await sendRequest(
 				client,
 				"textDocument/formatting",
@@ -504,13 +516,20 @@ export async function formatContent(
 			)) as TextEdit[] | null;
 
 			if (!edits || edits.length === 0) {
-				return content;
+				return { content, failed: false, unsupported: false };
 			}
 
-			// Apply edits in-memory and return
-			return applyTextEditsToString(content, edits);
-		} catch {}
+			return { content: applyTextEditsToString(content, edits), failed: false, unsupported: false };
+		} catch {
+			// Retain this failure while trying fallback servers. A later success
+			// wins, but an unsupported fallback must not erase the failure.
+			hadFailure = true;
+		}
 	}
 
-	return content;
+	return {
+		content,
+		failed: hadFailure,
+		unsupported: !hadFailure,
+	};
 }

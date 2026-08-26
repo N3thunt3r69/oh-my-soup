@@ -116,9 +116,11 @@ interface ConsolidationOutputSchema {
 }
 
 /**
- * Start the background memory startup pipeline.
+ * Start the background memory startup pipeline and return its completion signal.
  *
- * Skips for ephemeral sessions, subagent sessions, disabled settings, or DB failures.
+ * Callers may ignore the promise to keep startup non-blocking. Tests and
+ * lifecycle owners can await it to know that all phase work and cleanup have
+ * finished. Skips resolve immediately.
  */
 export function startMemoryStartupTask(options: {
 	session: AgentSession;
@@ -126,12 +128,12 @@ export function startMemoryStartupTask(options: {
 	modelRegistry: ModelRegistry;
 	agentDir: string;
 	taskDepth: number;
-}): void {
+}): Promise<void> {
 	const { session, settings, modelRegistry, agentDir, taskDepth } = options;
 	const cfg = loadMemoryConfig(settings);
-	if (!cfg.enabled) return;
-	if (taskDepth > 0) return;
-	if (!session.sessionManager.getSessionFile()) return;
+	if (!cfg.enabled) return Promise.resolve();
+	if (taskDepth > 0) return Promise.resolve();
+	if (!session.sessionManager.getSessionFile()) return Promise.resolve();
 
 	const dbPath = getAgentDbPath(agentDir);
 	try {
@@ -139,11 +141,18 @@ export function startMemoryStartupTask(options: {
 		closeMemoryDb(db);
 	} catch (error) {
 		logger.debug("Memory startup skipped: state DB unavailable", { error: String(error) });
-		return;
+		return Promise.resolve();
 	}
 
 	const signal = session.beginLocalMemoryStartup?.() ?? new AbortController().signal;
-	void runMemoryStartup({ session, settings, modelRegistry, agentDir, config: cfg, signal })
+	return runMemoryStartup({
+		session,
+		settings,
+		modelRegistry,
+		agentDir,
+		config: cfg,
+		signal,
+	})
 		.catch(error => {
 			if (!signal.aborted) logger.warn("Memory startup failed", { error: String(error) });
 		})
