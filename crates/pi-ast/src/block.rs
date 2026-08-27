@@ -833,7 +833,8 @@ mod tests {
 		let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
 		// Cargo leaves the manifest root available at runtime. Bazel bakes an
 		// ephemeral execroot into CARGO_MANIFEST_DIR, so use the workspace
-		// runfiles root where the target's hermetic corpus is declared as data.
+		// runfiles root where the hermetic corpus is declared as data. Runfiles
+		// leaves are symlinks, so `Path::is_file` below must follow them.
 		let root = if manifest_root.join("Cargo.toml").is_file() {
 			manifest_root
 		} else {
@@ -842,7 +843,7 @@ mod tests {
 		let mut files: Vec<PathBuf> = ignore::WalkBuilder::new(&root)
 			.build()
 			.filter_map(Result::ok)
-			.filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+			.filter(|entry| entry.path().is_file())
 			.map(ignore::DirEntry::into_path)
 			.filter(|path| {
 				matches!(path.extension().and_then(std::ffi::OsStr::to_str), Some("ts" | "py" | "rs"))
