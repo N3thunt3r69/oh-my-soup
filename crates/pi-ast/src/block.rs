@@ -830,7 +830,15 @@ mod tests {
 	/// budget, files are taken on a stride so the sample spans the whole tree
 	/// instead of one directory, skipping anything over 64 KiB.
 	fn repo_files(byte_budget: Option<usize>) -> Vec<PathBuf> {
-		let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+		let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+		// Cargo leaves the manifest root available at runtime. Bazel bakes an
+		// ephemeral execroot into CARGO_MANIFEST_DIR, so use the workspace
+		// runfiles root where the target's hermetic corpus is declared as data.
+		let root = if manifest_root.join("Cargo.toml").is_file() {
+			manifest_root
+		} else {
+			PathBuf::from(".")
+		};
 		let mut files: Vec<PathBuf> = ignore::WalkBuilder::new(&root)
 			.build()
 			.filter_map(Result::ok)

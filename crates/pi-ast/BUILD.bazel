@@ -20,6 +20,7 @@ rust_library(
 rust_test(
     name = "pi-ast_test",
     crate = ":pi-ast",
+    data = glob(["src/**/*.rs"]) + ["//:pi-ast-test-corpus"],
     edition = "2024",
     proc_macro_deps = all_crate_deps(proc_macro_dev = True),
     deps = all_crate_deps(normal_dev = True),

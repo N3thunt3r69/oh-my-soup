@@ -13,6 +13,18 @@ exports_files([
     "Cargo.lock",
     "rustfmt.toml",
 ])
+
+# Hermetic cross-language source corpus for pi-ast's differential parser test.
+# `packages/` and `python/` are Bazel-ignored, so use the repository scripts
+# plus the crate's own Rust sources (declared by the consuming target).
+filegroup(
+    name = "pi-ast-test-corpus",
+    srcs = glob([
+        "scripts/**/*.py",
+        "scripts/**/*.ts",
+    ]),
+)
+
 _ADDONS = {
     "linux-x64-baseline": ("//bazel/platforms:linux-x64-baseline", "pi_natives.linux-x64-baseline.node"),
     "linux-x64-modern": ("//bazel/platforms:linux-x64-modern", "pi_natives.linux-x64-modern.node"),
