@@ -125,7 +125,7 @@ impl Splitter {
 }
 
 /// Drive a single-stage scanner over `units`.
-pub(crate) fn scan_loop<U: Unit>(
+pub fn scan_loop<U: Unit>(
 	units: &[U],
 	f: &mut impl FnMut(&[U]),
 	next: impl Fn(&[U], usize) -> usize,

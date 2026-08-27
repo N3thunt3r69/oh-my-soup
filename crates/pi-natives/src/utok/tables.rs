@@ -214,7 +214,7 @@ mod glm_scan_tests {
 }
 
 /// Resolve the BPE encoding for a non-Claude family.
-pub(crate) fn bpe_for(enc: Encoding) -> &'static BpeEncoding {
+pub fn bpe_for(enc: Encoding) -> &'static BpeEncoding {
 	match enc {
 		Encoding::O200kBase => &O200K_BASE,
 		Encoding::Cl100kBase => &CL100K_BASE,
