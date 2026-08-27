@@ -2,12 +2,17 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-27
+
+### Changed
+
+- `getDaemonRuntimeDir` now derives its project key through the new exported `daemonProjectKey`, which lowercases the resolved path before hashing on win32 so case-variant launcher cwds (`d:\repo` vs `D:\repo`) map to one runtime scope. POSIX keys are unchanged.
+
 ## [17.3.1] - 2026-08-14
 
 ### Changed
 
 - Extended parsed Server-Sent Events with optional `id` and `retry` fields, including control-only events, so reconnecting transports can retain stream cursors and server-requested retry intervals.
-- `getDaemonRuntimeDir` now derives its project key through the new exported `daemonProjectKey`, which lowercases the resolved path before hashing on win32 so case-variant launcher cwds (`d:\repo` vs `D:\repo`) map to one runtime scope. POSIX keys are unchanged.
 
 ## [17.3.0] - 2026-08-13
 

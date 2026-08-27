@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-27
+
 ### Fixed
 
 - Transient provider failures in configured-completion and remote-LLM paths now receive bounded retries before falling back to `null`.

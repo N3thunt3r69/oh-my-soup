@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-27
+
 ### Fixed
 
 - Distinguished absent seen-line provenance from an explicitly empty set, so enforcement can guard every anchor when a producer displayed no numbered lines.

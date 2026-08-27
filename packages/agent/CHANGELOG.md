@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-27
+
 ### Added
 
 - Added opt-in transient retries to `instrumentedCompleteSimple`; response headers are captured and cleared per attempt so `retry-after` hints never leak between retries.
@@ -14,8 +16,6 @@
 
 - `onTurnEnd` now runs for a turn stopped by a terminal-tool-result abort (e.g. a subagent's final `yield`) instead of being skipped as an external abort, so per-turn bookkeeping observes the yield turn.
 - Replay-safe handoff, branch-summary, and manual-compaction oneshots now survive bounded transient provider failures. `SummaryOptions.oneshotRetry` defaults on for manual compaction, while auto-compaction opts out because its outer loop already owns retries.
-
-## [18.0.0] - 2026-08-22
 
 ## [17.3.2] - 2026-08-16
 

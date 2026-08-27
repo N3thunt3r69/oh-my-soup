@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-27
+
 ### Added
 
 - Models now materialize an optional `tokenizer` family in the catalog (`claude-v3`/`v47`/`v5`, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+). The field follows `requestModelId`, applies to bundled, discovered, and custom models, and can be explicitly overridden in model configuration.

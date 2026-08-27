@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-27
+
 ### Added
 
 - Added `--history <directory>` (`-H`) as a directory-backed session history option; it stores the authoritative chat transcript and session data there.
@@ -32,18 +34,6 @@
 - Replay-safe title, classifier, TTS, commit-analysis, commit-message, memory, and mnemopi oneshots now retry transient provider failures with bounded backoff; side-effecting agent turns remain unchanged.
 - Commit analysis, summary, changelog, and reduction paths now surface final provider error stops rather than parsing error text as successful output.
 
-## [17.3.2] - 2026-08-16
-
-### Added
-
-- Added an `update.auto` setting (default off): when a compiled oms notices a newer release at startup, it downloads and installs it in the background and the transcript shows an "Update Installed - restart oms to finish" notice instead of the manual `oms update` hint. Any background failure falls back to the normal update-available notice.
-- Added the Oh My Soup brand mark as terminal pixel art: a 24x20-pixel soup bowl (golden speckled body, navy "OH", red-to-pink "MY") rendered with half-block cells in truecolor with a 256-color fallback. It replaces the upstream pi glyph on the welcome screen, the setup splash (which now reads "O h   M y   S o u p"), the setup outro, and the wizard scene headers (height-gated so short terminals keep their scene body room). Six new optional theme keys (`welcomeLogoBowl`/`Speckle`/`Rim`/`Oh`/`My`/`MyAlt`) recolor it per theme, with brand defaults everywhere else.
-- Added a bundled `soup` theme: warm gold/broth/tomato palette across accents, borders, markdown, syntax, thinking tiers, and the status line, and made it the default dark theme for fresh installs (`theme.dark` default was `titanium`; existing explicit settings are untouched).
-- Welcome screen redesign: animated steam curls rise off the pixel bowl during the intro, the greeting carries the soup emoji, the right column gains a Project section (folder name plus home-shortened path) above LSP servers and recent sessions, and the version in the box title is an OSC 8 hyperlink to that release's GitHub page on terminals that support it (`tui.hyperlinks` gates it as everywhere else).
-- The `task` tool accepts a per-spawn `model` field (flat and batch forms): `provider/model-id`, a bare model id, or a role name like `smol`. It rides the existing subagent model-resolution chain (caller request wins over the settings override and the agent definition, with the established auth/retry fallbacks), so an agent can fan work out onto a different model family than its own — e.g. a Kimi session spawning Qwen workers.
-- Windows releases now ship an AVX2 build (`oms-windows-x64-modern.exe`) alongside the baseline exe, and the installer tries it first, using its existing smoke test as the CPU-capability check: a 404 (older release) or an illegal-instruction crash falls back to the baseline asset automatically. `oms-windows-x64.exe` remains the baseline build forever so pinned URLs and old installers keep working.
-- A dim `🍜 oms is starting…` line now paints to stderr before the heavy command graph loads on bare interactive TTY launches, so slow cold starts (first launch after a reboot) show activity instead of a blank terminal. Module evaluation blocks the event loop, so it is a static line by design; the root command erases it before first paint, and subcommands, flags, and piped usage never see it.
-
 ## [17.3.4] - 2026-08-14
 
 ### Changed
@@ -70,6 +60,18 @@
 - Fixed `oms` launched from the home directory silently chdir-ing to `C:\tmp` on Windows when it exists: the POSIX `/tmp`/`/var/tmp` auto-cwd candidates resolve drive-relative on win32 and are now platform-gated.
 - Fixed the advisor/watchdog config walk overrunning the repository root to the drive root on Windows: `git rev-parse --show-toplevel` output uses forward slashes, so the walk's stop condition never matched. `repo.root` now returns a native-separator path.
 - Fixed plan-mode write protection misclassifying case-variant paths as outside the workspace on Windows (case-sensitive `startsWith` containment replaced with the case-normalizing `pathIsWithin`).
+
+## [17.3.2] - 2026-08-16
+
+### Added
+
+- Added an `update.auto` setting (default off): when a compiled oms notices a newer release at startup, it downloads and installs it in the background and the transcript shows an "Update Installed - restart oms to finish" notice instead of the manual `oms update` hint. Any background failure falls back to the normal update-available notice.
+- Added the Oh My Soup brand mark as terminal pixel art: a 24x20-pixel soup bowl (golden speckled body, navy "OH", red-to-pink "MY") rendered with half-block cells in truecolor with a 256-color fallback. It replaces the upstream pi glyph on the welcome screen, the setup splash (which now reads "O h   M y   S o u p"), the setup outro, and the wizard scene headers (height-gated so short terminals keep their scene body room). Six new optional theme keys (`welcomeLogoBowl`/`Speckle`/`Rim`/`Oh`/`My`/`MyAlt`) recolor it per theme, with brand defaults everywhere else.
+- Added a bundled `soup` theme: warm gold/broth/tomato palette across accents, borders, markdown, syntax, thinking tiers, and the status line, and made it the default dark theme for fresh installs (`theme.dark` default was `titanium`; existing explicit settings are untouched).
+- Welcome screen redesign: animated steam curls rise off the pixel bowl during the intro, the greeting carries the soup emoji, the right column gains a Project section (folder name plus home-shortened path) above LSP servers and recent sessions, and the version in the box title is an OSC 8 hyperlink to that release's GitHub page on terminals that support it (`tui.hyperlinks` gates it as everywhere else).
+- The `task` tool accepts a per-spawn `model` field (flat and batch forms): `provider/model-id`, a bare model id, or a role name like `smol`. It rides the existing subagent model-resolution chain (caller request wins over the settings override and the agent definition, with the established auth/retry fallbacks), so an agent can fan work out onto a different model family than its own — e.g. a Kimi session spawning Qwen workers.
+- Windows releases now ship an AVX2 build (`oms-windows-x64-modern.exe`) alongside the baseline exe, and the installer tries it first, using its existing smoke test as the CPU-capability check: a 404 (older release) or an illegal-instruction crash falls back to the baseline asset automatically. `oms-windows-x64.exe` remains the baseline build forever so pinned URLs and old installers keep working.
+- A dim `🍜 oms is starting…` line now paints to stderr before the heavy command graph loads on bare interactive TTY launches, so slow cold starts (first launch after a reboot) show activity instead of a blank terminal. Module evaluation blocks the event loop, so it is a static line by design; the root command erases it before first paint, and subcommands, flags, and piped usage never see it.
 
 ## [17.3.1] - 2026-08-14
 
