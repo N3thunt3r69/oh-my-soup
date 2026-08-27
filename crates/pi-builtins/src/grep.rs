@@ -1631,7 +1631,7 @@ mod tests {
 		let (mut host, capture) = Host::for_test("grep", "hit\nmiss\nhit\n", "/");
 		let (reader, writer) = std::io::pipe().expect("pipe");
 		drop(reader);
-		host.stdout = openfiles::OpenFile::from(writer);
+		host.stdout = brush_core::openfiles::OpenFile::from(writer);
 
 		let code = parsed.run(&mut host);
 
