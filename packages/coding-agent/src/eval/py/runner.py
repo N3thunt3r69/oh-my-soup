@@ -6,6 +6,7 @@ wrapper writes typed frames back.
 Host -> wrapper:
   {"id": str, "code": str, "silent": bool?, "storeHistory": bool?}
   {"id": str, "code": str, "silent": bool?, "storeHistory": bool?, "cwd": str?, "env": dict?}
+  {"type": "interrupt"}                           # cooperative SIGINT
   {"type": "exit"}                                # graceful shutdown
 
 Wrapper -> host:
@@ -26,6 +27,7 @@ when installed.
 
 from __future__ import annotations
 
+import _thread
 import ast
 import asyncio
 import base64
@@ -1364,6 +1366,11 @@ def _read_stdin(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue, stdin) ->
                     "traceback": [],
                 }
             )
+            continue
+        if req.get("type") == "interrupt":
+            # Bun's Windows SIGINT terminates the subprocess. Inject the same
+            # KeyboardInterrupt on the main thread while preserving its state.
+            _thread.interrupt_main()
             continue
         loop.call_soon_threadsafe(queue.put_nowait, req)
     loop.call_soon_threadsafe(queue.put_nowait, {"type": "exit"})

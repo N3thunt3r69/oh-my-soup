@@ -412,6 +412,18 @@ describe("Patcher seen-line provenance", () => {
 		expect(fs.get(PATH)).toBe(wideContent);
 	});
 
+	it("guards every anchor when provenance records zero displayed lines", async () => {
+		const fs = new InMemoryFilesystem([[PATH, CONTENT]]);
+		const snapshots = new InMemorySnapshotStore();
+		const tag = snapshots.record(PATH, CONTENT, []);
+		const patcher = new Patcher({ fs, snapshots });
+
+		await expect(patcher.apply(Patch.parse(`[${PATH}#${tag}]\nPUT 4-4:\n+L4`))).rejects.toThrow(
+			/never displayed \(it showed/,
+		);
+		expect(fs.get(PATH)).toBe(CONTENT);
+	});
+
 	it("skips the check when no seen lines were recorded (absent → allow)", async () => {
 		const fs = new InMemoryFilesystem([[PATH, CONTENT]]);
 		const snapshots = new InMemorySnapshotStore();

@@ -8,6 +8,7 @@
 let
   cfg = config.programs.oms;
   yaml = pkgs.formats.yaml { };
+  configFile = yaml.generate "oms-config.yml" cfg.settings;
 in
 {
   options.programs.oms = {
@@ -25,9 +26,10 @@ in
       default = null;
       description = ''
         Settings written declaratively to {file}`~/.oms/agent/config.yml`.
-        The file is a read-only store symlink: changes made from inside OMS
-        (`/settings`, onboarding) replace it but revert on the next
-        `home-manager switch`.
+        On each `home-manager switch` the declared settings are copied into
+        place as a writable regular file, so OMS can lock and rewrite it when
+        persisting runtime changes (`/settings`, onboarding). Runtime changes
+        are overwritten by the declared values on the next switch.
       '';
       example = {
         theme.dark = "titanium";
@@ -38,8 +40,15 @@ in
 
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
-    home.file.".oms/agent/config.yml" = lib.mkIf (cfg.settings != null) {
-      source = yaml.generate "oms-config.yml" cfg.settings;
+    # OMS must be able to lock and atomically replace its runtime config, which
+    # is impossible through a read-only /nix/store symlink.
+    home.activation.omsConfig = lib.mkIf (cfg.settings != null) {
+      before = [ ];
+      after = [ "writeBoundary" ];
+      data = ''
+        run mkdir -p "$HOME/.oms/agent"
+        run install -m 600 ${configFile} "$HOME/.oms/agent/config.yml"
+      '';
     };
   };
 }

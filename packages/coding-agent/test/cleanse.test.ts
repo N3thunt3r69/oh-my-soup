@@ -15,6 +15,7 @@ import type {
 } from "@oh-my-soup/pi-coding-agent/cleanse/types";
 import { createProgressReporter } from "@oh-my-soup/pi-coding-agent/cli/progress-reporter";
 import { resolveCliArgv } from "@oh-my-soup/pi-coding-agent/cli-commands";
+import { removeWithRetries } from "@oh-my-soup/pi-utils";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -107,7 +108,7 @@ describe("cleanse diagnostics", () => {
 			});
 			expect(report.diagnostics[0]?.message).toContain("bun test (.) failed with exit code 3");
 		} finally {
-			await fs.rm(root, { recursive: true, force: true });
+			await removeWithRetries(root);
 		}
 	});
 
@@ -124,7 +125,7 @@ describe("cleanse diagnostics", () => {
 
 			expect(suite.checkers).toHaveLength(0);
 		} finally {
-			await fs.rm(root, { recursive: true, force: true });
+			await removeWithRetries(root);
 		}
 	});
 });
@@ -480,7 +481,7 @@ describe("cleanse custom suite", () => {
 				{ checker: "fake tsc", file: "src/a.ts", line: 1, severity: "error", message: "boom" },
 			]);
 		} finally {
-			await fs.rm(root, { recursive: true, force: true });
+			await removeWithRetries(root);
 		}
 	});
 
@@ -496,7 +497,7 @@ describe("cleanse custom suite", () => {
 			const report = await suite.run();
 			expect(report.checks.map(check => check.id)).toEqual(["custom-2"]);
 		} finally {
-			await fs.rm(root, { recursive: true, force: true });
+			await removeWithRetries(root);
 		}
 	});
 });

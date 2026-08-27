@@ -7,6 +7,8 @@ import {
 	astEdit,
 	astMatch,
 	blockRangeAt,
+	countTokens,
+	Encoding,
 	executeShell,
 	FileType,
 	fuzzyFind,
@@ -86,6 +88,13 @@ async function createFifo(fifoPath: string) {
 
 	throw new Error(await new Response(process.stderr).text());
 }
+
+describe("countTokens", () => {
+	it("counts UTF-16 content without the N-API terminator and sums arrays", () => {
+		expect(countTokens("hello world", Encoding.O200kBase)).toBe(2);
+		expect(countTokens(["hello world", "hello world"], Encoding.O200kBase)).toBe(4);
+	});
+});
 
 describe("pi-natives", () => {
 	beforeAll(async () => {

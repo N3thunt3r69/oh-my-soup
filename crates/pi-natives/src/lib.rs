@@ -43,6 +43,7 @@ pub mod keys;
 pub mod live;
 pub mod sixel;
 pub mod snapcompact;
+pub mod utok;
 pub use pi_ast::language;
 
 pub mod power;
@@ -86,9 +87,8 @@ const NAPI_TOKIO_MAX_WORKER_THREADS: usize = 4;
 const NAPI_TOKIO_MAX_BLOCKING_THREADS: usize = 8;
 
 /// Upper bound on Rayon's global pool on Windows. Rayon is used for CPU-bound
-/// helpers (`count_tokens`, vendored `sort`), but the global pool cannot
-/// recover if its first lazy initialization fails after Windows refuses worker
-/// threads.
+/// native helpers, but the global pool cannot recover if its first lazy
+/// initialization fails after Windows refuses worker threads.
 #[cfg(any(target_os = "windows", test))]
 const RAYON_MAX_THREADS: usize = 8;
 #[cfg(any(target_os = "windows", test))]

@@ -1064,6 +1064,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		const modelRegistry = sharedModelRegistry;
 		const settings = Settings.isolated();
 		const deliveryGate = Promise.withResolvers<void>();
+		const deliveryGateB = Promise.withResolvers<void>();
 		const delivered: string[] = [];
 		const started = new Set<string>();
 		const asyncJobManager = new AsyncJobManager({
@@ -1109,6 +1110,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		});
 		asyncJobManager.registerDeliverySink("acp-session-b", async jobId => {
 			started.add(jobId);
+			await deliveryGateB.promise;
 			delivered.push(jobId);
 		});
 
@@ -1116,13 +1118,17 @@ describe("AgentSession concurrent prompt guard", () => {
 			asyncJobManager.register("bash", "A", async () => "A", { id: "job-a", ownerId: "acp-session-a" });
 			await waitFor(() => started.has("job-a"));
 			asyncJobManager.register("bash", "B", async () => "B", { id: "job-b", ownerId: "acp-session-b" });
-			await waitFor(() => asyncJobManager.getDeliveryState({ ownerId: "acp-session-b" }).queued > 0);
+			await waitFor(() => started.has("job-b"));
 
+			expect(sessionB.getAsyncJobSnapshot()?.delivery.pendingJobIds).toContain("job-b");
 			expect(sessionB.getAsyncJobSnapshot()?.delivery.pendingJobIds).not.toContain("job-a");
-			await expect(sessionB.drainAsyncJobDeliveriesForAcp({ timeoutMs: 1_000 })).resolves.toBe(true);
+			const drainedPromise = sessionB.drainAsyncJobDeliveriesForAcp({ timeoutMs: 1_000 });
+			deliveryGateB.resolve();
+			await expect(drainedPromise).resolves.toBe(true);
 			expect(delivered).toEqual(["job-b"]);
 		} finally {
 			deliveryGate.resolve();
+			deliveryGateB.resolve();
 			await sessionB.dispose();
 		}
 	});

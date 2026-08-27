@@ -20,6 +20,7 @@ function createSpec<TApi extends Api>(overrides: {
 	applyPatchToolType?: "freeform" | "function";
 	cost?: ModelSpec<TApi>["cost"];
 	thinking?: ModelSpec<TApi>["thinking"];
+	compat?: ModelSpec<TApi>["compat"];
 }): ModelSpec<TApi> {
 	return {
 		id: overrides.id,
@@ -29,6 +30,7 @@ function createSpec<TApi extends Api>(overrides: {
 		baseUrl: "https://example.com",
 		reasoning: overrides.reasoning ?? true,
 		thinking: overrides.thinking,
+		compat: overrides.compat,
 		input: ["text"],
 		cost: overrides.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: overrides.contextWindow ?? 200000,
@@ -224,10 +226,17 @@ describe("generated model policies", () => {
 		]);
 	});
 
-	it("pins zai glm-5.2 base id to 1M context", () => {
+	it("pins released zai GLM 5.2+ base ids to 1M context", () => {
 		const models = [
 			createSpec({
 				id: "glm-5.2",
+				api: "anthropic-messages",
+				provider: "zai",
+				contextWindow: 200_000,
+				maxTokens: 8192,
+			}),
+			createSpec({
+				id: "glm-5.3",
 				api: "anthropic-messages",
 				provider: "zai",
 				contextWindow: 200_000,
@@ -237,8 +246,10 @@ describe("generated model policies", () => {
 
 		applyGeneratedModelPolicies(models);
 
-		expect(models[0]?.contextWindow).toBe(1_000_000);
-		expect(models[0]?.maxTokens).toBe(131_072);
+		expect(models.map(model => [model.contextWindow, model.maxTokens])).toEqual([
+			[1_000_000, 131_072],
+			[1_000_000, 131_072],
+		]);
 	});
 
 	it("pins MiniMax-M3 long-context providers to 1M context", () => {
@@ -469,6 +480,49 @@ describe("generated model policies", () => {
 		expect(models[3]?.applyPatchToolType).toBeUndefined();
 	});
 
+	it("bakes first-party xAI Responses effort policy and removes dead maps", () => {
+		const models: ModelSpec<"openai-responses">[] = [
+			createSpec({
+				id: "grok-code-fast-1",
+				api: "openai-responses",
+				provider: "xai",
+				thinking: { mode: "effort", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
+				compat: { reasoningEffortMap: { minimal: "low", xhigh: "high" } },
+			}),
+			createSpec({
+				id: "grok-4.5",
+				api: "openai-responses",
+				provider: "xai",
+				thinking: { mode: "effort", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
+			}),
+			createSpec({
+				id: "grok-4.6",
+				api: "openai-responses",
+				provider: "xai-oauth",
+			}),
+			createSpec({
+				id: "grok-code-fast-1",
+				api: "openai-responses",
+				provider: "openrouter",
+				thinking: { mode: "effort", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
+			}),
+		];
+
+		applyGeneratedModelPolicies(models);
+
+		expect(models[0]?.thinking).toBeUndefined();
+		expect(models[0]?.compat).toMatchObject({
+			supportsReasoningEffort: false,
+			omitReasoningEffort: true,
+		});
+		expect(models[0]?.compat).not.toHaveProperty("reasoningEffortMap");
+		expect(models[1]?.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
+		expect(models[1]?.compat?.reasoningEffortMap).toEqual({ minimal: "low", xhigh: "high", max: "high" });
+		expect(models[2]?.thinking?.efforts).toContain(Effort.XHigh);
+		expect(models[2]?.compat?.reasoningEffortMap).toEqual({ minimal: "low" });
+		expect(models[3]?.compat?.supportsReasoningEffort).toBeUndefined();
+	});
+
 	it("flags no-system-prompt models on native surfaces and leaves proxies alone", () => {
 		const models: ModelSpec<Api>[] = [
 			createSpec({ id: "gemma-4-31b-it", api: "google-generative-ai", provider: "google", reasoning: false }),
@@ -496,6 +550,33 @@ describe("generated model policies", () => {
 			undefined,
 			undefined,
 		]);
+	});
+	it("preserves generic chat-template provider-authored effort mappings", () => {
+		const thinking = {
+			mode: "effort" as const,
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+			effortMap: {
+				[Effort.Minimal]: "low",
+				[Effort.Low]: "low",
+				[Effort.Medium]: "high",
+				[Effort.High]: "high",
+				[Effort.XHigh]: "max",
+				[Effort.Max]: "max",
+			},
+		};
+		const models: ModelSpec<Api>[] = [
+			createSpec({
+				id: "deepseek-flash-v4",
+				api: "openai-completions",
+				provider: "yolo-auto",
+				compat: { thinkingFormat: "chat-template", supportsReasoningEffort: true },
+				thinking,
+			}),
+		];
+
+		applyGeneratedModelPolicies(models);
+
+		expect(models[0]?.thinking).toEqual(thinking);
 	});
 });
 

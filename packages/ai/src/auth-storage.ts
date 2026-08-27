@@ -1013,6 +1013,31 @@ function resolveOpenAICodexPlanRequirement(provider: string, modelId: string | u
 	if (bareModelId === "gpt-5.6" || GPT_56_PAID_CODEX_MODEL_PATTERN.test(bareModelId)) return "paid";
 	return "none";
 }
+const MODEL_ACCOUNT_POLICY_BLOCK_SCOPE_PREFIX = "model-policy:";
+const MODEL_ACCOUNT_POLICY_PROVIDERS: Readonly<Record<string, true>> = {
+	"openai-codex": true,
+	cursor: true,
+};
+
+function modelAccountPolicyBlockScope(provider: string, modelId: string | undefined): string | undefined {
+	if (!Object.hasOwn(MODEL_ACCOUNT_POLICY_PROVIDERS, provider) || typeof modelId !== "string") return undefined;
+	const separator = modelId.lastIndexOf("/");
+	const bareModelId = (separator === -1 ? modelId : modelId.slice(separator + 1)).trim().toLowerCase();
+	if (!bareModelId || bareModelId.includes("\0")) return undefined;
+	return `${MODEL_ACCOUNT_POLICY_BLOCK_SCOPE_PREFIX}${bareModelId}`;
+}
+
+function credentialBlockScopesForRequest(
+	provider: string,
+	strategy: CredentialRankingStrategy | undefined,
+	rankingContext: CredentialRankingContext,
+	blockScope: string | undefined,
+): readonly string[] {
+	const scopes = strategy?.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
+	const modelPolicyScope = modelAccountPolicyBlockScope(provider, rankingContext.modelId);
+	if (!modelPolicyScope || scopes.includes(modelPolicyScope)) return scopes;
+	return [...scopes, modelPolicyScope];
+}
 
 function getUsagePlanType(report: UsageReport | null): string | undefined {
 	const metadata = report?.metadata;
@@ -2172,7 +2197,7 @@ export class AuthStorage {
 
 		const rankingContext: CredentialRankingContext = { modelId: options?.modelId };
 		const blockScope = strategy.blockScope?.(rankingContext);
-		const blockScopes = strategy.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
+		const blockScopes = credentialBlockScopesForRequest(provider, strategy, rankingContext, blockScope);
 		const candidates = await this.#rankApiKeySelections({
 			providerKey,
 			provider,
@@ -2684,16 +2709,27 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Check if any form of auth is configured for a provider.
-	 * Unlike getApiKey(), this doesn't refresh OAuth tokens.
+	 * Dedicated auth for default-model availability. Unlike {@link getApiKey},
+	 * this ignores cross-provider env aliases so `XAI_API_KEY` does not
+	 * auto-select SuperGrok (`xai-oauth`).
 	 */
 	hasAuth(provider: string): boolean {
 		if (this.#runtimeOverrides.has(provider)) return true;
 		if (this.#configOverrides.has(provider)) return true;
 		if (this.#getCredentialsForProvider(provider).length > 0) return true;
-		if (getEnvApiKey(provider)) return true;
+		if (this.#hasDedicatedEnvAuth(provider)) return true;
 		if (this.#fallbackResolver?.(provider)) return true;
 		return false;
+	}
+
+	/**
+	 * Whether an explicit request could resolve a key for this provider,
+	 * including cross-provider env aliases such as `xai-oauth` borrowing
+	 * `XAI_API_KEY`.
+	 */
+	hasResolvableAuth(provider: string): boolean {
+		if (this.hasAuth(provider)) return true;
+		return Boolean(getEnvApiKey(provider));
 	}
 
 	/**
@@ -2716,6 +2752,18 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Env auth owned by this provider rather than a cross-provider alias.
+	 * `getEnvApiKey("xai-oauth")` deliberately accepts `XAI_API_KEY` for
+	 * explicit selectors, while automatic availability requires the OAuth token.
+	 */
+	#hasDedicatedEnvAuth(provider: string): boolean {
+		if (provider === "xai-oauth") {
+			return Boolean($env.XAI_OAUTH_TOKEN?.trim());
+		}
+		return Boolean(getEnvApiKey(provider));
+	}
+
+	/**
 	 * Classify where a provider's auth comes from, following the same precedence
 	 * as {@link AuthStorage.getApiKey}: runtime override → config override →
 	 * stored OAuth → login-stored api_key → env var → stored api_key →
@@ -2731,7 +2779,7 @@ export class AuthStorage {
 		if (stored.some(credential => credential.type === "api_key" && credential.source === "login")) {
 			return { kind: "api_key" };
 		}
-		if (getEnvApiKey(provider)) return { kind: "env", envVar: getEnvApiKeyName(provider) };
+		if (this.#hasDedicatedEnvAuth(provider)) return { kind: "env", envVar: getEnvApiKeyName(provider) };
 		if (stored.some(credential => credential.type === "api_key")) return { kind: "api_key" };
 		if (this.#fallbackResolver?.(provider)) return { kind: "fallback" };
 		return undefined;
@@ -3836,7 +3884,7 @@ export class AuthStorage {
 		const planRequirement = resolveOpenAICodexPlanRequirement(provider, options.modelId);
 		const planEligibilityByCredential = new Map<number, boolean | undefined>();
 		const blockScope = strategy.blockScope?.(rankingContext);
-		const blockScopes = strategy.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
+		const blockScopes = credentialBlockScopesForRequest(provider, strategy, rankingContext, blockScope);
 		const reserveFraction = Number.isFinite(options.reserveFraction)
 			? Math.max(0, Math.min(1, options.reserveFraction))
 			: 0;
@@ -3886,7 +3934,12 @@ export class AuthStorage {
 				}
 				if (!report) return { credentialId: entry.id, credentialType, state: "unknown" };
 
-				const limits = this.#getScopedUsageLimits(strategy, report, rankingContext);
+				// Reserve health is opt-in and non-destructive: prefer the strategy's
+				// reserve scoping, which may expose mapped model/tier rows that the
+				// hard-block scoper withholds until confirmed exhaustion.
+				const limits =
+					strategy.scopeLimitsForReserve?.(report, rankingContext) ??
+					this.#getScopedUsageLimits(strategy, report, rankingContext);
 				if (limits.length === 0) return { credentialId: entry.id, credentialType, state: "unknown" };
 
 				const currentLimits = limits.filter(limit => {
@@ -4272,17 +4325,24 @@ export class AuthStorage {
 		provider: string,
 		credentialType: AuthCredential["type"],
 		modelId: string | undefined,
+		blockScopeOverride?: string,
 	): CredentialBlockRouting {
 		const providerKey = this.#getProviderTypeKey(provider, credentialType);
 		const strategy = this.#rankingStrategyResolver?.(provider);
 		const rankingContext: CredentialRankingContext = { modelId };
-		const blockScope = strategy?.blockScope?.(rankingContext);
+		const defaultBlockScope = strategy?.blockScope?.(rankingContext);
+		const blockScope = blockScopeOverride ?? defaultBlockScope;
+		const requestBlockScopes = credentialBlockScopesForRequest(provider, strategy, rankingContext, defaultBlockScope);
+		const siblingBlockScopes =
+			blockScopeOverride && !requestBlockScopes.includes(blockScopeOverride)
+				? [...requestBlockScopes, blockScopeOverride]
+				: requestBlockScopes;
 		return {
 			providerKey,
 			strategy,
 			rankingContext,
 			blockScope,
-			siblingBlockScopes: strategy?.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []),
+			siblingBlockScopes,
 		};
 	}
 
@@ -4649,7 +4709,7 @@ export class AuthStorage {
 		const rankingContext: CredentialRankingContext = { modelId: options?.modelId };
 		const blockScope = strategy?.blockScope?.(rankingContext);
 		// Reads honour every scope that applies; the scalar above is for args that persist.
-		const blockScopes = strategy?.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
+		const blockScopes = credentialBlockScopesForRequest(provider, strategy, rankingContext, blockScope);
 		const planRequirement = resolveOpenAICodexPlanRequirement(provider, options?.modelId);
 		const hasPlanRequirement = planRequirement !== "none";
 		const checkUsage = strategy !== undefined && (credentials.length > 1 || hasPlanRequirement);
@@ -4796,13 +4856,24 @@ export class AuthStorage {
 						isDefinitiveFailure,
 					});
 					if (isDefinitiveFailure) {
-						await this.#disableDefinitiveOAuthFailure(
+						const outcome = await this.#disableDefinitiveOAuthFailure(
 							provider,
 							credentialId,
 							candidate.selection.credential,
 							candidate.selection.index,
 							errorMsg,
 						);
+						if (
+							outcome !== "disabled" &&
+							credentialId !== undefined &&
+							this.#syncOAuthSelectionFromStore(provider, candidate.selection, credentialId)
+						) {
+							// A peer rotated this row between our snapshot and the
+							// failed refresh. Keep the candidate only when re-sync
+							// lands on that same live row; a deleted or disabled row
+							// must not rebind through its stale positional index.
+							return;
+						}
 					} else if (credentialId !== undefined) {
 						const latestIndex = this.#getStoredCredentials(provider).findIndex(
 							entry => entry.id === credentialId,
@@ -5029,9 +5100,9 @@ export class AuthStorage {
 						provider,
 					});
 				}
-				refreshPromise = customProvider.refreshToken(credential);
+				refreshPromise = customProvider.refreshToken(credential, signal);
 			} else {
-				refreshPromise = refreshOAuthToken(provider as OAuthProvider, credential);
+				refreshPromise = refreshOAuthToken(provider as OAuthProvider, credential, signal);
 			}
 		}
 		// Bound the refresh so a slow/hanging token endpoint cannot stall credential selection.
@@ -6208,8 +6279,10 @@ export class AuthStorage {
 	 * - usage-limit / account-rate-limit error → {@link AuthStorage.markUsageLimitReached}
 	 *   (temporary block via its own backoff — default plus server usage-report
 	 *   reset; sticky left intact so the next resolve re-ranks around the block).
-	 * - account-scoped policy denial → temporarily block that account without
-	 *   marking its credential suspect, then rotate through eligible siblings.
+	 * - exact model-entitlement denial (Codex ChatGPT account or Cursor plan) →
+	 *   temporarily block only that requested model, then rotate.
+	 * - other account-scoped policy denial → temporarily block that account
+	 *   without marking its credential suspect, then rotate through siblings.
 	 * - otherwise (hard 401 / auth failure) → mark the credential suspect (or
 	 *   reload when no broker hook is wired) and block it, then drop matching
 	 *   sticky state.
@@ -6224,7 +6297,9 @@ export class AuthStorage {
 		const error = options?.error;
 		const status = AIError.status(error);
 		const message = error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
-		if (AIError.isUsageLimit(error) || isUsageLimitOutcome(status, message)) {
+		const exactCursorModelPolicy = AIError.isCursorPlanAccountPolicyError(error, provider);
+		const accountPolicy = exactCursorModelPolicy || AIError.isAccountPolicyError(error);
+		if (!accountPolicy && (AIError.isUsageLimit(error) || isUsageLimitOutcome(status, message))) {
 			// Thread the provider-specified reset window (e.g. Devin "Your limit
 			// will reset in 13 minutes") into the block duration so the credential
 			// is not reselected and hammered while the cap remains active.
@@ -6246,8 +6321,25 @@ export class AuthStorage {
 		});
 		if (!sessionCredential) return false;
 
-		if (AIError.isAccountPolicyError(error)) {
-			const routing = this.#credentialBlockRouting(provider, sessionCredential.type, options?.modelId);
+		const deniedModel = AIError.codexChatGPTAccountPolicyModel(error);
+		const exactCodexModelPolicy =
+			deniedModel !== undefined && AIError.isCodexChatGPTAccountPolicyError(error, provider, options?.modelId);
+		const exactModelPolicy = exactCodexModelPolicy || exactCursorModelPolicy;
+		// The exact sentence is provider-controlled input. A non-Codex provider,
+		// absent request model, or mismatched model must not turn it into either a
+		// global block or a hard-auth invalidation.
+		if (deniedModel !== undefined && !exactCodexModelPolicy) return false;
+		if (exactModelPolicy || accountPolicy) {
+			const modelPolicyScope = exactModelPolicy
+				? modelAccountPolicyBlockScope(provider, options?.modelId)
+				: undefined;
+			if (exactModelPolicy && modelPolicyScope === undefined) return false;
+			const routing = this.#credentialBlockRouting(
+				provider,
+				sessionCredential.type,
+				options?.modelId,
+				modelPolicyScope,
+			);
 			return this.#blockCredentialForRotation(
 				provider,
 				sessionCredential.type,

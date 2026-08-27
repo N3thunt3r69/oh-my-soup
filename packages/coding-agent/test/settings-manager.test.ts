@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { Effort } from "@oh-my-soup/pi-ai";
 import { clearCustomApis } from "@oh-my-soup/pi-ai/api-registry";
@@ -295,9 +296,9 @@ describe("Settings", () => {
 			await writeSettings({ setupVersion: 1 });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const canonicalConfigPath = await fs.promises.realpath(getConfigPath());
-			const rename = fs.promises.rename.bind(fs.promises);
+			const rename = fsp.rename.bind(fsp);
 			let injected = false;
-			vi.spyOn(fs.promises, "rename").mockImplementation(async (source, target) => {
+			vi.spyOn(fsp, "rename").mockImplementation(async (source, target) => {
 				if (!injected && String(source).endsWith(".tmp") && String(target) === canonicalConfigPath) {
 					injected = true;
 					throw new FsCodeError("EPERM", "injected Windows replacement failure");

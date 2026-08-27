@@ -1,7 +1,6 @@
 import type { Agent, AgentMessage } from "@oh-my-soup/pi-agent-core";
 import {
 	calculatePromptTokens,
-	estimateTokens,
 	hasContextTokenUsage,
 	type SessionMessageEntry,
 } from "@oh-my-soup/pi-agent-core/compaction";
@@ -22,6 +21,12 @@ interface PendingContextSnapshot {
 	promptTokens: number;
 	nonMessageTokens: number;
 	cutoffCount: number;
+	/**
+	 * Compaction epoch at rebase time. Distinguishes a genuinely fresh in-turn
+	 * anchor (same epoch) from a post-cutoff anchor that predates a mid-run
+	 * compaction (older epoch) so the latter never out-ranks this snapshot.
+	 */
+	epoch: number;
 }
 
 /** Capabilities the stats tracker borrows from its owning session. */
@@ -44,9 +49,13 @@ export class SessionStatsTracker {
 	readonly #host: SessionStatsTrackerHost;
 	#pendingContextSnapshot: PendingContextSnapshot | undefined;
 	#contextUsageRevision = 0;
+	#compactionEpoch = 0;
 
 	constructor(host: SessionStatsTrackerHost) {
 		this.#host = host;
+	}
+	get #tokenizer() {
+		return this.#host.agent.tokenizer;
 	}
 
 	/** Returns aggregate message, token, and cost statistics for the session. */
@@ -121,9 +130,10 @@ export class SessionStatsTracker {
 		const contextWindow = Number.isFinite(rawContextWindow) && rawContextWindow > 0 ? rawContextWindow : 0;
 		const { skillsTokens, toolsTokens, systemContextTokens, systemPromptTokens } = computeNonMessageBreakdown(
 			this.#host.session,
+			this.#tokenizer,
 		);
 		const categoryNonMessageTokens = skillsTokens + toolsTokens + systemContextTokens + systemPromptTokens;
-		const currentNonMessageTokens = computeNonMessageTokens(this.#host.session);
+		const currentNonMessageTokens = computeNonMessageTokens(this.#host.session, this.#tokenizer);
 		const branchEntries = this.#host.sessionManager.getBranch();
 		const latestCompaction = getLatestCompactionEntry(branchEntries);
 		const compactionIndex = latestCompaction ? branchEntries.lastIndexOf(latestCompaction) : -1;
@@ -162,33 +172,37 @@ export class SessionStatsTracker {
 			}
 		}
 
+		const anchorEpoch = anchorAssistant?.contextSnapshot?.compactionEpoch ?? 0;
 		const useAnchor =
-			anchorAssistant !== undefined && anchorIndex !== -1 && (!pending || anchorIndex >= pending.cutoffCount);
+			anchorAssistant !== undefined &&
+			anchorIndex !== -1 &&
+			(!pending || (anchorIndex >= pending.cutoffCount && anchorEpoch >= pending.epoch));
 		if (useAnchor && anchorAssistant) {
 			const promptTokens = correctedPromptTokens(anchorAssistant);
 			const nonMessageTokens =
-				anchorAssistant.contextSnapshot?.nonMessageTokens ?? computeNonMessageTokens(this.#host.session);
+				anchorAssistant.contextSnapshot?.nonMessageTokens ??
+				computeNonMessageTokens(this.#host.session, this.#tokenizer);
 			anchored = true;
 			let tailTokens = 0;
 			for (let index = anchorIndex + 1; index < activeMessages.length; index++) {
-				tailTokens += estimateTokens(activeMessages[index]);
+				tailTokens += this.#tokenizer.countMessage(activeMessages[index]);
 			}
 			usedTokens =
 				promptTokens +
 				Math.max(0, currentNonMessageTokens - nonMessageTokens) +
 				tailTokens +
-				pendingMessages.reduce((sum, message) => sum + estimateTokens(message), 0);
+				pendingMessages.reduce((sum, message) => sum + this.#tokenizer.countMessage(message), 0);
 		} else if (pending) {
 			anchored = true;
 			let tailTokens = 0;
 			for (let index = pending.cutoffCount; index < activeMessages.length; index++) {
-				tailTokens += estimateTokens(activeMessages[index]);
+				tailTokens += this.#tokenizer.countMessage(activeMessages[index]);
 			}
 			usedTokens =
 				pending.promptTokens +
 				Math.max(0, currentNonMessageTokens - pending.nonMessageTokens) +
 				tailTokens +
-				pendingMessages.reduce((sum, message) => sum + estimateTokens(message), 0);
+				pendingMessages.reduce((sum, message) => sum + this.#tokenizer.countMessage(message), 0);
 		}
 
 		if (!anchored && !pending && branchEntries.length === 0) {
@@ -205,27 +219,28 @@ export class SessionStatsTracker {
 				}
 				const promptTokens = correctedPromptTokens(message);
 				const nonMessageTokens =
-					message.contextSnapshot?.nonMessageTokens ?? computeNonMessageTokens(this.#host.session);
+					message.contextSnapshot?.nonMessageTokens ??
+					computeNonMessageTokens(this.#host.session, this.#tokenizer);
 				let tailTokens = 0;
 				for (let tailIndex = index + 1; tailIndex < activeMessages.length; tailIndex++) {
-					tailTokens += estimateTokens(activeMessages[tailIndex]);
+					tailTokens += this.#tokenizer.countMessage(activeMessages[tailIndex]);
 				}
 				usedTokens =
 					promptTokens +
 					Math.max(0, currentNonMessageTokens - nonMessageTokens) +
 					tailTokens +
-					pendingMessages.reduce((sum, pendingMessage) => sum + estimateTokens(pendingMessage), 0);
+					pendingMessages.reduce((sum, pendingMessage) => sum + this.#tokenizer.countMessage(pendingMessage), 0);
 				anchored = true;
 				break;
 			}
 		}
 		if (!anchored) {
 			let messagesTokens = 0;
-			for (const message of activeMessages) messagesTokens += estimateTokens(message);
+			for (const message of activeMessages) messagesTokens += this.#tokenizer.countMessage(message);
 			usedTokens =
 				currentNonMessageTokens +
 				messagesTokens +
-				pendingMessages.reduce((sum, message) => sum + estimateTokens(message), 0);
+				pendingMessages.reduce((sum, message) => sum + this.#tokenizer.countMessage(message), 0);
 		}
 		return {
 			contextWindow,
@@ -253,6 +268,15 @@ export class SessionStatsTracker {
 	/** Monotonic revision for in-flight context snapshot changes. */
 	get revision(): number {
 		return this.#contextUsageRevision;
+	}
+
+	/**
+	 * Monotonic compaction epoch, bumped whenever history is compacted. Stamped
+	 * onto each assistant snapshot at record time so {@link getContextBreakdown}
+	 * can reject a post-cutoff anchor whose usage predates the last compaction.
+	 */
+	get compactionEpoch(): number {
+		return this.#compactionEpoch;
 	}
 
 	/** Non-message token count captured for the active provider request. */
@@ -291,7 +315,8 @@ export class SessionStatsTracker {
 			if (!assistant.contextSnapshot) {
 				assistant.contextSnapshot = {
 					promptTokens: calculatePromptTokens(assistant.usage),
-					nonMessageTokens: computeNonMessageTokens(this.#host.session),
+					nonMessageTokens: computeNonMessageTokens(this.#host.session, this.#tokenizer),
+					compactionEpoch: this.#compactionEpoch,
 				};
 			}
 			const snapshot = assistant.contextSnapshot;
@@ -302,18 +327,20 @@ export class SessionStatsTracker {
 	}
 
 	/** Sets or clears the in-flight context snapshot. */
-	setPendingSnapshot(snapshot: PendingContextSnapshot | undefined): void {
-		this.#pendingContextSnapshot = snapshot;
+	setPendingSnapshot(snapshot: Omit<PendingContextSnapshot, "epoch"> | undefined): void {
+		this.#pendingContextSnapshot = snapshot ? { ...snapshot, epoch: this.#compactionEpoch } : undefined;
 		this.#contextUsageRevision++;
 	}
 
 	/** Recomputes an in-flight snapshot after history is compacted or rewritten. */
 	rebaseAfterCompaction(): void {
+		this.#compactionEpoch++;
 		if (!this.#pendingContextSnapshot) return;
-		const nonMessageTokens = computeNonMessageTokens(this.#host.session);
+		const nonMessageTokens = computeNonMessageTokens(this.#host.session, this.#tokenizer);
 		const messages = this.#host.agent.state.messages;
 		this.setPendingSnapshot({
-			promptTokens: nonMessageTokens + messages.reduce((sum, message) => sum + estimateTokens(message), 0),
+			promptTokens:
+				nonMessageTokens + messages.reduce((sum, message) => sum + this.#tokenizer.countMessage(message), 0),
 			nonMessageTokens,
 			cutoffCount: messages.length,
 		});

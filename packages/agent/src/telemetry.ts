@@ -30,6 +30,8 @@ import {
 	completeSimple,
 	type Message,
 	type Model,
+	type OneshotRetryOptions,
+	retryTransientCompletion,
 	type ServiceTier,
 	type SimpleStreamOptions,
 	type StopReason,
@@ -1663,6 +1665,13 @@ export interface InstrumentedChatSpanOptions {
 		ctx: Context,
 		options: SimpleStreamOptions,
 	) => Promise<AssistantMessage>;
+	/**
+	 * Opt in to bounded transient retries for a replay-safe oneshot.
+	 * Omitted means no retry because arbitrary tools and tool choices may have
+	 * side effects. Framework-owned abort and response-header wiring overrides
+	 * the corresponding fields supplied here.
+	 */
+	readonly retry?: OneshotRetryOptions;
 }
 
 /**
@@ -1723,10 +1732,17 @@ export async function instrumentedCompleteSimple<TApi extends Api>(
 	try {
 		return await runInActiveSpan(chatSpan, async () => {
 			const complete = span.completeImpl ?? completeSimple;
-			const message = await complete(model, ctx, {
-				...options,
-				onResponse: captureOnResponse,
-			});
+			const runOnce = () => {
+				capturedHeaders = undefined;
+				return complete(model, ctx, { ...options, onResponse: captureOnResponse });
+			};
+			const message = span.retry
+				? await retryTransientCompletion(runOnce, {
+						...span.retry,
+						signal: options.signal,
+						getResponseHeaders: () => capturedHeaders,
+					})
+				: await runOnce();
 			await finishChatSpan(telemetry, chatSpan, message, {
 				stepNumber,
 				serviceTier: options.serviceTier,

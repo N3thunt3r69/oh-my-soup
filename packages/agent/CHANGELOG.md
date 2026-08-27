@@ -2,9 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in transient retries to `instrumentedCompleteSimple`; response headers are captured and cleared per attempt so `retry-after` hints never leak between retries.
+
+### Changed
+
+- Catalog-resolved tokenizer families now drive exact native counts: Claude, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+ use their matching embedded tokenizer; unknown models retain the fast estimate (or o200k with `PI_TOKENIZER_ACCURATE=1`). `Tokenizer` takes the resolved catalog `Model`, never a raw model id.
+
 ### Fixed
 
 - `onTurnEnd` now runs for a turn stopped by a terminal-tool-result abort (e.g. a subagent's final `yield`) instead of being skipped as an external abort, so per-turn bookkeeping observes the yield turn.
+- Replay-safe handoff, branch-summary, and manual-compaction oneshots now survive bounded transient provider failures. `SummaryOptions.oneshotRetry` defaults on for manual compaction, while auto-compaction opts out because its outer loop already owns retries.
 
 ## [18.0.0] - 2026-08-22
 

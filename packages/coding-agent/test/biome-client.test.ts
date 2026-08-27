@@ -105,3 +105,25 @@ describe("BiomeClient format", () => {
 		expect(result).toBe(content);
 	});
 });
+
+describe("BiomeClient lint", () => {
+	test("cancels a hung Biome process when diagnostics are aborted", async () => {
+		const tempDir = await makeTempDir();
+		const command = process.execPath;
+		// Invoke a Bun script through the same argv slot that normally contains
+		// the `lint` subcommand. This remains executable on both Windows and POSIX.
+		await Bun.write(path.join(tempDir, "lint"), "for (;;) {}\n");
+		const targetFile = path.join(tempDir, "example.ts");
+		const started = Date.now();
+
+		let rejected = false;
+		try {
+			await new BiomeClient(biomeConfig(command), tempDir).lint(targetFile, AbortSignal.timeout(50));
+		} catch {
+			rejected = true;
+		}
+
+		expect(rejected).toBe(true);
+		expect(Date.now() - started).toBeLessThan(2_000);
+	}, 5_000);
+});

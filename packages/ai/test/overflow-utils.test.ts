@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-soup/pi-ai";
-import { isContextOverflow } from "@oh-my-soup/pi-ai/error";
+import * as AIError from "@oh-my-soup/pi-ai/error";
+
+const { isContextOverflow } = AIError;
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
 	return {
@@ -41,20 +43,51 @@ describe("isContextOverflow - model_context_window_exceeded", () => {
 	});
 });
 
-describe("isContextOverflow - HTTP 413 variants", () => {
-	it("detects generic 413 payload-too-large errors", () => {
+describe("HTTP 413 payload and overflow arbitration", () => {
+	it("classifies request byte/media limits as payload rejection, not token overflow", () => {
 		const message = createErrorMessage("413 Request Entity Too Large: payload too large for request body");
-		expect(isContextOverflow(message)).toBe(true);
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isPayloadRejection(message)).toBe(true);
+		expect(AIError.isContextOverflow(message)).toBe(false);
+		expect(AIError.retriable(message.errorId)).toBe(false);
 	});
 
-	it("detects Anthropic request size overflow wording", () => {
-		const message = createErrorMessage("Request exceeds the maximum size allowed by this model");
-		expect(isContextOverflow(message)).toBe(true);
+	it("keeps explicit token evidence as overflow-only", () => {
+		const message = createErrorMessage("request_too_large: prompt is too long: 300000 tokens > 200000 maximum");
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isContextOverflow(message)).toBe(true);
+		expect(AIError.isPayloadRejection(message)).toBe(false);
 	});
 
-	it("does not classify unrelated 413 errors as overflow", () => {
+	it("classifies provider chat-history count limits as overflow, not payload rejection", () => {
+		const message = createErrorMessage("413 Chat history exceeds the 800-message limit");
+		message.errorStatus = 413;
+		message.errorId = AIError.classifyMessage(message);
+
+		expect(AIError.isContextOverflow(message)).toBe(true);
+		expect(AIError.isPayloadRejection(message)).toBe(false);
+	});
+
+	it("dual-flags media numeric limits without mistaking the number for token evidence", () => {
+		const message = createErrorMessage("request_too_large: image count exceeds the limit of 20");
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.is(message.errorId, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.isPayloadRejection(message)).toBe(true);
+		expect(AIError.isTextAmbiguousContextOverflow(message.errorId, message, 200_000)).toBe(true);
+	});
+
+	it("classifies status-only 413 responses as payload rejection", () => {
+		const message = createErrorMessage("Content Too Large");
+		message.errorStatus = 413;
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isPayloadRejection(message)).toBe(true);
+		expect(AIError.isContextOverflow(message)).toBe(false);
+	});
+
+	it("does not classify unrelated 413 text without status evidence", () => {
 		const message = createErrorMessage("413 Forbidden");
-		expect(isContextOverflow(message)).toBe(false);
+		expect(AIError.isContextOverflow(message)).toBe(false);
+		expect(AIError.isPayloadRejection(message)).toBe(false);
 	});
 });
 
@@ -63,8 +96,11 @@ describe("isContextOverflow - 400/413 no-body (Cerebras, Mistral, proxy wrappers
 		expect(isContextOverflow(createErrorMessage("400 status code (no body)"))).toBe(true);
 	});
 
-	it("detects bare '413 status code (no body)'", () => {
-		expect(isContextOverflow(createErrorMessage("413 status code (no body)"))).toBe(true);
+	it("dual-flags bare '413 status code (no body)'", () => {
+		const message = createErrorMessage("413 status code (no body)");
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isContextOverflow(message)).toBe(true);
+		expect(AIError.isPayloadRejection(message)).toBe(true);
 	});
 
 	it("detects '400 (no body)' without 'status code' word", () => {
@@ -148,6 +184,16 @@ describe("isContextOverflow - silent overflow (usage exceeds window)", () => {
 
 	it("detects a successful response whose input + cacheRead exceeds the context window", () => {
 		expect(isContextOverflow(createStopMessage(150_000, 60_000), 200_000)).toBe(true);
+	});
+
+	it("lets provider usage evidence resolve a dual-flag media rejection as authoritative overflow", () => {
+		const message = createErrorMessage("request_too_large: image count exceeds the limit of 20");
+		message.usage.input = 250_000;
+		message.usage.totalTokens = 250_000;
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isPayloadRejection(message)).toBe(true);
+		expect(AIError.isUsageBackedContextOverflow(message, 200_000)).toBe(true);
+		expect(AIError.isTextAmbiguousContextOverflow(message.errorId, message, 200_000)).toBe(false);
 	});
 
 	it("does not flag a successful response within the context window", () => {

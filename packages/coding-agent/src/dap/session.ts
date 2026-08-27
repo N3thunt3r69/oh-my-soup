@@ -393,6 +393,10 @@ export class DapSessionManager {
 				timeoutMs,
 			);
 			session.needsConfigurationDone = session.capabilities.supportsConfigurationDoneRequest === true;
+			if (options.adapter.attachDefaults.skipAttachRequest === true) {
+				await this.#completeConfigurationHandshake(session, signal, timeoutMs);
+				return buildSummary(session);
+			}
 			const attachArguments: DapAttachArguments = {
 				...options.adapter.attachDefaults,
 				cwd: options.cwd,
@@ -1485,6 +1489,9 @@ export class DapSessionManager {
 		if (!session.needsConfigurationDone) {
 			if (session.parentSessionId) {
 				await this.#applyRootBreakpointsToSession(session, signal, timeoutMs);
+			}
+			if (session.status === "launching" || session.status === "configuring") {
+				session.status = "running";
 			}
 			return;
 		}

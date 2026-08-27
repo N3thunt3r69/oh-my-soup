@@ -48,4 +48,39 @@ describe("startup model cache header restoration (#5780)", () => {
 			expect(live.headers).toEqual(model.headers);
 		}
 	});
+
+	test("uses an explicit cache path independently of the models config directory", async () => {
+		const modelsPath = path.join(tempDir, "config", "models.json");
+		const cacheDbPath = path.join(tempDir, "data", "models.db");
+		await fs.promises.mkdir(path.dirname(modelsPath), { recursive: true });
+		await fs.promises.mkdir(path.dirname(cacheDbPath), { recursive: true });
+		await Bun.write(
+			modelsPath,
+			JSON.stringify({
+				providers: {
+					probe: {
+						baseUrl: "https://example.invalid/v1/",
+						api: "openai-completions",
+						auth: "none",
+						discovery: { type: "openai-models-list" },
+					},
+				},
+			}),
+		);
+
+		const primedRegistry = new ModelRegistry(authStorage, modelsPath, {
+			cacheDbPath,
+			fetch: async () => Response.json({ data: [{ id: "probe-model" }] }),
+		});
+		await primedRegistry.refreshProvider("probe", "online");
+
+		expect(await Bun.file(cacheDbPath).exists()).toBe(true);
+		expect(await Bun.file(path.join(path.dirname(modelsPath), "models.db")).exists()).toBe(false);
+
+		const restartedRegistry = new ModelRegistry(authStorage, modelsPath, {
+			cacheDbPath,
+			fetch: () => Promise.reject(new Error("offline")),
+		});
+		expect(restartedRegistry.find("probe", "probe-model")).toBeDefined();
+	});
 });

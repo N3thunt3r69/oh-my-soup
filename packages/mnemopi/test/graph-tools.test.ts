@@ -50,6 +50,32 @@ describe("EpisodicGraph CRUD", () => {
 	});
 });
 
+describe("EpisodicGraph gist extraction", () => {
+	it("captures capitalized proper-noun places and ignores lowercase prose", () => {
+		withGraph(graph => {
+			expect(graph.extractGist("Met Bob in Paris yesterday.", "mem_loc_1").location).toBe("Paris");
+			expect(graph.extractGist("We stored the summary in your loaded context plus.", "mem_loc_2").location).toBe(
+				null,
+			);
+		});
+	});
+
+	it("extracts proper nouns from Greek and Cyrillic content", () => {
+		withGraph(graph => {
+			const greek = graph.extractGist("Ο Βασίλης συνάντησε τη Μαρία στην Αθήνα.", "mem_el");
+			expect(greek.participants).toContain("Βασίλης");
+			expect(greek.participants).toContain("Μαρία");
+
+			const cyrillic = graph.extractGist("Иван встретил Анну в Москве.", "mem_ru");
+			expect(cyrillic.participants).toContain("Иван");
+			expect(cyrillic.participants).toContain("Анну");
+
+			graph.storeGist(greek, "mem_el");
+			expect(graph.findGistsByParticipant("Βασίλης")).toHaveLength(1);
+		});
+	});
+});
+
 describe("EpisodicGraph links and traversal", () => {
 	it("creates idempotent weighted links and traverses neighborhoods", () => {
 		withGraph(graph => {

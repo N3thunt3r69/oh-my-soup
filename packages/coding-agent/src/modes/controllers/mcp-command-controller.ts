@@ -6,6 +6,7 @@
 import * as path from "node:path";
 import { type Component, replaceTabs, Spacer, Text } from "@oh-my-soup/pi-tui";
 import { getMCPConfigPath, getProjectDir } from "@oh-my-soup/pi-utils";
+import { clearCache as clearFsCache } from "../../capability/fs";
 import type { SourceMeta } from "../../capability/types";
 import { expandEnvVarsDeep } from "../../discovery/helpers";
 import {
@@ -61,6 +62,7 @@ import { copyToClipboard } from "../../utils/clipboard";
 import { isTimeoutError } from "../../utils/fetch-timeout";
 import { openPath } from "../../utils/open";
 import { ChatBlock } from "../components/chat-block";
+import { DynamicBorder } from "../components/dynamic-border";
 import { MCPAddWizard } from "../components/mcp-add-wizard";
 import { TranscriptBlock } from "../components/transcript-container";
 import { parseCommandArgs } from "../shared";
@@ -70,6 +72,25 @@ import { groupBySource, parseRemoveArgs, readScopeFlag, showCommandMessage } fro
 
 const MCP_MANUAL_INPUT_PROVIDER_ID = "mcp";
 const MCP_MANUAL_LOGIN_TIP = "Headless? Paste the redirect URL or code with /login <value>.";
+const MCP_TEST_ESCAPE_GRACE_MS = 5_000;
+
+/**
+ * Hint block for an in-flight `/mcp test`. It remains active until settlement
+ * seals its final text, after which TranscriptContainer can retire it as an
+ * immutable history batch.
+ */
+class MutableMCPTestHintBlock extends TranscriptBlock {
+	#sealed = false;
+
+	isTranscriptBlockFinalized(): boolean {
+		return this.#sealed;
+	}
+
+	seal(): void {
+		this.#sealed = true;
+	}
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string, onTimeout?: () => void): Promise<T> {
 	const { promise: timeoutPromise, reject } = Promise.withResolvers<T>();
 	const timer = setTimeout(() => {
@@ -1564,17 +1585,44 @@ export class MCPCommandController {
 			return;
 		}
 
-		const originalOnEscape = this.ctx.editor.onEscape;
 		const abortController = new AbortController();
-		this.ctx.editor.onEscape = () => {
+		let settled = false;
+		const handleEscape = (): void => {
+			if (settled) {
+				this.ctx.showStatus(`MCP test for "${name}" already finished`);
+				return;
+			}
 			abortController.abort();
 		};
 
+		// Claim Esc before the first await. A slow or stalled config lookup must
+		// not let the same key press fall through to an overlapping agent turn.
+		this.ctx.mcpTestEscapeHandlers.add(handleEscape);
+
 		let connection: MCPServerConnection | undefined;
+		let hintShown = false;
+		let hintText: Text | undefined;
+		let hintBlock: MutableMCPTestHintBlock | undefined;
+		let settleNote = `Tested connection to "${name}".`;
+
+		// Once Esc consumes this owner, stop advertising a cancellable action
+		// immediately. The final outcome is still decided by the awaited
+		// signal-aware operation: an abort during manager sync does not cancel it.
+		abortController.signal.addEventListener("abort", () => {
+			if (settled || !hintShown) return;
+			hintText?.setText(theme.fg("muted", `Testing connection to "${name}"...`));
+			this.ctx.ui.requestRender();
+		});
+
 		try {
-			const found = await this.#resolveServerForAuth(name);
+			const found = await raceAbortSignal(
+				this.#resolveServerForAuth(name),
+				abortController.signal,
+				() => new DOMException("Aborted", "AbortError"),
+			);
 
 			if (!found) {
+				this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
 				this.ctx.showError(
 					`Server "${name}" not found.\n\nTip: Run ${theme.fg("accent", "/mcp list")} to see available servers.`,
 				);
@@ -1583,13 +1631,27 @@ export class MCPCommandController {
 
 			const { config } = found;
 			if (config.enabled === false) {
+				this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
 				this.ctx.showError(`Server "${name}" is disabled. Run /mcp enable ${name} first.`);
 				return;
 			}
 
-			this.#showMessage(
-				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
-			);
+			// Cover the microtask gap after the raced lookup: never display a
+			// stale "(esc to cancel)" hint after ownership has been consumed.
+			if (abortController.signal.aborted) {
+				this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
+				this.ctx.showStatus(`Cancelled MCP test for "${name}"`);
+				return;
+			}
+
+			hintBlock = new MutableMCPTestHintBlock();
+			hintBlock.addChild(new DynamicBorder());
+			const text = new Text(theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), 1, 1);
+			hintBlock.addChild(text);
+			hintBlock.addChild(new DynamicBorder());
+			this.ctx.presentCommandOutput(hintBlock);
+			hintText = text;
+			hintShown = true;
 
 			// Resolve auth config if needed
 			let resolvedConfig: MCPServerConfig;
@@ -1615,7 +1677,6 @@ export class MCPCommandController {
 				`  Tools: ${tools.length}`,
 			];
 
-			// Show tool names if there are any
 			if (tools.length > 0 && tools.length <= 10) {
 				lines.push("");
 				lines.push("  Available tools:");
@@ -1629,13 +1690,12 @@ export class MCPCommandController {
 			this.#showMessage(lines.join("\n"));
 		} catch (error) {
 			if (abortController.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+				settleNote = `Cancelled connection test for "${name}".`;
 				this.ctx.showStatus(`Cancelled MCP test for "${name}"`);
 				return;
 			}
 
 			const errorMsg = error instanceof Error ? error.message : String(error);
-
-			// Provide helpful error messages
 			let helpText = "";
 			if (errorMsg.includes("ENOENT") || errorMsg.includes("not found")) {
 				helpText = "\n\nTip: Check that the command or URL is correct.";
@@ -1645,13 +1705,27 @@ export class MCPCommandController {
 				helpText = "\n\nTip: Check that the server is running and the URL/port is correct.";
 			} else if (errorMsg.includes("timeout")) {
 				helpText = "\n\nTip: The server may be slow or unresponsive. Try increasing the timeout.";
-			} else if (errorMsg.includes("401") || errorMsg.includes("403")) {
-				helpText = "\n\nTip: Check your authentication credentials.";
 			}
 
+			settleNote = `Connection test for "${name}" failed.`;
 			this.ctx.showError(`Failed to connect to "${name}": ${errorMsg}${helpText}`);
 		} finally {
-			this.ctx.editor.onEscape = originalOnEscape;
+			settled = true;
+			if (hintShown) {
+				hintText?.setText(theme.fg("muted", settleNote));
+				this.ctx.ui.requestRender();
+				hintBlock?.seal();
+			}
+			if (this.ctx.mcpTestEscapeHandlers.has(handleEscape)) {
+				if (hintShown) {
+					const timer = setTimeout(() => {
+						this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
+					}, MCP_TEST_ESCAPE_GRACE_MS);
+					timer.unref();
+				} else {
+					this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
+				}
+			}
 			if (connection) {
 				// Best-effort: don't block UI on cleanup.
 				void disconnectServer(connection);
@@ -2068,6 +2142,9 @@ export class MCPCommandController {
 		// removed/disabled servers cannot leave stale `/server:prompt` entries;
 		// newly loaded prompts repopulate them through the manager callback.
 		this.ctx.session.setMCPPromptCommands([]);
+		// External edits bypass the config writer's invalidation hook; force the
+		// capability layer to observe the latest mcp.json during rediscovery.
+		clearFsCache();
 
 		// Rediscover and connect, mirroring startup's discovery filters.
 		const result = await this.ctx.mcpManager.discoverAndConnect({

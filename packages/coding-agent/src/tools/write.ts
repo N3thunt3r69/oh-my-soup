@@ -359,13 +359,15 @@ function stripWriteContent(session: ToolSession, content: string): { text: strin
  * and return the matching `[displayPath#TAG]` header. Returns `undefined`
  * when the session is not in hashline mode so callers can no-op cheaply.
  *
- * Mirrors the post-commit snapshot recording the hashline patcher performs
- * after a successful edit: the model gets a tag without an extra `read`.
+ * Mirrors the post-commit snapshot recording the hashline patcher performs,
+ * but records an empty seen-line set: write output displays no numbered lines,
+ * so enforcement must not authorize anchors merely because the model authored
+ * the file content.
  */
 function maybeWriteSnapshotHeader(session: ToolSession, absolutePath: string, content: string): string | undefined {
 	if (!resolveFileDisplayMode(session).hashLines) return undefined;
 	const normalized = normalizeToLF(content);
-	const tag = getFileSnapshotStore(session).record(canonicalSnapshotKey(absolutePath), normalized);
+	const tag = getFileSnapshotStore(session).record(canonicalSnapshotKey(absolutePath), normalized, []);
 	return formatHashlineHeader(formatPathRelativeToCwd(absolutePath, session.cwd), tag);
 }
 
@@ -400,19 +402,21 @@ function emitWriteProgress(
  * If `content` begins with a `#!` shebang, ensure the file is executable.
  *
  * Mirrors `chmod a+x` (adds user/group/other execute bits to existing mode).
- * Errors are swallowed: chmod failure (e.g. Windows ACL, read-only mount)
- * MUST NOT fail an otherwise successful write. Returns whether the mode
- * actually changed so the caller can surface a note.
+ * Windows does not represent executable status with POSIX mode bits, so it
+ * cannot make this claim. Other platforms are checked again after chmod because
+ * some filesystems accept the call while ignoring execute bits. Errors MUST NOT
+ * fail an otherwise successful write.
  */
 async function maybeMarkExecutableForShebang(absolutePath: string, content: string): Promise<boolean> {
-	if (!content.startsWith("#!")) return false;
+	if (process.platform === "win32" || !content.startsWith("#!")) return false;
 	try {
 		const stat = await fs.stat(absolutePath);
 		const currentMode = stat.mode & 0o7777;
 		const newMode = currentMode | 0o111;
 		if (newMode === currentMode) return false;
 		await fs.chmod(absolutePath, newMode);
-		return true;
+		const updatedMode = (await fs.stat(absolutePath)).mode & 0o7777;
+		return (updatedMode & 0o111) === 0o111;
 	} catch {
 		return false;
 	}

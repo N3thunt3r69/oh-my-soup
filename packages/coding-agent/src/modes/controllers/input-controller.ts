@@ -298,6 +298,15 @@ export class InputController {
 			});
 		}
 		this.ctx.editor.onEscape = () => {
+			// `/mcp test` advertises Esc until each owner's post-settlement grace
+			// expires. One press cancels every advertised test and consumes their
+			// ownership before any side-channel or main-turn action can steal it.
+			if (this.ctx.mcpTestEscapeHandlers.size > 0) {
+				const handlers = [...this.ctx.mcpTestEscapeHandlers];
+				this.ctx.mcpTestEscapeHandlers.clear();
+				for (const handler of handlers) handler();
+				return;
+			}
 			// Side-channel panels are the topmost view. Esc dismisses them before
 			// touching loop mode, maintenance, or the underlying main turn.
 			// Active context maintenance owns Esc: auto/manual compaction,

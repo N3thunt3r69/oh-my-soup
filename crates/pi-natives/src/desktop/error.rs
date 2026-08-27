@@ -50,6 +50,7 @@ impl DesktopError {
 		Self { code, message: message.into() }
 	}
 
+	#[cfg(any(target_os = "linux", target_os = "macos"))]
 	pub(crate) fn permission_denied(message: impl Into<String>) -> Self {
 		Self::new(ErrorCode::PermissionDenied, message)
 	}

@@ -172,6 +172,9 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	}
 	if (arg === COMPUTER_WORKER_ARG) {
 		if (parentPort) installWorkerInbox(parentPort);
+		// The native desktop addon belongs to this selector only. Keeping the worker
+		// entry dynamic lets --help, --version, and ordinary startup run under
+		// `bun --no-addons` without evaluating the computer implementation.
 		const { startComputerWorker } = await import("./tools/computer/worker-entry");
 		startComputerWorker();
 		return true;
@@ -395,6 +398,14 @@ export async function runCli(argv: string[]): Promise<void> {
 	// poison `workerHostEntry()` for the whole test process, forcing eval/stats/
 	// browser workers onto the same-realm inline fallback.
 	if (isProcessEntry) declareWorkerHostEntry();
+
+	// Provider streams already resolve PI_PROXY through their request wrapper.
+	// Install the generic form before loading the command graph so OAuth,
+	// usage, discovery, and other bare fetch calls follow the same route. This
+	// remains dynamic because a static pi-ai import would run before profile
+	// bootstrap and would load the provider graph for network-free CLI paths.
+	const { installGlobalProxyFetch } = await import("@oh-my-soup/pi-ai/utils/proxy");
+	installGlobalProxyFetch();
 
 	if (resolvedArgv[0] === "--smoke-test") {
 		await runSmokeTest();

@@ -24,6 +24,7 @@ import {
 	type ExtensionFactory,
 } from "@oh-my-soup/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
+import type { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 import { VIBE_TOOL_NAMES } from "@oh-my-soup/pi-coding-agent/tools/vibe";
 import { logger, removeSyncWithRetries, Snowflake, untilAborted } from "@oh-my-soup/pi-utils";
@@ -70,6 +71,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 	// these tests vary, and skips the background model refresh the SDK would
 	// otherwise start when it builds its own registry.
 	let modelRegistry!: ModelRegistry;
+	let registryAuthStorage!: AuthStorage;
 	let registryAuthDir: string;
 
 	const makeTempDir = (): string => {
@@ -82,7 +84,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 	beforeAll(async () => {
 		registryAuthDir = path.join(os.tmpdir(), `pi-sdk-tool-activation-auth-${Snowflake.next()}`);
 		fs.mkdirSync(registryAuthDir, { recursive: true });
-		modelRegistry = new ModelRegistry(await discoverAuthStorage(registryAuthDir));
+		registryAuthStorage = await discoverAuthStorage(registryAuthDir);
+		modelRegistry = new ModelRegistry(registryAuthStorage);
 	});
 
 	// Shared options for every session. `rules: []` and `workspaceTree` short-circuit
@@ -125,6 +128,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 	});
 
 	afterAll(() => {
+		registryAuthStorage.close();
 		removeSyncWithRetries(registryAuthDir);
 	});
 

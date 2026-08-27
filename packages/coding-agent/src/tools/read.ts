@@ -10,7 +10,15 @@ import type {
 	ToolTier,
 } from "@oh-my-soup/pi-agent-core";
 import type { ImageContent, TextContent } from "@oh-my-soup/pi-ai";
-import { type ImageMetadata, isProbablyBinary, logger, prompt, readImageMetadata } from "@oh-my-soup/pi-utils";
+import {
+	BINARY_SNIFF_BYTES,
+	type ImageMetadata,
+	isProbablyBinary,
+	isProbablyBinaryHeader,
+	logger,
+	prompt,
+	readImageMetadata,
+} from "@oh-my-soup/pi-utils";
 import {
 	canonicalSnapshotKey,
 	getFileSnapshotStore,
@@ -85,6 +93,7 @@ import {
 	formatTextWithMode,
 	type HashlineHeaderContext,
 	hashlineHeaderContext,
+	hashlineHeaderContextForText,
 	lineNumbersFromSpans,
 	markMarkdownContentType,
 	prependHashlineHeader,
@@ -117,13 +126,157 @@ export { readToolRenderer } from "./read-renderer";
 const MAX_PROFILE_SUMMARY_BYTES = 32 * 1024 * 1024;
 const MAX_ARTIFACT_RAW_INLINE_BYTES = DEFAULT_MAX_BYTES;
 
-async function readBracketContextFullLines(absolutePath: string, fileSize: number): Promise<string[] | undefined> {
-	if (fileSize > SNAPSHOT_MAX_BYTES) return undefined;
+/** LF byte, scanned natively to find line boundaries in a buffered file. */
+const LF_BYTE = 0x0a;
+
+/**
+ * Whole-file bytes plus every view the local text read path consumes,
+ * materialized exactly once.
+ *
+ * Only files at or below {@link SNAPSHOT_MAX_BYTES} are buffered: past that cap
+ * bracket context and the snapshot are skipped anyway, so streaming a window
+ * stays strictly cheaper than materializing the file.
+ */
+interface BufferedFileText {
+	readonly bytes: Buffer;
+	readonly rawText: string;
+	readonly rawSegments: readonly string[];
+	readonly strippedText: string;
+	readonly normalizedText: string;
+	readonly addressableLines: readonly string[];
+	readonly endsWithNewline: boolean;
+}
+
+/**
+ * Read the whole file before decoding, so binary content can be rejected
+ * without allocating text views that will immediately be discarded.
+ */
+async function readWholeFile(absolutePath: string): Promise<Buffer | undefined> {
 	try {
-		return splitAddressableFileLines(normalizeToLF(await Bun.file(absolutePath).text()));
+		return await fs.readFile(absolutePath);
 	} catch {
 		return undefined;
 	}
+}
+
+/** Derive every text view needed by the read path, decoding exactly once. */
+function deriveBufferedFileText(bytes: Buffer): BufferedFileText {
+	const rawText = bytes.toString("utf-8");
+	const strippedText = rawText.charCodeAt(0) === 0xfeff ? rawText.slice(1) : rawText;
+	const normalizedText = strippedText.includes("\r") ? normalizeToLF(strippedText) : strippedText;
+	const rawSegments = rawText.split("\n");
+	let addressableLines: readonly string[];
+	if (normalizedText === rawText) {
+		const last = rawSegments.length - 1;
+		addressableLines = last > 0 && rawSegments[last] === "" ? rawSegments.slice(0, last) : rawSegments;
+	} else {
+		addressableLines = splitAddressableFileLines(normalizedText);
+	}
+	return {
+		bytes,
+		rawText,
+		rawSegments,
+		strippedText,
+		normalizedText,
+		addressableLines,
+		endsWithNewline: bytes.length > 0 && bytes[bytes.length - 1] === LF_BYTE,
+	};
+}
+
+/** The line window a range read renders, with its exact byte accounting. */
+interface ReadLineWindow {
+	lines: string[];
+	totalFileLines: number;
+	collectedBytes: number;
+	stoppedByByteLimit: boolean;
+	firstLinePreview?: { text: string; bytes: number };
+	firstLineByteLength?: number;
+	hasTrailingNewline: boolean;
+	reachedEof: boolean;
+}
+
+/**
+ * Slice the same window as {@link streamLinesFromFile} from an already-buffered
+ * file. Byte lengths come from the original buffer so invalid UTF-8 replacement
+ * characters cannot inflate accounting or move the truncation boundary.
+ */
+function collectLineWindowFromBuffer(
+	file: BufferedFileText,
+	startLine: number,
+	maxLinesToCollect: number,
+	maxBytes: number,
+	selectedLineLimit: number,
+	includeTerminalNewline: boolean,
+): ReadLineWindow {
+	const { bytes, rawSegments, endsWithNewline } = file;
+	const totalFileLines =
+		endsWithNewline && !includeTerminalNewline && rawSegments.length > 1
+			? rawSegments.length - 1
+			: rawSegments.length;
+	const window: ReadLineWindow = {
+		lines: [],
+		totalFileLines,
+		collectedBytes: 0,
+		stoppedByByteLimit: false,
+		hasTrailingNewline: endsWithNewline,
+		reachedEof: true,
+	};
+	if (startLine >= totalFileLines) return window;
+
+	let lineStart = 0;
+	for (let index = 0; index < startLine; index++) {
+		const newlineAt = bytes.indexOf(LF_BYTE, lineStart);
+		if (newlineAt === -1) {
+			lineStart = bytes.length;
+			break;
+		}
+		lineStart = newlineAt + 1;
+	}
+
+	let doneCollecting = false;
+	let selectedLinesSeen = 0;
+	for (let index = startLine; index < totalFileLines; index++) {
+		const newlineAt = bytes.indexOf(LF_BYTE, lineStart);
+		const lineEnd = newlineAt === -1 ? bytes.length : newlineAt;
+		const lineByteLength = lineEnd - lineStart;
+
+		if (selectedLinesSeen < selectedLineLimit) selectedLinesSeen++;
+		if (window.lines.length === 0 && window.firstLinePreview === undefined && lineByteLength > 0) {
+			const previewEnd = Math.min(lineEnd, lineStart + maxBytes);
+			const { text, bytes: previewBytes } = truncateHeadBytes(bytes.subarray(lineStart, previewEnd), maxBytes);
+			window.firstLinePreview = { text, bytes: previewBytes };
+		}
+
+		if (!doneCollecting) {
+			const separatorBytes = window.lines.length > 0 ? 1 : 0;
+			if (window.lines.length >= maxLinesToCollect) {
+				doneCollecting = true;
+			} else if (window.lines.length === 0 && lineByteLength > maxBytes) {
+				window.stoppedByByteLimit = true;
+				doneCollecting = true;
+				window.firstLineByteLength ??= lineByteLength;
+			} else if (window.lines.length > 0 && window.collectedBytes + separatorBytes + lineByteLength > maxBytes) {
+				window.stoppedByByteLimit = true;
+				doneCollecting = true;
+			} else {
+				window.lines.push(rawSegments[index] ?? "");
+				window.collectedBytes += separatorBytes + lineByteLength;
+				window.firstLineByteLength ??= lineByteLength;
+				if (window.collectedBytes > maxBytes) {
+					window.stoppedByByteLimit = true;
+					doneCollecting = true;
+				} else if (window.lines.length >= maxLinesToCollect) {
+					doneCollecting = true;
+				}
+			}
+		} else if (window.firstLineByteLength === undefined) {
+			window.firstLineByteLength = lineByteLength;
+		}
+
+		if (doneCollecting && selectedLinesSeen >= selectedLineLimit) break;
+		lineStart = lineEnd + 1;
+	}
+	return window;
 }
 
 interface StreamFileLinesOptions {
@@ -139,19 +292,7 @@ async function streamLinesFromFile(
 	selectedLineLimit: number | null,
 	signal?: AbortSignal,
 	options: StreamFileLinesOptions = {},
-): Promise<{
-	lines: string[];
-	totalFileLines: number;
-	collectedBytes: number;
-	stoppedByByteLimit: boolean;
-	firstLinePreview?: { text: string; bytes: number };
-	firstLineByteLength?: number;
-	selectedBytesTotal: number;
-	/** Whether the fully scanned source ended in a newline. */
-	hasTrailingNewline: boolean;
-	/** False when `stopScanAfterCollect` cut the scan short — `totalFileLines` is then a lower bound. */
-	reachedEof: boolean;
-}> {
+): Promise<ReadLineWindow> {
 	const { includeTerminalNewline = false, stopScanAfterCollect = false } = options;
 	const bufferChunk = Buffer.allocUnsafe(READ_CHUNK_SIZE);
 	const collectedLines: string[] = [];
@@ -168,7 +309,6 @@ async function streamLinesFromFile(
 	let firstLinePreviewBytes = 0;
 	const firstLinePreviewChunks: Buffer[] = [];
 	let firstLineByteLength: number | undefined;
-	let selectedBytesTotal = 0;
 	let selectedLinesSeen = 0;
 	let captureLine = false;
 	let discardLineChunks = false;
@@ -219,7 +359,6 @@ async function streamLinesFromFile(
 
 	const finalizeLine = () => {
 		if (lineIndex >= startLine && (selectedLineLimit === null || selectedLinesSeen < selectedLineLimit)) {
-			selectedBytesTotal += currentLineLength + (selectedLinesSeen > 0 ? 1 : 0);
 			selectedLinesSeen++;
 		}
 
@@ -337,7 +476,6 @@ async function streamLinesFromFile(
 		stoppedByByteLimit,
 		firstLinePreview,
 		firstLineByteLength,
-		selectedBytesTotal,
 		reachedEof,
 		hasTrailingNewline: reachedEof && endedWithNewline,
 	};
@@ -620,15 +758,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	}
 
 	/**
-	 * Stream multiple non-contiguous ranges from a local file. ACP bridge takes
-	 * priority when present (editor buffer is source of truth); otherwise each
-	 * range is streamed independently with its own line/byte budget. Out-of-bounds
-	 * ranges surface as inline notices rather than aborting the read.
+	 * Render multiple non-contiguous ranges of a local file. ACP bridge takes
+	 * priority when present (editor buffer is source of truth); otherwise ranges
+	 * are sliced out of `buffered` when the caller already materialized the file,
+	 * and streamed independently when it did not.
 	 */
 	async #readLocalFileMultiRange(
 		absolutePath: string,
 		ranges: readonly LineRange[],
 		fileSize: number,
+		buffered: BufferedFileText | undefined,
 		parsed: ParsedSelector,
 		displayMode: { hashLines: boolean; lineNumbers: boolean },
 		suffixResolution: { from: string; to: string } | undefined,
@@ -676,7 +815,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const notices: string[] = [];
 		const visibleSpans: Array<{ startLine: number; endLine: number }> = [];
 		const displayLineByNumber = new Map<number, string>();
-		const fullLines = rawSelector ? undefined : await readBracketContextFullLines(absolutePath, fileSize);
+		const fullLines = rawSelector ? undefined : buffered?.addressableLines;
 		let columnTruncated = 0;
 		let displayContent: { text: string; startLine: number; lineNumbers?: Array<number | null> } | undefined;
 
@@ -685,27 +824,21 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			const requestedLength = range.endLine !== undefined ? range.endLine - range.startLine + 1 : this.#defaultLimit;
 			const maxLines = Math.min(requestedLength, DEFAULT_MAX_LINES);
 
-			// When the full file is already in memory (the common case for files
-			// within the snapshot byte cap), slice ranges from it instead of
-			// re-streaming the file once per range.
+			const maxBytesForRead = Math.max(DEFAULT_MAX_BYTES, maxLines * 512);
 			let collectedLines: string[];
 			let totalFileLines: number;
 			if (fullLines) {
 				totalFileLines = fullLines.length;
 				collectedLines = fullLines.slice(rangeStart, rangeStart + maxLines);
 			} else {
-				const maxBytesForRead = Math.max(DEFAULT_MAX_BYTES, maxLines * 512);
-				const streamResult = await streamLinesFromFile(
-					absolutePath,
-					rangeStart,
-					maxLines,
-					maxBytesForRead,
-					maxLines,
-					signal,
-					{ includeTerminalNewline: rawSelector, stopScanAfterCollect: fileSize > SNAPSHOT_MAX_BYTES },
-				);
-				totalFileLines = streamResult.totalFileLines;
-				collectedLines = streamResult.lines;
+				const window = buffered
+					? collectLineWindowFromBuffer(buffered, rangeStart, maxLines, maxBytesForRead, maxLines, rawSelector)
+					: await streamLinesFromFile(absolutePath, rangeStart, maxLines, maxBytesForRead, maxLines, signal, {
+							includeTerminalNewline: rawSelector,
+							stopScanAfterCollect: fileSize > SNAPSHOT_MAX_BYTES,
+						});
+				totalFileLines = window.totalFileLines;
+				collectedLines = window.lines;
 			}
 
 			if (rangeStart >= totalFileLines) {
@@ -747,7 +880,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			const entries = buildLineEntriesWithBlockContext(
 				fullLines,
 				visibleSpans,
-				{ path: absolutePath },
+				{ path: absolutePath, text: buffered?.normalizedText },
 				{
 					lineText: (lineNumber, sourceText) => {
 						const visibleText = displayLineByNumber.get(lineNumber);
@@ -772,14 +905,26 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			outputText = blocks.join("\n\n…\n\n");
 		}
 		if (shouldAddHashLines && outputText) {
-			const tag = await recordFileSnapshot(this.session, absolutePath);
+			const tag = buffered
+				? getFileSnapshotStore(this.session).record(canonicalSnapshotKey(absolutePath), buffered.normalizedText)
+				: await recordFileSnapshot(this.session, absolutePath);
 			if (tag) {
 				recordSeenLinesFromBody(this.session, absolutePath, tag, outputText);
 				outputText = `${formatReadHashlineHeader(formatPathRelativeToCwd(absolutePath, this.session.cwd), tag)}\n${outputText}`;
 			}
 		} else if (rawSelector && visibleSpans.length > 0) {
 			const rawSeenLines = lineNumbersFromSpans(visibleSpans);
-			if (rawSeenLines.length > 0) await recordFileSnapshot(this.session, absolutePath, rawSeenLines);
+			if (rawSeenLines.length > 0) {
+				if (buffered) {
+					getFileSnapshotStore(this.session).record(
+						canonicalSnapshotKey(absolutePath),
+						buffered.normalizedText,
+						rawSeenLines,
+					);
+				} else {
+					await recordFileSnapshot(this.session, absolutePath, rawSeenLines);
+				}
+			}
 		}
 		if (notices.length > 0) {
 			outputText = outputText ? `${outputText}\n${notices.join("\n")}` : notices.join("\n");
@@ -972,6 +1117,14 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			isDirectory = stat.isDirectory();
 		} catch (error) {
 			if (isNotFoundError(error)) {
+				// A documented semicolon list is explicit user scope, while suffix
+				// matching is only fuzzy recovery. Fan the list out before a broad
+				// workspace scan, but only after literal/archive/sqlite resolution so
+				// real resources containing semicolons retain precedence.
+				if (readPath.includes(";")) {
+					const delimitedResult = await this.#tryReadDelimitedPaths(readPath, signal);
+					if (delimitedResult) return delimitedResult;
+				}
 				// Attempt unique suffix resolution before falling back to the approved-plan
 				// alias or fuzzy suggestions. Existing workspace files retain precedence.
 				if (!isRemoteMountPath(absolutePath)) {
@@ -1135,6 +1288,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				content = [{ type: "text", text: `[Cannot read ${ext} file: conversion failed]` }];
 			}
 		} else {
+			// Materialize once for every local text consumer below. Past the
+			// snapshot cap, keep the existing streaming path.
+			const wholeFileBytes = fileSize <= SNAPSHOT_MAX_BYTES ? await readWholeFile(absolutePath) : undefined;
 			// Binary sniff before any UTF-8 text materialization. A binary file
 			// (font, object, archive, packed blob) decodes to NUL/control bytes and
 			// U+FFFD mojibake that corrupts the terminal and burns context. Images,
@@ -1142,7 +1298,12 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			// everything reaching here is meant to be plain text. `:raw` stays the
 			// explicit escape hatch for reading bytes verbatim. This single guard
 			// covers both the multi-range and single-range disk paths below.
-			if (!isRawSelector(parsed) && (await isProbablyBinary(absolutePath))) {
+			const looksBinary =
+				!isRawSelector(parsed) &&
+				(wholeFileBytes
+					? isProbablyBinaryHeader(wholeFileBytes.subarray(0, BINARY_SNIFF_BYTES))
+					: await isProbablyBinary(absolutePath));
+			if (looksBinary) {
 				return toolResult<ReadToolDetails>({ resolvedPath: absolutePath, suffixResolution })
 					.text(
 						prependSuffixResolutionNotice(
@@ -1153,13 +1314,15 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					.sourcePath(absolutePath)
 					.done();
 			}
+			// Decode only content that survived the byte-level sniff.
+			const buffered = wholeFileBytes ? deriveBufferedFileText(wholeFileBytes) : undefined;
 
 			if (
 				parsed.kind === "none" &&
 				this.session.settings.get("read.summarize.enabled") &&
 				(this.session.settings.get("read.summarize.prose") || !isProseSummaryPath(absolutePath))
 			) {
-				const summary = await trySummarize(this.session, absolutePath, fileSize, signal);
+				const summary = await trySummarize(this.session, absolutePath, fileSize, signal, buffered?.strippedText);
 				if (summary?.parsed && summary.elided) {
 					const renderedSummary = renderSummary(this.session, summary);
 					const footer = formatSummaryElisionFooter(
@@ -1168,7 +1331,14 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						renderedSummary.elidedLines,
 					);
 					const summaryHashContext = displayMode.hashLines
-						? await readHashlineHeaderContext(this.session, absolutePath, this.session.cwd)
+						? buffered
+							? hashlineHeaderContextForText(
+									this.session,
+									absolutePath,
+									this.session.cwd,
+									buffered.normalizedText,
+								)
+							: await readHashlineHeaderContext(this.session, absolutePath, this.session.cwd)
 						: undefined;
 					const bodyText = footer ? `${renderedSummary.text}\n\n${footer}` : renderedSummary.text;
 					const modelText = prependHashlineHeader(bodyText, summaryHashContext);
@@ -1195,6 +1365,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						absolutePath,
 						parsed.ranges,
 						fileSize,
+						buffered,
 						parsed,
 						displayMode,
 						suffixResolution,
@@ -1259,15 +1430,24 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					// Assume ~512 bytes/line average; never go below the shared default.
 					const maxBytesForRead = Math.max(DEFAULT_MAX_BYTES, maxLinesToCollect * 512);
 
-					const streamResult = await streamLinesFromFile(
-						absolutePath,
-						startLine,
-						maxLinesToCollect,
-						maxBytesForRead,
-						selectedLineLimit,
-						undefined, // plain-file read: deterministic and fast, never abort mid-read
-						{ includeTerminalNewline: rawSelector, stopScanAfterCollect: fileSize > SNAPSHOT_MAX_BYTES },
-					);
+					const lineWindow = buffered
+						? collectLineWindowFromBuffer(
+								buffered,
+								startLine,
+								maxLinesToCollect,
+								maxBytesForRead,
+								selectedLineLimit,
+								rawSelector,
+							)
+						: await streamLinesFromFile(
+								absolutePath,
+								startLine,
+								maxLinesToCollect,
+								maxBytesForRead,
+								selectedLineLimit,
+								undefined, // plain-file read: deterministic and fast, never abort mid-read
+								{ includeTerminalNewline: rawSelector, stopScanAfterCollect: fileSize > SNAPSHOT_MAX_BYTES },
+							);
 
 					const {
 						lines: collectedLines,
@@ -1278,7 +1458,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						firstLineByteLength,
 						reachedEof,
 						hasTrailingNewline,
-					} = streamResult;
+					} = lineWindow;
 
 					// Check if offset is out of bounds - return graceful message instead of throwing
 					if (requestedStart >= totalFileLines) {
@@ -1321,9 +1501,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					for (let i = 0; i < displayLines.length; i++) {
 						displayLineByNumber.set(startLineDisplay + i, displayLines[i] ?? "");
 					}
-					const bracketContextFullLines = rawSelector
-						? undefined
-						: await readBracketContextFullLines(absolutePath, fileSize);
+					const bracketContextFullLines = rawSelector ? undefined : buffered?.addressableLines;
 					const displayedEndLine = startLineDisplay + Math.max(0, displayLines.length - 1);
 
 					const selectedContent = displayLines.join("\n");
@@ -1350,17 +1528,18 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					const shouldAddLineNumbers = rawSelector ? false : shouldAddHashLines ? false : displayMode.lineNumbers;
 					let hashContext: HashlineHeaderContext | undefined;
 					if (shouldAddHashLines && collectedLines.length > 0 && !firstLineExceedsLimit) {
-						// The tag is a content hash of the WHOLE file. A whole-file read
-						// already holds every line in memory; a range read re-reads the
-						// file (bounded by SNAPSHOT_MAX_BYTES) so the tag fingerprints the
-						// full file and any anchor validates while the file is unchanged.
 						const isWholeFile = offset === undefined && limit === undefined && !wasTruncated;
-						const tag = isWholeFile
+						const tag = buffered
 							? getFileSnapshotStore(this.session).record(
 									canonicalSnapshotKey(absolutePath),
-									normalizeToLF(`${collectedLines.join("\n")}${hasTrailingNewline ? "\n" : ""}`),
+									buffered.normalizedText,
 								)
-							: await recordFileSnapshot(this.session, absolutePath);
+							: isWholeFile
+								? getFileSnapshotStore(this.session).record(
+										canonicalSnapshotKey(absolutePath),
+										normalizeToLF(`${collectedLines.join("\n")}${hasTrailingNewline ? "\n" : ""}`),
+									)
+								: await recordFileSnapshot(this.session, absolutePath);
 						if (tag) {
 							hashContext = hashlineHeaderContext(formatPathRelativeToCwd(absolutePath, this.session.cwd), tag);
 						}
@@ -1387,7 +1566,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						const entries = buildLineEntriesWithBlockContext(
 							bracketContextFullLines,
 							[{ startLine: startLineDisplay, endLine: displayedEndLine }],
-							{ path: absolutePath },
+							{ path: absolutePath, text: buffered?.normalizedText },
 							{
 								lineText: (lineNumber, sourceText) => {
 									const visibleText = displayLineByNumber.get(lineNumber);
@@ -1474,11 +1653,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						recordSeenLinesFromBody(this.session, absolutePath, hashContext.tag, outputText);
 					}
 					if (rawSelector && !firstLineExceedsLimit && collectedLines.length > 0) {
-						await recordFileSnapshot(
-							this.session,
-							absolutePath,
-							contiguousLineNumbers(startLineDisplay, collectedLines.length),
-						);
+						const seenLines = contiguousLineNumbers(startLineDisplay, collectedLines.length);
+						if (buffered) {
+							getFileSnapshotStore(this.session).record(
+								canonicalSnapshotKey(absolutePath),
+								buffered.normalizedText,
+								seenLines,
+							);
+						} else {
+							await recordFileSnapshot(this.session, absolutePath, seenLines);
+						}
 					}
 
 					if (capturedDisplayContent) {
@@ -1659,10 +1843,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const rawSelector = isRawSelector(parsedSel);
 		const displayMode = resolveFileDisplayMode(this.session, { raw: rawSelector, immutable: true });
 		if (isMultiRange(parsedSel) && parsedSel.kind === "lines") {
+			const artifactBytes = artifact.size <= SNAPSHOT_MAX_BYTES ? await readWholeFile(artifact.path) : undefined;
+			const buffered = artifactBytes ? deriveBufferedFileText(artifactBytes) : undefined;
 			const read = await this.#readLocalFileMultiRange(
 				artifact.path,
 				parsedSel.ranges,
 				artifact.size,
+				buffered,
 				parsedSel,
 				displayMode,
 				undefined,

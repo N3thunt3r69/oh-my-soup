@@ -20,8 +20,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent } from "@oh-my-soup/pi-agent-core";
-import { effectiveReserveTokens, estimateTokens, prepareCompaction } from "@oh-my-soup/pi-agent-core/compaction";
+import { Agent, Tokenizer } from "@oh-my-soup/pi-agent-core";
+import { effectiveReserveTokens, prepareCompaction } from "@oh-my-soup/pi-agent-core/compaction";
 import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
@@ -32,6 +32,8 @@ import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-soup/pi-utils";
 import * as snapcompact from "@oh-my-soup/snapcompact";
+
+const tokenizer = new Tokenizer();
 
 describe("AgentSession snapcompact frame-budget sizing", () => {
 	let tempDir: TempDir;
@@ -173,9 +175,9 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		// numFrames × FRAME_TOKEN_ESTIMATE + non-message + kept-recent.
 		const preparation = prepareCompaction(branchEntries, settings);
 		if (!preparation) throw new Error("Expected non-empty preparation");
-		let baseTokens = computeNonMessageTokens(session);
+		let baseTokens = computeNonMessageTokens(session, tokenizer);
 		for (const message of preparation.recentMessages) {
-			baseTokens += estimateTokens(message);
+			baseTokens += tokenizer.countMessage(message);
 		}
 		const shape = snapcompact.resolveShape(model);
 		const edgeCap = snapcompact.geometry(shape).capacity;

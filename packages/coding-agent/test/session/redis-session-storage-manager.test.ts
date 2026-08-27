@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import type { Usage } from "@oh-my-soup/pi-ai";
 import {
 	RedisSessionStorage,
@@ -155,9 +156,10 @@ describe("SessionManager + RedisSessionStorage", () => {
 	it("persists appended assistant messages into Redis and reloads them via open()", async () => {
 		const redis = createFakeRedis();
 		const storage = await RedisSessionStorage.create({ client: redis });
-		const sessionDir = "/sessions/proj";
+		const cwd = path.resolve("redis-session-manager-fixture", "cwd");
+		const sessionDir = path.resolve("redis-session-manager-fixture", "sessions", "proj");
 
-		const manager = SessionManager.create("/cwd", sessionDir, storage);
+		const manager = SessionManager.create(cwd, sessionDir, storage);
 		manager.appendMessage({
 			role: "assistant",
 			provider: "anthropic",
@@ -206,9 +208,10 @@ describe("SessionManager + RedisSessionStorage", () => {
 	it("SessionManager.list returns Redis-backed sessions for the cwd", async () => {
 		const redis = createFakeRedis();
 		const storage = await RedisSessionStorage.create({ client: redis });
-		const sessionDir = "/sessions/list-proj";
+		const cwd = path.resolve("redis-session-manager-fixture", "cwd");
+		const sessionDir = path.resolve("redis-session-manager-fixture", "sessions", "list-proj");
 
-		const a = SessionManager.create("/cwd", sessionDir, storage);
+		const a = SessionManager.create(cwd, sessionDir, storage);
 		a.appendMessage({
 			role: "assistant",
 			provider: "anthropic",
@@ -223,7 +226,7 @@ describe("SessionManager + RedisSessionStorage", () => {
 		await storage.drain();
 		await a.close();
 
-		const b = SessionManager.create("/cwd", sessionDir, storage);
+		const b = SessionManager.create(cwd, sessionDir, storage);
 		b.appendMessage({
 			role: "assistant",
 			provider: "anthropic",
@@ -243,7 +246,7 @@ describe("SessionManager + RedisSessionStorage", () => {
 		expect(aFile).toBeDefined();
 		expect(bFile).toBeDefined();
 
-		const sessions = await SessionManager.list("/cwd", sessionDir, storage);
+		const sessions = await SessionManager.list(cwd, sessionDir, storage);
 		const sessionFiles = sessions.map(s => s.path).sort();
 		expect(sessionFiles).toContain(aFile as string);
 		expect(sessionFiles).toContain(bFile as string);

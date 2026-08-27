@@ -28,11 +28,12 @@ import { $which, getAgentDir, hashPath, removeWithRetries, setAgentDir, WhichCac
 //
 // Set these on `process.env` so they apply to both the local `runGit` helper
 // AND the impl's `git.ts::runCommand`, which spreads `process.env` into every
-// spawn. `/dev/null` is the documented way to tell git "use no config from
-// this scope". `GIT_TERMINAL_PROMPT=0` + `GIT_ASKPASS=true` guarantee git
-// never blocks on stdin waiting for credentials or a GPG passphrase.
-process.env.GIT_CONFIG_GLOBAL = "/dev/null";
-process.env.GIT_CONFIG_SYSTEM = "/dev/null";
+// spawn. Point both disabled scopes at the platform null device.
+// `GIT_TERMINAL_PROMPT=0` + `GIT_ASKPASS=true` guarantee git never blocks
+// on stdin waiting for credentials or a GPG passphrase.
+const gitNullDevice = process.platform === "win32" ? "NUL" : os.devNull;
+process.env.GIT_CONFIG_GLOBAL = gitNullDevice;
+process.env.GIT_CONFIG_SYSTEM = gitNullDevice;
 process.env.GIT_CONFIG_NOSYSTEM = "1";
 process.env.GIT_TERMINAL_PROMPT = "0";
 process.env.GIT_ASKPASS = "true";
@@ -1023,7 +1024,8 @@ describe("github tool", () => {
 			const cfg = runGit(fixture.repoRoot, ["config", "--get-regexp", "^branch\\.pr-123\\."]);
 			expect(cfg).toContain("branch.pr-123.pushremote forksrc");
 			expect(cfg).toContain(`branch.pr-123.merge refs/heads/${fixture.headRefName}`);
-			expect(runGit(fixture.repoRoot, ["worktree", "list", "--porcelain"])).toContain(`worktree ${worktreePath}`);
+			const listedWorktrees = await git.worktree.list(fixture.repoRoot);
+			expect(listedWorktrees.map(entry => path.normalize(entry.path))).toContain(path.normalize(worktreePath));
 			expect(runGit(worktreePath, ["branch", "--show-current"])).toBe("pr-123");
 		});
 	});

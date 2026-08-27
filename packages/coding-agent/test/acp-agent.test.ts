@@ -147,6 +147,8 @@ class FakeAgentSession {
 	waitForIdleBlocker: (() => Promise<void>) | undefined;
 	asyncJobDrain: ((options?: { timeoutMs?: number }) => Promise<boolean>) | undefined;
 	usageFallbackConfirmer: ((confirmation: UsageFallbackConfirmation) => Promise<boolean>) | undefined;
+	retryResult = false;
+	retryCalls = 0;
 	#listeners = new Set<(event: AgentSessionEvent) => void>();
 
 	constructor(
@@ -246,6 +248,11 @@ class FakeAgentSession {
 		}
 		this.isStreaming = false;
 		return true;
+	}
+
+	async retry(): Promise<boolean> {
+		this.retryCalls++;
+		return this.retryResult;
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -466,7 +473,11 @@ afterEach(async () => {
 });
 
 async function createHarness(
-	options: { elicitationHandler?: (req: CreateElicitationRequest) => Promise<CreateElicitationResponse> } = {},
+	options: {
+		elicitationHandler?: (req: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
+		/** Runs before a notification is recorded, so a test can delay one delivery. */
+		sessionUpdateHook?: (notification: SessionNotification) => Promise<void> | void;
+	} = {},
 ): Promise<AgentHarness> {
 	const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "oms-acp-test-"));
 	cleanupRoots.push(root);
@@ -484,6 +495,7 @@ async function createHarness(
 	const sessions: FakeAgentSession[] = [];
 	const connection = {
 		sessionUpdate: async (notification: SessionNotification) => {
+			if (options.sessionUpdateHook) await options.sessionUpdateHook(notification);
 			updates.push(notification);
 		},
 		unstable_createElicitation: options.elicitationHandler
@@ -1742,6 +1754,7 @@ describe("ACP agent", () => {
 				: [],
 		);
 		expect(names).toContain("fast");
+		expect(names).toContain("retry");
 		expect(names).toContain("force");
 		expect(names).toContain("skill:sample");
 		expect(names).not.toContain("settings");
@@ -1750,7 +1763,7 @@ describe("ACP agent", () => {
 		expect(names).not.toContain("loop");
 		expect(names).not.toContain("login");
 		expect(names).not.toContain("new");
-		expect(names).not.toContain("handoff");
+		expect(names).toContain("handoff");
 		expect(names).not.toContain("fork");
 		expect(names).not.toContain("btw");
 		expect(names).not.toContain("drop");
@@ -2011,6 +2024,73 @@ describe("ACP agent", () => {
 			await firstPrompt;
 		} finally {
 			unblockIdle();
+			harness.abortController.abort();
+			await Bun.sleep(0);
+		}
+	});
+
+	it("drains in-flight ACP event handlers before closing a retry turn", async () => {
+		const deliveryBlocked = Promise.withResolvers<void>();
+		const deliveryRelease = Promise.withResolvers<void>();
+		let held = false;
+		const harness = await createHarness({
+			sessionUpdateHook: async notification => {
+				if (
+					held ||
+					notification.update.sessionUpdate !== "agent_message_chunk" ||
+					notification.update.content.type !== "text" ||
+					notification.update.content.text !== "Recovered answer."
+				) {
+					return;
+				}
+				held = true;
+				deliveryBlocked.resolve();
+				await deliveryRelease.promise;
+			},
+		});
+		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		const session = harness.findSession(created.sessionId)!;
+		session.retryResult = true;
+
+		let emitted = false;
+		session.waitForIdleBlocker = async () => {
+			if (emitted) return;
+			emitted = true;
+			// Deliberately omit `agent_end`: the command handler's trailing
+			// finish path must wait for the in-flight message delivery itself.
+			const assistantMessage = makeAssistantMessage("Recovered answer.");
+			for (const listener of session.listeners()) {
+				listener({
+					type: "message_update",
+					message: assistantMessage,
+					assistantMessageEvent: { type: "text_delta", delta: "Recovered answer." },
+				} as AgentSessionEvent);
+			}
+		};
+
+		const prompt = harness.agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "/retry" }],
+		});
+		await deliveryBlocked.promise;
+
+		try {
+			const resolvedEarly = await Promise.race([prompt.then(() => true), Bun.sleep(0).then(() => false)]);
+			expect(resolvedEarly).toBe(false);
+
+			deliveryRelease.resolve();
+			const response = await prompt;
+			expect(response.stopReason).toBe("end_turn");
+			expect(
+				harness.updates.some(
+					update =>
+						update.update.sessionUpdate === "agent_message_chunk" &&
+						update.update.content.type === "text" &&
+						update.update.content.text === "Recovered answer.",
+				),
+			).toBe(true);
+		} finally {
+			deliveryRelease.resolve();
 			harness.abortController.abort();
 			await Bun.sleep(0);
 		}
@@ -2427,6 +2507,31 @@ describe("ACP agent", () => {
 
 		harness.abortController.abort();
 		await Bun.sleep(0);
+	});
+
+	it("settles the prompt turn when a force residual resolves locally", async () => {
+		const harness = await createHarness();
+		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		const session = harness.findSession(created.sessionId)!;
+
+		session.prompt = async (text: string): Promise<boolean> => {
+			session.promptCalls.push(text);
+			return false;
+		};
+
+		const response = await harness.agent.prompt({
+			sessionId: created.sessionId,
+			messageId: "00000000-0000-4000-8000-000000000009",
+			prompt: [{ type: "text", text: "/force bash /local-command" }],
+		} as PromptRequest);
+
+		expectAcpStructure(zPromptResponse, response);
+		expect(response.stopReason).toBe("end_turn");
+		expect(session.forcedToolChoice).toBe("bash");
+		expect(session.promptCalls).toEqual(["/local-command"]);
+
+		harness.abortController.abort();
+		await Promise.resolve();
 	});
 
 	describe("ACP elicitation bridge", () => {

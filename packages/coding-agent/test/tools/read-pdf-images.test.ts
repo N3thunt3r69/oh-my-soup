@@ -379,15 +379,18 @@ describe("read PDF image extraction", () => {
 	});
 
 	it("supports PDF basenames at the filesystem component limit", async () => {
-		const longPdfPath = path.join(testDir, `${"a".repeat(250)}.pdf`);
+		const longPdfPath = path.join(testDir, `${"a".repeat(251)}.pdf`);
 		fs.writeFileSync(longPdfPath, "%PDF-stub");
-		mockExtraction();
+		const extraction = mockExtraction();
 
 		const result = await new ReadTool(makeSession(testDir)).execute("call", {
 			path: `${longPdfPath}:p11-img0.png`,
 		});
 
 		expect(result.content.some(content => content.type === "image")).toBe(true);
+		const stagingDir = extraction.mock.calls[0]?.[2]?.imageDir;
+		if (!stagingDir) throw new Error("Expected a PDF image staging directory");
+		expect(path.basename(stagingDir).length).toBeLessThanOrEqual(80);
 	});
 
 	it("errors with the available members for an unknown member", async () => {

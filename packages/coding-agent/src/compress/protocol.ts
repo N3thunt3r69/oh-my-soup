@@ -14,7 +14,7 @@
  * // …drive a session, then read protocol.latest / protocol.approved
  */
 import { type } from "@oh-my-soup/omstype";
-import { countTokens } from "@oh-my-soup/pi-agent-core";
+import { Tokenizer } from "@oh-my-soup/pi-agent-core";
 import type { ToolDefinition } from "../extensibility/extensions";
 import approveDescription from "../prompts/tools/approve.md" with { type: "text" };
 import rewriteDescription from "../prompts/tools/rewrite.md" with { type: "text" };
@@ -66,6 +66,7 @@ function words(text: string): number {
 
 /** Draft ledger shared by the protocol tools and the command loop. */
 export class CompressProtocol {
+	readonly #tokenizer = new Tokenizer();
 	readonly #sourceWords: number;
 	readonly #sourceTokens: number;
 	readonly #drafts: CompressDraft[] = [];
@@ -75,7 +76,7 @@ export class CompressProtocol {
 
 	constructor(source: string) {
 		this.#sourceWords = words(source);
-		this.#sourceTokens = countTokens(source);
+		this.#sourceTokens = this.#tokenizer.countTokens(source);
 	}
 
 	/** Newest submitted draft, or undefined before the first `rewrite`. */
@@ -110,7 +111,7 @@ export class CompressProtocol {
 
 	/** Size of `draft` against the source. */
 	metrics(draft: CompressDraft): CompressMetrics {
-		const draftTokens = countTokens(draft.text);
+		const draftTokens = this.#tokenizer.countTokens(draft.text);
 		return {
 			sourceWords: this.#sourceWords,
 			draftWords: words(draft.text),

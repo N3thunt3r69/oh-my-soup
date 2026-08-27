@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `retryTransientCompletion` for bounded, replay-safe oneshot LLM retries. It handles resolved `stopReason: "error"` messages and thrown transient failures, honors provider retry hints, preserves final failures unchanged, and never changes side-effecting streaming-turn recovery.
+
 ## [17.3.1] - 2026-08-14
 
 ### Added

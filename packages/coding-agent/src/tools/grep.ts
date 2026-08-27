@@ -213,9 +213,8 @@ function mergeRangesInto(map: Map<string, LineRange[]>, absKey: string, ranges: 
 }
 
 function matchAbsolutePath(matchPath: string, searchPath: string): string {
-	if (matchPath === "") return searchPath;
-	if (path.isAbsolute(matchPath)) return matchPath;
-	return path.resolve(searchPath, matchPath);
+	if (matchPath === "") return path.resolve(searchPath);
+	return path.resolve(path.isAbsolute(matchPath) ? matchPath : path.join(searchPath, matchPath));
 }
 
 /**

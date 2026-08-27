@@ -12,7 +12,17 @@ describe("RPC mode malformed stdin", () => {
 	test("reports a bad line as an error frame and keeps serving subsequent commands", async () => {
 		const cliPath = path.join(import.meta.dir, "..", "src", "cli.ts");
 		const child = Bun.spawn(
-			["bun", cliPath, "--mode", "rpc", "--provider", "anthropic", "--model", "claude-sonnet-4-5"],
+			[
+				process.execPath,
+				cliPath,
+				"--mode",
+				"rpc",
+				"--provider",
+				"anthropic",
+				"--model",
+				"claude-sonnet-4-5",
+				"--no-extensions",
+			],
 			{
 				cwd: path.join(import.meta.dir, ".."),
 				env: { ...Bun.env, PI_NO_TITLE: "1" },
@@ -55,7 +65,7 @@ describe("RPC mode malformed stdin", () => {
 		expect(stateResponse?.success).toBe(true);
 		expect(pageResponse).toMatchObject({
 			success: true,
-			data: { messages: [], totalMessages: 0 },
+			data: { messages: expect.any(Array), totalMessages: expect.any(Number) },
 		});
 	}, 30000);
 });

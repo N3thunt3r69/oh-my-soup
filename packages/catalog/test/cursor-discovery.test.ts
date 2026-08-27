@@ -25,6 +25,8 @@ const FIXTURE_MODEL_IDS = [
 	"kimi-k3-low",
 	"kimi-k3-max",
 	"grok-code-fast-2",
+	"cursor-grok-4.5-high",
+	"cursor-grok-4.6-xhigh",
 	// Bundled-reference ids: the reference stays authoritative.
 	"claude-4.5-opus-high",
 	"claude-4.6-opus-high",
@@ -90,6 +92,13 @@ describe("cursor discovery input modalities (issue #4726)", () => {
 		expect(byId.get("kimi-k3-high")?.reasoning).toBe(true);
 		expect(byId.get("kimi-k3-low")?.reasoning).toBe(true);
 		expect(byId.get("kimi-k3-max")?.reasoning).toBe(true);
+	});
+
+	it("marks versioned Cursor Grok ids as reasoning while leaving Grok Code unchanged", async () => {
+		const byId = await discover();
+		expect(byId.get("cursor-grok-4.5-high")?.reasoning).toBe(true);
+		expect(byId.get("cursor-grok-4.6-xhigh")?.reasoning).toBe(true);
+		expect(byId.get("grok-code-fast-2")?.reasoning).toBe(false);
 	});
 
 	it("keeps bundled references authoritative for input modalities", async () => {

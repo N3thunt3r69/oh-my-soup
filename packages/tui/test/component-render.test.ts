@@ -71,6 +71,10 @@ class AnchoredStatusContainer extends Container implements NativeScrollbackLiveR
 		const hasAnchoredRows = this.children.length > 0;
 		return hasAnchoredRows ? 0 : undefined;
 	}
+
+	isNativeScrollbackLiveRegionPinned(): boolean {
+		return true;
+	}
 }
 
 function strip(rows: string[]): string[] {
@@ -346,6 +350,40 @@ describe("TUI.requestComponentRender", () => {
 			expect(duplicated).toEqual([]);
 			const observed = Array.from(buffer.matchAll(/ROW-\d{3}/g), match => match[0]);
 			expect(observed).toEqual(markers);
+		} finally {
+			tui.stop();
+			await term.flush();
+		}
+	});
+
+	it("keeps a pinned panel out of scrollback under an unpinned streaming transcript seam", async () => {
+		const term = new VirtualTerminal(40, 8, 1_000);
+		const scheduler = new StressRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const markers = Array.from({ length: 5 }, (_unused, index) => `HIST-${index}`);
+		const transcript = new LiveHead([...markers, "streaming-tail"]);
+		transcript.setSeam(markers.length);
+		const status = new AnchoredStatusContainer();
+		const editor = new CountingLines(["editor"]);
+		tui.addChild(transcript);
+		tui.addChild(status);
+		tui.addChild(editor);
+
+		try {
+			tui.start();
+			await scheduler.drain(term);
+			const panel = new CountingLines(["btw-0"]);
+			status.addChild(panel);
+			tui.requestRender();
+			await scheduler.drain(term);
+			for (let tick = 1; tick <= 12; tick++) {
+				panel.set(Array.from({ length: tick + 1 }, (_row, index) => `BTWROW-${tick}-${index}`));
+				tui.requestComponentRender(panel);
+				await scheduler.drain(term);
+			}
+
+			const history = strip(term.getScrollBuffer()).slice(0, -term.rows);
+			expect(history.filter(row => row.startsWith("BTWROW-"))).toEqual([]);
 		} finally {
 			tui.stop();
 			await term.flush();

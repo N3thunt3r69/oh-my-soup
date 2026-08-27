@@ -8,6 +8,7 @@
   lib,
   libopus,
   libpulseaudio,
+  makeBinaryWrapper,
   ninja,
   pipewire,
   pkg-config,
@@ -51,6 +52,9 @@ let
     _: patch: source + "/${patch}"
   ) rootPackageJson.patchedDependencies;
   patchOverrides = bun2nix.patchedDependenciesToOverrides { inherit patchedDependencies; };
+  runtimeNativeLibraries = lib.optionals stdenv.hostPlatform.isLinux (
+    [ stdenv.cc.cc.lib ] ++ lib.optional (stdenv.cc.cc ? libgcc) stdenv.cc.cc.libgcc
+  );
   bunRuntimeTemplate = stdenvNoCC.mkDerivation {
     pname = "oms-bun-runtime-template";
     inherit (bun) version;
@@ -89,7 +93,10 @@ stdenv.mkDerivation {
     rustPlatform.cargoSetupHook
     rustToolchain
   ]
-  ++ lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ]
+  ++ lib.optionals stdenv.hostPlatform.isLinux [
+    autoPatchelfHook
+    makeBinaryWrapper
+  ]
   ++ lib.optionals stdenv.hostPlatform.isDarwin [ darwin.autoSignDarwinBinariesHook ];
 
   # pcre2 is vendored via PCRE2_SYS_STATIC, but opus must link the nixpkgs
@@ -186,12 +193,27 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
 
+  # Runtime-downloaded addons (onnxruntime-node, sherpa-onnx-node, sharp,
+  # fastembed) are process.dlopen'd and need libstdc++.so.6 / libgcc_s.so.1.
+  # Their own DT_RUNPATH means the executable RPATH cannot satisfy those
+  # dependencies. Expose the Nix store directories through an OMS-specific
+  # variable; inference workers translate it to LD_LIBRARY_PATH, while user
+  # PTYs, eval kernels, and tool subprocesses retain their original loader path.
+  postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
+    wrapProgram "$out/bin/oms" \
+      --set-default OMS_NATIVE_LIBRARY_PATH "${lib.makeLibraryPath runtimeNativeLibraries}"
+  '';
+
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
     HOME="$TMPDIR" "$out/bin/oms" --smoke-test | grep -q "smoke-test: ok"
     BUN_BE_BUN=1 "$out/bin/oms" -e \
       'if (Bun.version !== "${bun.version}" || typeof Bun.Image !== "function") process.exit(1)'
+    ${lib.optionalString stdenv.hostPlatform.isLinux ''
+      env -u LD_LIBRARY_PATH BUN_BE_BUN=1 "$out/bin/oms" -e \
+        'const {dlopen}=require("bun:ffi");const dirs=(process.env.OMS_NATIVE_LIBRARY_PATH||"").split(":").filter(Boolean);const need={"libstdc++.so.6":{__cxa_demangle:{args:["ptr","ptr","ptr","ptr"],returns:"ptr"}},"libgcc_s.so.1":{_Unwind_Backtrace:{args:["ptr","ptr"],returns:"i32"}}};for(const lib of Object.keys(need)){let ok=false;for(const d of dirs){try{dlopen(d+"/"+lib,need[lib]);ok=true;break}catch(e){}}if(!ok){console.error("unresolved: "+lib);process.exit(1)}}'
+    ''}
     runHook postInstallCheck
   '';
 

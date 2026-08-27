@@ -2,7 +2,7 @@
  * Run onboarding setup or install dependencies for optional features.
  */
 
-import { Args, Command, Flags, renderCommandHelp } from "@oh-my-soup/pi-utils/cli";
+import { Args, CliUsageError, Command, Flags } from "@oh-my-soup/pi-utils/cli";
 import { parseArgs } from "../cli/args";
 import { setupHelp as commandHelp } from "../cli/command-help";
 import { runSetupCommand, type SetupCommandArgs, type SetupComponent } from "../cli/setup-cli";
@@ -49,8 +49,13 @@ export default class Setup extends Command {
 		const { args, flags } = await this.parse(Setup);
 		if (!args.component) {
 			if (flags.check || flags.json) {
-				renderCommandHelp("oms", "setup", Setup);
-				return;
+				const message = "setup --check/--json requires a COMPONENT (python|speech)";
+				if (flags.json) {
+					process.stdout.write(`${JSON.stringify({ error: message })}\n`);
+					process.exitCode = 1;
+					return;
+				}
+				throw new CliUsageError(message);
 			}
 			await runOnboardingSetup();
 			return;

@@ -7,12 +7,13 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-soup/pi-agent-core";
-import { logger, prompt, untilAborted } from "@oh-my-soup/pi-utils";
+import { isEnoent, isFsError, logger, prompt, untilAborted } from "@oh-my-soup/pi-utils";
 import { type Theme, theme } from "../modes/theme/theme";
 import lspDescription from "../prompts/tools/lsp.md" with { type: "text" };
 import type { ToolSession } from "../tools";
 import { truncateForPrompt } from "../tools/approval";
 import { formatPathRelativeToCwd, resolveToCwd } from "../tools/path-utils";
+import { replaceTabs, shortenPath } from "../tools/render-utils";
 import { ToolAbortError, ToolError, throwIfAborted } from "../tools/tool-errors";
 import { clampTimeout } from "../tools/tool-timeouts";
 import {
@@ -26,6 +27,7 @@ import {
 	refreshFile,
 	sendNotification,
 	sendRequest,
+	shutdownStaleClients,
 	waitForProjectLoaded,
 } from "./client";
 import { getLinterClient } from "./clients";
@@ -144,6 +146,18 @@ async function enumerateRenamePairs(
 		});
 	}
 	return { pairs, directory: true, exceeded: false };
+}
+
+function formatRenameStatPath(filePath: string, cwd: string): string {
+	const relative = formatPathRelativeToCwd(filePath, cwd);
+	return replaceTabs(path.isAbsolute(relative) ? shortenPath(filePath) : relative);
+}
+
+/** Filesystem error detail safe for model/TUI output: never echo raw paths. */
+function formatRenameStatError(error: unknown): string {
+	if (!isFsError(error)) return "unknown filesystem error";
+	const syscall = error.syscall ? ` during ${replaceTabs(error.syscall)}` : "";
+	return `${replaceTabs(error.code)}${syscall}`;
 }
 
 /**
@@ -324,7 +338,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 						throwIfAborted(signal);
 						if (serverConfig.createClient) {
 							const linterClient = getLinterClient(serverName, serverConfig, this.session.cwd);
-							const diagnostics = await linterClient.lint(resolved);
+							const diagnostics = await linterClient.lint(resolved, signal);
 							allDiagnostics.push(...diagnostics);
 							succeededServers++;
 							totalServerSuccesses++;
@@ -467,35 +481,44 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			let sourceStat: fs.Stats;
 			try {
 				sourceStat = await fs.promises.stat(source);
-			} catch {
+			} catch (err) {
+				const relSource = formatRenameStatPath(source, this.session.cwd);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Error: source path does not exist: ${formatPathRelativeToCwd(source, this.session.cwd)}`,
+							text: isEnoent(err)
+								? `Error: source path does not exist: ${relSource}`
+								: `Error: cannot read source path ${relSource}: ${formatRenameStatError(err)}`,
 						},
 					],
 					details: { action, success: false, request: params },
 				};
 			}
 
-			let destExists = false;
 			try {
-				await fs.promises.stat(dest);
-				destExists = true;
-			} catch {
-				// expected: destination must not exist
-			}
-			if (destExists) {
+				await fs.promises.lstat(dest);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Error: destination already exists: ${formatPathRelativeToCwd(dest, this.session.cwd)}`,
+							text: `Error: destination already exists: ${formatRenameStatPath(dest, this.session.cwd)}`,
 						},
 					],
 					details: { action, success: false, request: params },
 				};
+			} catch (err) {
+				if (!isEnoent(err)) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Error: cannot read destination path ${formatRenameStatPath(dest, this.session.cwd)}: ${formatRenameStatError(err)}`,
+							},
+						],
+						details: { action, success: false, request: params },
+					};
+				}
 			}
 
 			const enumerated = await enumerateRenamePairs(source, dest);
@@ -1029,6 +1052,11 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			configCache.delete(this.session.cwd);
 			const refreshedConfig = getConfig(this.session.cwd);
 			const servers = getLspServers(refreshedConfig);
+			const stopped = await shutdownStaleClients(
+				this.session.cwd,
+				servers.map(([, serverConfig]) => serverConfig),
+				signal,
+			);
 			if (servers.length === 0) {
 				return {
 					content: [{ type: "text", text: "No language server found for this action" }],
@@ -1036,6 +1064,9 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				};
 			}
 			const outputs: string[] = [];
+			if (stopped.length > 0) {
+				outputs.push(`Stopped ${stopped.length} server(s) with superseded configuration: ${stopped.join(", ")}`);
+			}
 			for (const [workspaceServerName, workspaceServerConfig] of servers) {
 				throwIfAborted(signal);
 				clearInitializationFailure(workspaceServerConfig, this.session.cwd);

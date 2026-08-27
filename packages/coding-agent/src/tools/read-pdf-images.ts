@@ -18,7 +18,6 @@ const MAX_IMAGE_SIZE = MAX_IMAGE_INPUT_BYTES;
 const PDF_IMAGE_PLACEHOLDER_RE = /<!--\s*image:\s*([^\s<>]+)(.*?)-->/g;
 const PDF_IMAGE_MEMBER_RE = /^(.*\.pdf):(.*)$/i;
 const PDF_IMAGE_MEMBER_EXTENSION_RE = /\.png$/i;
-const PDF_IMAGE_CACHE_BASENAME_MAX_LENGTH = 96;
 
 interface PdfImageSnapshot {
 	directory: string;
@@ -64,12 +63,14 @@ function pdfImageCacheDir(session: ToolSession, absolutePdfPath: string, content
 		const sessionFile = session.getSessionFile();
 		root = sessionFile?.endsWith(".jsonl") ? sessionFile.slice(0, -6) : path.join(os.tmpdir(), "oms-read-pdf-images");
 	}
-	const basename = path
-		.basename(absolutePdfPath)
-		.replace(/[^A-Za-z0-9._-]/g, "_")
-		.slice(0, PDF_IMAGE_CACHE_BASENAME_MAX_LENGTH);
-	const pathDigest = Bun.hash(absolutePdfPath).toString(36);
-	return path.join(root, "read-pdf-images", `${basename}-${pathDigest}-${contentDigest}`);
+	const cacheKey = new Bun.CryptoHasher("sha256")
+		.update(absolutePdfPath)
+		.update("\0")
+		.update(contentDigest)
+		.digest("hex");
+	// Keep the source basename out of cache and staging components: a legal
+	// NAME_MAX-sized PDF must not make derived paths exceed OS path limits.
+	return path.join(root, "read-pdf-images", cacheKey);
 }
 
 async function snapshotPdfSource(absolutePdfPath: string, signal?: AbortSignal): Promise<PdfImageSnapshot> {

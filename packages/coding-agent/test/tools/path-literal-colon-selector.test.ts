@@ -27,6 +27,10 @@ function getText(result: { content: Array<{ type: string; text?: string }> }): s
 }
 
 const EMPTY_ZIP_EOCD = new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+// Win32 reserves `:` for drive and alternate-stream syntax, so it cannot
+// represent the literal filenames exercised below. Selector-only coverage
+// remains active on Windows.
+const itWithLiteralColonFilename = it.skipIf(process.platform === "win32");
 
 // Regression: filenames whose tail matches the read-tool selector grammar
 // (e.g. `test:1-2`, `log:raw`) used to be shredded by `splitPathAndSel` before
@@ -55,7 +59,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 	}
 
 	describe("splitPathAndSelPreferringLiteral", () => {
-		it("keeps the raw path intact when a literal colon file exists on disk", async () => {
+		itWithLiteralColonFilename("keeps the raw path intact when a literal colon file exists on disk", async () => {
 			const literal = "test:1-2";
 			await Bun.write(path.join(tmpDir, literal), "test\n");
 
@@ -66,14 +70,17 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			expect(await splitPathAndSelPreferringLiteral(literal, tmpDir)).toEqual({ path: literal });
 		});
 
-		it("keeps a shell-escaped literal path intact when the resolved file exists", async () => {
-			await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
-			await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal\n");
+		itWithLiteralColonFilename(
+			"keeps a shell-escaped literal path intact when the resolved file exists",
+			async () => {
+				await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
+				await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal\n");
 
-			expect(await splitPathAndSelPreferringLiteral("dir/a\\ b:1-2", tmpDir)).toEqual({
-				path: "dir/a\\ b:1-2",
-			});
-		});
+				expect(await splitPathAndSelPreferringLiteral("dir/a\\ b:1-2", tmpDir)).toEqual({
+					path: "dir/a\\ b:1-2",
+				});
+			},
+		);
 
 		it("falls back to selector interpretation when the literal path does not exist", async () => {
 			// No file created — the selector split wins because the raw path
@@ -84,19 +91,22 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			});
 		});
 
-		it("also protects `:raw`-shaped literal filenames", async () => {
+		itWithLiteralColonFilename("also protects `:raw`-shaped literal filenames", async () => {
 			const literal = "log:raw";
 			await Bun.write(path.join(tmpDir, literal), "line one\nline two\n");
 			expect(await splitPathAndSelPreferringLiteral(literal, tmpDir)).toEqual({ path: literal });
 		});
 
-		it("keeps a literal dangling symlink intact (lstat exists even though stat fails)", async () => {
-			const literal = path.join(tmpDir, "test:1-2");
-			await fs.symlink(path.join(tmpDir, "missing-target"), literal);
+		itWithLiteralColonFilename(
+			"keeps a literal dangling symlink intact (lstat exists even though stat fails)",
+			async () => {
+				const literal = path.join(tmpDir, "test:1-2");
+				await fs.symlink(path.join(tmpDir, "missing-target"), literal);
 
-			expect(await probeLiteralPathExists(literal, tmpDir)).toBe("exists");
-			expect(await splitPathAndSelPreferringLiteral(literal, tmpDir)).toEqual({ path: literal });
-		});
+				expect(await probeLiteralPathExists(literal, tmpDir)).toBe("exists");
+				expect(await splitPathAndSelPreferringLiteral(literal, tmpDir)).toEqual({ path: literal });
+			},
+		);
 
 		it("returns the strict split unchanged when there is no selector tail", async () => {
 			expect(await splitPathAndSelPreferringLiteral("plain.txt", tmpDir)).toEqual({
@@ -110,13 +120,13 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			expect(await probeLiteralPathExists(path.join(tmpDir, "never-here:1-2"), tmpDir)).toBe("missing");
 		});
 
-		it('returns "exists" for a regular file', async () => {
+		itWithLiteralColonFilename('returns "exists" for a regular file', async () => {
 			const literal = path.join(tmpDir, "regular:1-2");
 			await Bun.write(literal, "hi\n");
 			expect(await probeLiteralPathExists(literal, tmpDir)).toBe("exists");
 		});
 
-		it('returns "exists" for a dangling symlink', async () => {
+		itWithLiteralColonFilename('returns "exists" for a dangling symlink', async () => {
 			const literal = path.join(tmpDir, "dangling:1-2");
 			await fs.symlink(path.join(tmpDir, "nowhere"), literal);
 			expect(await probeLiteralPathExists(literal, tmpDir)).toBe("exists");
@@ -131,7 +141,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 	});
 
 	describe("read tool", () => {
-		it("reads a literal file whose name ends in a selector-shaped suffix", async () => {
+		itWithLiteralColonFilename("reads a literal file whose name ends in a selector-shaped suffix", async () => {
 			const literal = "test:1-2";
 			const absolute = path.join(tmpDir, literal);
 			await Bun.write(absolute, "test\n");
@@ -146,30 +156,36 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			expect(output).not.toMatch(/not found/i);
 		});
 
-		it("reads a shell-escaped literal file whose name ends in a selector-shaped suffix", async () => {
-			await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
-			await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal read\n");
+		itWithLiteralColonFilename(
+			"reads a shell-escaped literal file whose name ends in a selector-shaped suffix",
+			async () => {
+				await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
+				await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal read\n");
 
-			const tool = new ReadTool(createSession());
-			const result = await tool.execute("read-escaped-literal", { path: "dir/a\\ b:1-2" });
-			const output = getText(result);
+				const tool = new ReadTool(createSession());
+				const result = await tool.execute("read-escaped-literal", { path: "dir/a\\ b:1-2" });
+				const output = getText(result);
 
-			expect(output).toContain("escaped literal read");
-		});
+				expect(output).toContain("escaped literal read");
+			},
+		);
 
-		it("prefers a real `foo:1-2` file over interpreting `:1-2` as a range on `foo`", async () => {
-			await Bun.write(path.join(tmpDir, "foo"), "line 1\nline 2\nline 3\n");
-			await Bun.write(path.join(tmpDir, "foo:1-2"), "colon file wins\n");
+		itWithLiteralColonFilename(
+			"prefers a real `foo:1-2` file over interpreting `:1-2` as a range on `foo`",
+			async () => {
+				await Bun.write(path.join(tmpDir, "foo"), "line 1\nline 2\nline 3\n");
+				await Bun.write(path.join(tmpDir, "foo:1-2"), "colon file wins\n");
 
-			const tool = new ReadTool(createSession());
-			const result = await tool.execute("read-literal-wins", {
-				path: path.join(tmpDir, "foo:1-2"),
-			});
-			const output = getText(result);
+				const tool = new ReadTool(createSession());
+				const result = await tool.execute("read-literal-wins", {
+					path: path.join(tmpDir, "foo:1-2"),
+				});
+				const output = getText(result);
 
-			expect(output).toContain("colon file wins");
-			expect(output).not.toContain("line 1");
-		});
+				expect(output).toContain("colon file wins");
+				expect(output).not.toContain("line 1");
+			},
+		);
 
 		it("still honors the `:5-10` selector when only the base file exists on disk", async () => {
 			const absolute = path.join(tmpDir, "notes");
@@ -192,46 +208,52 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			expect(output).not.toContain("line 40");
 		});
 
-		it("reads a literal file that looks like an archive selector (`data.zip:1-2`)", async () => {
-			// A real POSIX file whose name ends in a selector-shaped tail after an
-			// archive extension. The archive resolver would otherwise open `data.zip`
-			// alongside it and error on the phantom member.
-			const baseArchive = path.join(tmpDir, "data.zip");
-			// Empty zip bytes — the file just needs to stat as a real archive so
-			// the archive resolver would happily accept it.
-			await Bun.write(baseArchive, EMPTY_ZIP_EOCD);
-			const literal = path.join(tmpDir, "data.zip:1-2");
-			await Bun.write(literal, "literal archive-shaped file\n");
+		itWithLiteralColonFilename(
+			"reads a literal file that looks like an archive selector (`data.zip:1-2`)",
+			async () => {
+				// A real POSIX file whose name ends in a selector-shaped tail after an
+				// archive extension. The archive resolver would otherwise open `data.zip`
+				// alongside it and error on the phantom member.
+				const baseArchive = path.join(tmpDir, "data.zip");
+				// Empty zip bytes — the file just needs to stat as a real archive so
+				// the archive resolver would happily accept it.
+				await Bun.write(baseArchive, EMPTY_ZIP_EOCD);
+				const literal = path.join(tmpDir, "data.zip:1-2");
+				await Bun.write(literal, "literal archive-shaped file\n");
 
-			const tool = new ReadTool(createSession());
-			const result = await tool.execute("read-literal-zip-selector", { path: literal });
-			const output = getText(result);
+				const tool = new ReadTool(createSession());
+				const result = await tool.execute("read-literal-zip-selector", { path: literal });
+				const output = getText(result);
 
-			expect(output).toContain("literal archive-shaped file");
-		});
+				expect(output).toContain("literal archive-shaped file");
+			},
+		);
 
-		it("reads a literal file that looks like a sqlite selector (`notes.db:1-2`)", async () => {
-			// A real POSIX file whose base name matches a sqlite-shaped path plus a
-			// selector-shaped tail. The sqlite resolver would misroute this to
-			// `notes.db` and try to open a table named `1-2`.
-			const baseDb = path.join(tmpDir, "notes.db");
-			// SQLite database header (16-byte magic string plus zero-padding).
-			const header = new Uint8Array(4096);
-			header.set(Buffer.from("SQLite format 3\0", "utf-8"), 0);
-			await Bun.write(baseDb, header);
-			const literal = path.join(tmpDir, "notes.db:1-2");
-			await Bun.write(literal, "literal db-shaped file\n");
+		itWithLiteralColonFilename(
+			"reads a literal file that looks like a sqlite selector (`notes.db:1-2`)",
+			async () => {
+				// A real POSIX file whose base name matches a sqlite-shaped path plus a
+				// selector-shaped tail. The sqlite resolver would misroute this to
+				// `notes.db` and try to open a table named `1-2`.
+				const baseDb = path.join(tmpDir, "notes.db");
+				// SQLite database header (16-byte magic string plus zero-padding).
+				const header = new Uint8Array(4096);
+				header.set(Buffer.from("SQLite format 3\0", "utf-8"), 0);
+				await Bun.write(baseDb, header);
+				const literal = path.join(tmpDir, "notes.db:1-2");
+				await Bun.write(literal, "literal db-shaped file\n");
 
-			const tool = new ReadTool(createSession());
-			const result = await tool.execute("read-literal-db-selector", { path: literal });
-			const output = getText(result);
+				const tool = new ReadTool(createSession());
+				const result = await tool.execute("read-literal-db-selector", { path: literal });
+				const output = getText(result);
 
-			expect(output).toContain("literal db-shaped file");
-		});
+				expect(output).toContain("literal db-shaped file");
+			},
+		);
 	});
 
 	describe("grep tool", () => {
-		it("searches inside a literal `test:1-2` file", async () => {
+		itWithLiteralColonFilename("searches inside a literal `test:1-2` file", async () => {
 			const literal = "test:1-2";
 			const absolute = path.join(tmpDir, literal);
 			await Bun.write(absolute, "needle\n");
@@ -247,55 +269,64 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			expect(output).not.toMatch(/not found/i);
 		});
 
-		it("searches a shell-escaped literal file whose name ends in a selector-shaped suffix", async () => {
-			await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
-			await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal needle\n");
+		itWithLiteralColonFilename(
+			"searches a shell-escaped literal file whose name ends in a selector-shaped suffix",
+			async () => {
+				await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
+				await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal needle\n");
 
-			const tool = new GrepTool(createSession());
-			const result = await tool.execute("grep-escaped-literal", {
-				pattern: "needle",
-				path: "dir/a\\ b:1-2",
-			});
-			const output = getText(result);
+				const tool = new GrepTool(createSession());
+				const result = await tool.execute("grep-escaped-literal", {
+					pattern: "needle",
+					path: "dir/a\\ b:1-2",
+				});
+				const output = getText(result);
 
-			expect(output).toContain("escaped literal needle");
-		});
+				expect(output).toContain("escaped literal needle");
+			},
+		);
 
-		it("searches a literal file whose name contains a semicolon and selector-shaped tail (`a;b:1-2`)", async () => {
-			// Semicolon is the delimited-path separator; without a raw-literal
-			// probe in `splitDelimitedPathEntry`, expandDelimitedPathEntries would
-			// split `a;b:1-2` into `["a", "b:1-2"]` before grep saw the literal file.
-			const literal = path.join(tmpDir, "a;b:1-2");
-			await Bun.write(literal, "delimited literal needle\n");
+		itWithLiteralColonFilename(
+			"searches a literal file whose name contains a semicolon and selector-shaped tail (`a;b:1-2`)",
+			async () => {
+				// Semicolon is the delimited-path separator; without a raw-literal
+				// probe in `splitDelimitedPathEntry`, expandDelimitedPathEntries would
+				// split `a;b:1-2` into `["a", "b:1-2"]` before grep saw the literal file.
+				const literal = path.join(tmpDir, "a;b:1-2");
+				await Bun.write(literal, "delimited literal needle\n");
 
-			const tool = new GrepTool(createSession());
-			const result = await tool.execute("grep-literal-semicolon-selector", {
-				pattern: "needle",
-				path: literal,
-			});
-			const output = getText(result);
+				const tool = new GrepTool(createSession());
+				const result = await tool.execute("grep-literal-semicolon-selector", {
+					pattern: "needle",
+					path: literal,
+				});
+				const output = getText(result);
 
-			expect(output).toContain("delimited literal needle");
-			expect(output).not.toMatch(/not found/i);
-		});
+				expect(output).toContain("delimited literal needle");
+				expect(output).not.toMatch(/not found/i);
+			},
+		);
 
-		it("searches a literal file that looks like an archive selector (`data.zip:1-2`)", async () => {
-			// The base archive exists too; grep must not rematerialize the raw
-			// literal path as archive `data.zip` plus phantom member `1-2`.
-			const baseArchive = path.join(tmpDir, "data.zip");
-			await Bun.write(baseArchive, EMPTY_ZIP_EOCD);
-			const literal = path.join(tmpDir, "data.zip:1-2");
-			await Bun.write(literal, "literal archive needle\n");
+		itWithLiteralColonFilename(
+			"searches a literal file that looks like an archive selector (`data.zip:1-2`)",
+			async () => {
+				// The base archive exists too; grep must not rematerialize the raw
+				// literal path as archive `data.zip` plus phantom member `1-2`.
+				const baseArchive = path.join(tmpDir, "data.zip");
+				await Bun.write(baseArchive, EMPTY_ZIP_EOCD);
+				const literal = path.join(tmpDir, "data.zip:1-2");
+				await Bun.write(literal, "literal archive needle\n");
 
-			const tool = new GrepTool(createSession());
-			const result = await tool.execute("grep-literal-zip-selector", {
-				pattern: "needle",
-				path: literal,
-			});
-			const output = getText(result);
+				const tool = new GrepTool(createSession());
+				const result = await tool.execute("grep-literal-zip-selector", {
+					pattern: "needle",
+					path: literal,
+				});
+				const output = getText(result);
 
-			expect(output).toContain("literal archive needle");
-		});
+				expect(output).toContain("literal archive needle");
+			},
+		);
 
 		it("preserves `:N-M` line-range filtering when the literal file does not exist", async () => {
 			const absolute = path.join(tmpDir, "notes.txt");

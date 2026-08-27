@@ -43,6 +43,7 @@ const compat: ResolvedOpenAICompat = {
 	allowsSyntheticReasoningContentForToolCalls: true,
 	replayReasoningContent: false,
 	qwenPreserveThinking: false,
+	qwenTemplateReasoningEffort: false,
 	requiresAssistantContentForToolCalls: false,
 	openRouterRouting: {},
 	vercelGatewayRouting: {},
@@ -51,6 +52,7 @@ const compat: ResolvedOpenAICompat = {
 	toolStrictMode: "none",
 	supportsReasoningParams: true,
 	supportsSamplingParams: true,
+	supportsPenaltyAndStopParams: true,
 	alwaysSendMaxTokens: false,
 	isOpenRouterHost: false,
 	isVercelGatewayHost: false,
@@ -435,6 +437,97 @@ describe("openai-completions convertMessages", () => {
 			expect(Array.isArray(trailingUser.content)).toBe(true);
 			const imageParts = (trailingUser.content as Array<{ type?: string }>).filter(p => p?.type === "image_url");
 			expect(imageParts.length).toBe(1);
+		}
+	});
+
+	it("strips image_url only for text-only DeepSeek endpoints", () => {
+		const baseModel = getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">;
+		const textOnlyModels = [
+			{ id: "deepseek-v4-pro", provider: "deepseek", baseUrl: "https://api.deepseek.com/v1" },
+			{ id: "deepseek-ai/DeepSeek-V4-Pro", provider: "custom-proxy", baseUrl: "https://llm.example/v1" },
+			{ id: "deepseek-r1-revision-0528", provider: "custom-proxy", baseUrl: "https://llm.example/v1" },
+			{ id: "deepseek-v4-provisioned", provider: "custom-proxy", baseUrl: "https://llm.example/v1" },
+		];
+
+		for (const spec of textOnlyModels) {
+			const model: Model<"openai-completions"> = {
+				...baseModel,
+				...spec,
+				name: spec.id,
+				provider: spec.provider as Model<"openai-completions">["provider"],
+				api: "openai-completions",
+				input: ["text", "image"],
+			};
+			const now = Date.now();
+			const assistantMessage: AssistantMessage = {
+				role: "assistant",
+				content: [{ type: "toolCall", id: "tool-1", name: "browser", arguments: { action: "screenshot" } }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: emptyUsage,
+				stopReason: "toolUse",
+				timestamp: now,
+			};
+			const context: Context = {
+				messages: [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: "Take a screenshot" },
+							{ type: "image", data: "ZmFrZQ==", mimeType: "image/webp" },
+						],
+						timestamp: now - 2,
+					},
+					assistantMessage,
+					buildToolResult("tool-1", now + 1),
+				],
+			};
+
+			const messages = convertMessages(model, context, compat);
+			for (const message of messages) {
+				if (!Array.isArray(message.content)) continue;
+				for (const part of message.content as Array<{ type?: string }>) {
+					expect(part?.type).not.toBe("image_url");
+				}
+			}
+			const userMessage = messages.find(message => message.role === "user");
+			expect(JSON.stringify(userMessage?.content)).toContain(NON_VISION_IMAGE_PLACEHOLDER);
+			const toolMessage = messages.find(message => message.role === "tool");
+			expect(toolMessage?.content).toContain(NON_VISION_IMAGE_PLACEHOLDER);
+		}
+	});
+
+	it("preserves image_url for DeepSeek OCR and delimited vision SKUs", () => {
+		const baseModel = getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">;
+		for (const id of ["deepseek/deepseek-ocr-2", "deepseek-v4-flash-vision-exp"]) {
+			const model: Model<"openai-completions"> = {
+				...baseModel,
+				id,
+				name: id,
+				provider: "deepseek" as Model<"openai-completions">["provider"],
+				baseUrl: "https://api.deepseek.com",
+				api: "openai-completions",
+				input: ["text", "image"],
+			};
+			const context: Context = {
+				messages: [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: "Describe this image" },
+							{ type: "image", data: "ZmFrZQ==", mimeType: "image/png" },
+						],
+						timestamp: Date.now(),
+					},
+				],
+			};
+
+			const messages = convertMessages(model, context, compat);
+			expect(messages[0]?.content).toEqual([
+				{ type: "text", text: "Describe this image" },
+				{ type: "image_url", image_url: { url: "data:image/png;base64,ZmFrZQ==" } },
+			]);
 		}
 	});
 });

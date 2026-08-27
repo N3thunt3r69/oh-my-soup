@@ -12,6 +12,7 @@ import type {
 	ElementScreenshotOptions,
 	HTTPRequest,
 	HTTPResponse,
+	KeyboardTypeOptions,
 	KeyInput,
 	Page,
 	SerializedAXNode,
@@ -225,6 +226,8 @@ const ZERO_MATCH_FAIL_FAST_MS = 2_000;
 const ZERO_MATCH_POLL_MS = 250;
 /** Cleanup must settle inside the supervisor's 750ms post-run grace window. */
 const REQUEST_INTERCEPTION_CLEANUP_TIMEOUT_MS = 500;
+/** Bound cleanup window after a timed-out raw handle action. */
+const HANDLE_ACTION_INVALIDATION_TIMEOUT_MS = 500;
 
 export interface OpTimeouts {
 	/** Largest per-op deadline allowed — strictly below the cell budget. */
@@ -252,7 +255,6 @@ export async function dispatchScroll(
 ): Promise<void> {
 	const deadline = Promise.withResolvers<void>();
 	const timer = setTimeout(() => deadline.resolve(), ackTimeoutMs);
-	timer.unref();
 	try {
 		await Promise.race([dispatch(), deadline.promise]);
 	} finally {
@@ -378,18 +380,183 @@ function asElementHandle(handle: unknown): ElementHandle | null {
 export type ActionableHandle = ElementHandle & { fill(value: string): Promise<void> };
 
 /**
- * Attach `fill()` to a puppeteer ElementHandle before handing it to user code.
- * Puppeteer handles expose `type()` but no `fill()`; the semantics mirror the
- * selector-based `tab.fill()`: focus, clear any existing value, then type.
+ * A named per-op guard: runs `fn` inside the active run's fail-fast deadline and
+ * in-flight tracking, so a stalled handle action rejects before the cell budget.
  */
-export function toActionableHandle(handle: ElementHandle): ActionableHandle {
-	const enriched = handle as ActionableHandle;
-	enriched.fill = value => fillViaHandle(enriched, value);
+export type HandleOpGuard = <T>(label: string, fn: (signal: AbortSignal) => Promise<T>) => Promise<T>;
+
+/**
+ * Every ElementHandle method that dispatches input, pointer/touch, drag, or navigation
+ * work and can stall on a busy page. Pure reads retain native Puppeteer behavior.
+ */
+const GUARDED_HANDLE_METHODS = [
+	"click",
+	"type",
+	"hover",
+	"tap",
+	"focus",
+	"press",
+	"select",
+	"uploadFile",
+	"scrollIntoView",
+	"drag",
+	"dragEnter",
+	"dragOver",
+	"drop",
+	"dragAndDrop",
+	"touchStart",
+	"touchMove",
+	"touchEnd",
+	"autofill",
+] as const satisfies readonly (keyof ElementHandle)[];
+
+type GuardedHandleMethod = (typeof GUARDED_HANDLE_METHODS)[number];
+type RawHandleMethod = (...args: unknown[]) => Promise<unknown>;
+
+interface RawHandleMethods {
+	interactive: Partial<Record<GuardedHandleMethod, RawHandleMethod>>;
+	type: ElementHandle["type"];
+	invalidatedBy?: string;
+}
+
+/** Symbol-keyed original methods survive cached-handle rewraps without colliding. */
+const RAW_HANDLE_METHODS = Symbol("browser.rawHandleMethods");
+
+type HandleWithRawMethods = ActionableHandle & { [RAW_HANDLE_METHODS]?: RawHandleMethods };
+
+async function runGuardedHandleAction<T>(
+	handle: ElementHandle,
+	state: RawHandleMethods,
+	label: string,
+	signal: AbortSignal,
+	action: () => Promise<T>,
+	invalidate?: () => Promise<void>,
+): Promise<T> {
+	if (state.invalidatedBy) {
+		throw new ToolError(
+			`${label} cannot run: this handle was invalidated after ${state.invalidatedBy} timed out; ` +
+				"run tab.observe() or tab.ariaSnapshot() to resolve a fresh handle",
+		);
+	}
+	throwIfAborted(signal);
+	const pending = action();
+	try {
+		return await untilAborted(signal, () => pending);
+	} catch (error) {
+		if (!signal.aborted) throw error;
+		state.invalidatedBy = label;
+		void pending.catch(() => undefined);
+		await withTimeout(
+			Promise.all([handle.dispose().catch(() => undefined), invalidate?.().catch(() => undefined)]),
+			HANDLE_ACTION_INVALIDATION_TIMEOUT_MS,
+			`Timed out invalidating ${label}`,
+		).catch(() => undefined);
+		throw error;
+	}
+}
+
+/**
+ * Attach `fill()` and, when guarded, fail-fast wrappers for every stallable action.
+ * Cached handles are always rewrapped from preserved raw methods, never a prior run's
+ * wrappers. A timed-out action poisons the handle before its error is surfaced.
+ */
+export function toActionableHandle(
+	handle: ElementHandle,
+	guard?: HandleOpGuard,
+	invalidate?: () => Promise<void>,
+): ActionableHandle {
+	const enriched = handle as HandleWithRawMethods;
+	const methods = enriched as unknown as Partial<Record<GuardedHandleMethod, RawHandleMethod>>;
+	const preserved = enriched[RAW_HANDLE_METHODS];
+	if (!guard) {
+		if (preserved) {
+			for (const method of GUARDED_HANDLE_METHODS) {
+				const original = preserved.interactive[method];
+				if (original) methods[method] = original;
+			}
+		}
+		enriched.fill = value => fillViaHandle(enriched, value, undefined, preserved?.type);
+		return enriched;
+	}
+
+	let originals = preserved;
+	if (!originals) {
+		const interactive: Partial<Record<GuardedHandleMethod, RawHandleMethod>> = {};
+		for (const method of GUARDED_HANDLE_METHODS) {
+			const original = methods[method];
+			if (typeof original === "function") interactive[method] = original.bind(enriched);
+		}
+		originals = { interactive, type: enriched.type.bind(enriched) };
+		enriched[RAW_HANDLE_METHODS] = originals;
+	}
+
+	for (const method of GUARDED_HANDLE_METHODS) {
+		if (method === "type") continue;
+		const original = originals.interactive[method];
+		if (!original) continue;
+		methods[method] = (...args) =>
+			guard(`handle.${method}()`, signal =>
+				runGuardedHandleAction(
+					enriched,
+					originals,
+					`handle.${method}()`,
+					signal,
+					() => original(...args),
+					invalidate,
+				),
+			);
+	}
+	enriched.type = (text, options) =>
+		guard<void>("handle.type()", signal =>
+			runGuardedHandleAction(
+				enriched,
+				originals,
+				"handle.type()",
+				signal,
+				() => typeViaHandle(enriched, text, options, signal),
+				invalidate,
+			),
+		);
+	enriched.fill = value =>
+		guard<void>("handle.fill()", signal =>
+			runGuardedHandleAction(
+				enriched,
+				originals,
+				"handle.fill()",
+				signal,
+				() => fillViaHandle(enriched, value, signal, text => typeViaHandle(enriched, text, { delay: 0 }, signal)),
+				invalidate,
+			),
+		);
 	return enriched;
 }
 
-/** Focus, clear any existing value, then retype — shared by `tab.fill(aria-ref)` and enriched handles. */
-async function fillViaHandle(handle: ElementHandle, value: string, signal?: AbortSignal): Promise<void> {
+/** Focus once, then type one code point at a time so abort stops before the next dispatch. */
+async function typeViaHandle(
+	handle: ElementHandle,
+	text: string,
+	options: Readonly<KeyboardTypeOptions> | undefined,
+	signal: AbortSignal,
+): Promise<void> {
+	await untilAborted(signal, () =>
+		handle.evaluate(el => {
+			const node = el as unknown as { focus?: () => void };
+			node.focus?.();
+		}),
+	);
+	for (const character of text) {
+		throwIfAborted(signal);
+		await untilAborted(signal, () => handle.frame.page().keyboard.type(character, options));
+	}
+}
+
+/** Focus, clear any existing value, then retype. */
+async function fillViaHandle(
+	handle: ElementHandle,
+	value: string,
+	signal?: AbortSignal,
+	type: (text: string) => Promise<unknown> = text => handle.type(text, { delay: 0 }),
+): Promise<void> {
 	await untilAborted(signal, () =>
 		handle.evaluate(el => {
 			const node = el as unknown as { value?: string; focus?: () => void };
@@ -397,7 +564,7 @@ async function fillViaHandle(handle: ElementHandle, value: string, signal?: Abor
 			if ("value" in node) node.value = "";
 		}),
 	);
-	await untilAborted(signal, () => handle.type(value, { delay: 0 }));
+	await untilAborted(signal, () => type(value));
 }
 
 /**
@@ -1404,6 +1571,17 @@ export class WorkerCore {
 			fn: (sig: AbortSignal) => Promise<T>,
 			selectorOpts?: { selector?: string; zeroMatchAfterMs?: number },
 		): Promise<T> => markHandled(this.#runOp(active, label, signal, perOpMs, fn, selectorOpts));
+		// Guard user-facing handles with this run's deadline and invalidate raw
+		// actions before a caught timeout can dispatch a duplicate retry.
+		const enrich = (handle: ElementHandle): ActionableHandle =>
+			toActionableHandle(
+				handle,
+				(label, fn) => op(label, actionOpMs, fn),
+				async () => {
+					this.#clearElementCache();
+					await this.#stopLoading();
+				},
+			);
 		return {
 			name,
 			page,
@@ -1567,7 +1745,7 @@ export class WorkerCore {
 				return op(
 					`tab.waitFor(${JSON.stringify(selector)})`,
 					w,
-					async sig => toActionableHandle(await this.#resolveActionHandle(selector, w, sig)),
+					async sig => enrich(await this.#resolveActionHandle(selector, w, sig)),
 					{ selector, zeroMatchAfterMs: opts?.timeout === undefined ? ZERO_MATCH_FAIL_FAST_MS : undefined },
 				);
 			},
@@ -1577,12 +1755,11 @@ export class WorkerCore {
 					`tab.waitForSelector(${JSON.stringify(selector)})`,
 					w,
 					async sig => {
-						if (parseAriaRefSelector(selector) !== null)
-							return toActionableHandle(await this.#resolveAriaRef(selector));
+						if (parseAriaRefSelector(selector) !== null) return enrich(await this.#resolveAriaRef(selector));
 						const resolved = normalizeSelector(selector);
 						if (resolved.startsWith("aria/")) {
 							const ariaHandle = await this.#waitForAria(resolved, w, opts, sig);
-							return ariaHandle ? toActionableHandle(ariaHandle) : null;
+							return ariaHandle ? enrich(ariaHandle) : null;
 						}
 						const handle = (await untilAborted(sig, () =>
 							page.waitForSelector(resolved, {
@@ -1592,7 +1769,7 @@ export class WorkerCore {
 								signal: sig,
 							}),
 						)) as ElementHandle | null;
-						return handle ? toActionableHandle(handle) : null;
+						return handle ? enrich(handle) : null;
 					},
 					{
 						selector,
@@ -1658,8 +1835,8 @@ export class WorkerCore {
 				const w = waitMs(opts?.timeout);
 				return op("tab.waitForResponse()", w, sig => this.#waitForResponse(pattern, w, sig));
 			},
-			id: async id => toActionableHandle(await this.#resolveCachedHandle(id)),
-			ref: async id => toActionableHandle(await this.#resolveAriaRef(id)),
+			id: async id => enrich(await this.#resolveCachedHandle(id)),
+			ref: async id => enrich(await this.#resolveAriaRef(id)),
 		};
 	}
 

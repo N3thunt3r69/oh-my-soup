@@ -37,23 +37,55 @@ export function createMCPTimeout(
 	signal?: AbortSignal;
 	clear: () => void;
 	isTimeoutAbort: (error: unknown) => boolean;
+	/** True when this operation's own timer fired, regardless of the consumer-visible error. */
+	timedOut: () => boolean;
 } {
 	if (!isMCPTimeoutEnabled(timeoutMs)) {
 		return {
 			signal,
 			clear: () => {},
 			isTimeoutAbort: () => false,
+			timedOut: () => false,
 		};
 	}
 
 	const abortController = new AbortController();
-	const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+	// Track which source fired first. A late caller abort must not erase an
+	// elapsed timeout, and a late timer must not relabel caller cancellation.
+	let timerFired = false;
+	let callerAborted = false;
+	let timeoutId: NodeJS.Timeout | undefined;
+	let onCallerAbort: (() => void) | undefined;
+	if (signal?.aborted) {
+		callerAborted = true;
+		abortController.abort();
+	} else {
+		timeoutId = setTimeout(() => {
+			if (callerAborted) return;
+			timerFired = true;
+			abortController.abort();
+		}, timeoutMs);
+		if (signal) {
+			onCallerAbort = () => {
+				callerAborted = true;
+				clearTimeout(timeoutId);
+			};
+			signal.addEventListener("abort", onCallerAbort, { once: true });
+		}
+	}
 	const operationSignal = signal ? AbortSignal.any([signal, abortController.signal]) : abortController.signal;
 
 	return {
 		signal: operationSignal,
-		clear: () => clearTimeout(timeoutId),
+		clear: () => {
+			clearTimeout(timeoutId);
+			if (signal && onCallerAbort) signal.removeEventListener("abort", onCallerAbort);
+		},
 		isTimeoutAbort: error =>
-			error instanceof Error && error.name === "AbortError" && abortController.signal.aborted && !signal?.aborted,
+			timerFired &&
+			(error instanceof Error
+				? error.name === "AbortError" || (error.name === "SyntaxError" && operationSignal.aborted)
+				: false),
+		timedOut: () => timerFired,
 	};
 }

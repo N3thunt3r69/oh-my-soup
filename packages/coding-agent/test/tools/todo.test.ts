@@ -310,6 +310,19 @@ describe("TodoTool operations", () => {
 		expect(parsedA?.blocker).toBe("x");
 	});
 
+	it("round-trips checklist items with backslash-escaped brackets from /todo edit", () => {
+		const md = ["# Todos", "* \\[x] first", "- \\[ \\] second", "+ \\[/\\] third"].join("\n");
+		const { phases, errors } = markdownToPhases(md);
+
+		expect(errors).toEqual([]);
+		expect(phases[0]?.tasks).toEqual([
+			{ content: "first", status: "completed" },
+			{ content: "second", status: "pending" },
+			{ content: "third", status: "in_progress" },
+		]);
+		expect(phasesToMarkdown(phases)).toBe("# Todos\n- [x] first\n- [ ] second\n- [/] third\n");
+	});
+
 	it("normalizes a multi-line blocker reason so the markdown round-trip survives", async () => {
 		const tool = new TodoTool(createSession());
 		await tool.execute("call-1", { op: "init", list: [{ phase: "Work", items: ["a"] }] });

@@ -79,11 +79,16 @@ export interface MuxConnectParams {
 	cwd: string;
 	/** Extra environment overlaid on the mux daemon's own env for the spawn. */
 	env?: Record<string, string>;
+	/**
+	 * Opaque digest of initialization options, settings, and language identity.
+	 * The digest keeps configuration secrets out of the handshake and logs.
+	 */
+	configurationIdentity: string;
 }
 
 /** Handshake result. */
 export interface MuxConnectResult {
-	/** Server identity key inside the mux (`${command}:${cwd}`). */
+	/** Hashed server identity key covering spawn inputs and initialization identity. */
 	key: string;
 	/** True when this handshake spawned the server process. */
 	spawned: boolean;
@@ -91,7 +96,16 @@ export interface MuxConnectResult {
 	pid?: number;
 }
 
-/** Server identity key used by the mux registry. */
-export function muxServerKey(command: string, cwd: string): string {
-	return `${command}:${cwd}`;
+/**
+ * Server identity key used by the mux registry.
+ *
+ * The registry may reuse an idle process only when every spawn input matches.
+ * Environment entries are sorted so equivalent objects have one canonical
+ * identity. The canonical identity is hashed because this key crosses the mux
+ * handshake and appears in logs, while environment values may contain secrets.
+ */
+export function muxServerKey(params: MuxConnectParams): string {
+	const envEntries = Object.entries(params.env ?? {}).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+	const identity = JSON.stringify([params.command, params.args, params.cwd, envEntries, params.configurationIdentity]);
+	return `sha256:${Bun.SHA256.hash(identity, "hex")}`;
 }

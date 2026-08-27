@@ -186,6 +186,34 @@ describe("structured subagent primitive", () => {
 		expect(settled.result.modelRole).toBe("reviewer");
 		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
+
+	it("does not treat a task spawn handle as the HUD description", async () => {
+		mockDiscovery();
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+
+		const handleOnly = await runStructuredSubagent(
+			request({ identity: { id: "AuthLoader", label: "AuthLoader" }, retainArtifacts: true }),
+		);
+		expect(dispatched[0]?.description).toBeUndefined();
+		expect(dispatched[0]?.id).toBe("AuthLoader");
+		await fs.rm(handleOnly.artifactsDir, { recursive: true, force: true });
+
+		dispatched.length = 0;
+		const evalLabeled = await runStructuredSubagent(
+			request({
+				invocationKind: "eval",
+				identity: { label: "Refactor the auth flow" },
+				retainArtifacts: true,
+			}),
+		);
+		expect(dispatched[0]?.description).toBe("Refactor the auth flow");
+		await fs.rm(evalLabeled.artifactsDir, { recursive: true, force: true });
+	});
+
 	it("derives modelRole from the raw selector source in request, override, definition order", async () => {
 		const customAgent = { ...AGENT, model: ["@definition"] };
 		mockDiscovery(customAgent);
@@ -375,7 +403,7 @@ describe("structured subagent primitive", () => {
 			runStructuredSubagent(
 				request({ session: session({ isolationMode: "worktree" }), isolation: { requested: true } }),
 			),
-		).rejects.toThrow("Isolated subagent execution requires a git repository");
+		).rejects.toThrow("Isolated subagent execution could not be prepared: not a repository");
 		expect(artifactsDirsFromRegistry()).toEqual([]);
 	});
 

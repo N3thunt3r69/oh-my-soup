@@ -14,7 +14,7 @@
  * Throws on any failure (no model, no key, unparseable output, abort/timeout);
  * the caller falls back to a concrete level and continues the turn.
  */
-import { type AssistantMessage, completeSimple, Effort, type Model } from "@oh-my-soup/pi-ai";
+import { type AssistantMessage, completeSimple, Effort, type Model, retryTransientCompletion } from "@oh-my-soup/pi-ai";
 import { getSupportedEfforts } from "@oh-my-soup/pi-catalog/model-thinking";
 import { prompt } from "@oh-my-soup/pi-utils";
 
@@ -115,19 +115,23 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 	const metadata = deps.metadataResolver?.(model.provider);
 	const maxTokens = REASONING_SAFE_MAX_TOKENS;
 
-	const response = await completeSimple(
-		model,
-		{
-			systemPrompt: [difficultySystemPromptFor(ceiling)],
-			messages: [{ role: "user", content: input, timestamp: Date.now() }],
-		},
-		{
-			apiKey: deps.registry.resolver(model, deps.sessionId),
-			maxTokens,
-			disableReasoning: true,
-			metadata,
-			signal: deps.signal,
-		},
+	const response = await retryTransientCompletion(
+		() =>
+			completeSimple(
+				model,
+				{
+					systemPrompt: [difficultySystemPromptFor(ceiling)],
+					messages: [{ role: "user", content: input, timestamp: Date.now() }],
+				},
+				{
+					apiKey: deps.registry.resolver(model, deps.sessionId),
+					maxTokens,
+					disableReasoning: true,
+					metadata,
+					signal: deps.signal,
+				},
+			),
+		{ signal: deps.signal },
 	);
 
 	if (response.stopReason === "error") {

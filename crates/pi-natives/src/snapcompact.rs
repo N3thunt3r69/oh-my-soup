@@ -1354,6 +1354,29 @@ mod tests {
 	}
 
 	#[test]
+	fn digit_zero_is_disambiguated_from_letter_o() {
+		for font in [&*FONT_5X8, &*FONT_6X12, &*FONT_8X13] {
+			let (cw, ch) = (font.cell_w, font.cell_h);
+			let width = cw * 2;
+			let grid = Grid { cols: 2, rows: 1, repeat: 1, cell_w: cw, cell_h: ch };
+			let pixels = render_bitmap("0O", width, ch, font, &grid, true);
+			let band = ch / 4..ch - ch / 4;
+			let middle_ink = |start: usize| -> usize {
+				band
+					.clone()
+					.flat_map(|y| (start..start + cw).map(move |x| (x, y)))
+					.filter(|&(x, y)| pixels[y * width + x] != 0)
+					.count()
+			};
+			let (zero, letter_o) = (middle_ink(0), middle_ink(cw));
+			assert!(
+				zero > letter_o,
+				"cell {cw}x{ch}: zero must ink its middle more than O (zero={zero}, O={letter_o})"
+			);
+		}
+	}
+
+	#[test]
 	fn bitmap_inks_sentences_and_caps_capacity() {
 		// 40px -> 8 cols x 5 rows = 40 cells (5x8 font).
 		let grid = Grid { cols: 8, rows: 5, repeat: 1, cell_w: 5, cell_h: 8 };

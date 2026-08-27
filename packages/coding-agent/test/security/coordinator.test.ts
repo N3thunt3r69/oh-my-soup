@@ -254,6 +254,7 @@ describe("native security coordinator", () => {
 		await $`git init --initial-branch=main`.cwd(repositoryRoot).quiet();
 		await $`git config user.name Fixture`.cwd(repositoryRoot).quiet();
 		await $`git config user.email fixture@example.invalid`.cwd(repositoryRoot).quiet();
+		await $`git config core.autocrlf false`.cwd(repositoryRoot).quiet();
 		await $`git add src/app.ts`.cwd(repositoryRoot).quiet();
 		await $`git commit -m base`.cwd(repositoryRoot).quiet();
 		const baseRevision = (await $`git rev-parse HEAD`.cwd(repositoryRoot).text()).trim();
@@ -265,6 +266,7 @@ describe("native security coordinator", () => {
 		let executionRoot = "";
 		let request = "";
 		let reviewedContent = "";
+		let reviewedRevision = "";
 		const coordinator = new SecurityCoordinator(
 			{
 				cwd: repositoryRoot,
@@ -282,6 +284,9 @@ describe("native security coordinator", () => {
 						prompt: async text => {
 							request = text;
 							reviewedContent = await Bun.file(path.join(input.executionRoot, "src", "app.ts")).text();
+							const revision = await DEFAULT_SECURITY_GIT_ADAPTER.headSha(input.executionRoot);
+							if (!revision) throw new Error("Expected security worktree HEAD");
+							reviewedRevision = revision;
 							return true;
 						},
 						waitForIdle: async () => undefined,
@@ -301,6 +306,7 @@ describe("native security coordinator", () => {
 		expect(terminal.phase).toBe("partial");
 		expect(executionRoot).not.toBe(repositoryRoot);
 		expect(reviewedContent).toBe("export const app = 'head';\n");
+		expect(reviewedRevision).toBe(headRevision);
 		expect(request).toContain("Requested base-to-head diff");
 		expect(request).toContain("+export const app = 'head';");
 		await expect(fs.stat(executionRoot)).rejects.toThrow();

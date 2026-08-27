@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { scheduler } from "node:timers/promises";
 import { Agent } from "@oh-my-soup/pi-agent-core";
 import * as compactionModule from "@oh-my-soup/pi-agent-core/compaction";
 import { resolveThresholdTokens, shouldCompact } from "@oh-my-soup/pi-agent-core/compaction";
+import type { AssistantMessage } from "@oh-my-soup/pi-ai";
 import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
@@ -523,6 +525,66 @@ describe("AgentSession auto-compaction progress guard", () => {
 		const noProgress = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes(NO_PROGRESS_FRAGMENT));
 		expect(noProgress.length).toBe(0);
 	});
+
+	it("rejects a stale pre-compaction anchor that lands past the rebase cutoff", async () => {
+		seedPriorTurns();
+		activateOngoingGoal("stale-anchor");
+		const gate = Promise.withResolvers<void>();
+		const firstPromptCall = Promise.withResolvers<void>();
+		vi.spyOn(session.agent, "prompt").mockImplementation(() => {
+			firstPromptCall.resolve();
+			return gate.promise as never;
+		});
+		vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		const { promise: compactionDone, resolve: onCompactionDone } = Promise.withResolvers<void>();
+		session.subscribe(event => {
+			if (event.type === "auto_compaction_end") onCompactionDone();
+		});
+
+		// Keep the provider request in flight while mid-run compaction rebases its
+		// pending estimate to the compacted history.
+		const inFlight = session.prompt("x".repeat(600_000));
+		await firstPromptCall.promise;
+
+		const trigger = highUsageAssistant();
+		session.agent.emitExternalEvent({ type: "message_end", message: trigger });
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [trigger] });
+		await compactionDone;
+
+		const rebasedTokens = session.getContextBreakdown()?.usedTokens ?? 0;
+		expect(rebasedTokens).toBeLessThan(50_000);
+		const preCompactionEpoch = (trigger as AssistantMessage).contextSnapshot?.compactionEpoch ?? 0;
+
+		// This response lands after the rebase cutoff, but its provider usage was
+		// captured before compaction. Position alone must not make it authoritative.
+		const staleAnchor = {
+			role: "assistant",
+			content: [{ type: "text", text: "stale in-flight response" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "stop",
+			usage: {
+				input: 360000,
+				output: 500,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 360500,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			contextSnapshot: { promptTokens: 360000, nonMessageTokens: 100, compactionEpoch: preCompactionEpoch },
+			timestamp: Date.now() + 1,
+		} as AssistantMessage;
+		sessionManager.appendMessage(staleAnchor);
+		session.agent.replaceMessages([...session.agent.state.messages, staleAnchor]);
+
+		expect(session.getContextBreakdown()?.usedTokens ?? 0).toBeLessThan(50_000);
+
+		gate.resolve();
+		await inFlight.catch(() => {});
+		await session.waitForIdle();
+	});
 	/**
 	 * Seed several large prior turns into the session branch so `prepareCompaction`
 	 * returns a real preparation after the overflow recovery drops the failed
@@ -853,6 +915,114 @@ describe("AgentSession auto-compaction progress guard", () => {
 				}),
 			}),
 		);
+	});
+
+	it("resumes length recovery after an overlapping handoff fails before agent_end", async () => {
+		session.settings.set("contextPromotion.enabled", false);
+		const continueStarted = Promise.withResolvers<void>();
+		const continueSpy = vi.spyOn(session.agent, "continue").mockImplementation(async () => {
+			continueStarted.resolve();
+		});
+		const { promise: compactionDone, resolve: onCompactionDone } = Promise.withResolvers<void>();
+		session.subscribe(event => {
+			if (event.type === "auto_compaction_end") onCompactionDone();
+		});
+		const handoffStarted = Promise.withResolvers<void>();
+		const releaseFailedHandoff = Promise.withResolvers<void>();
+		vi.spyOn(compactionModule, "generateHandoffFromContext").mockImplementation(async () => {
+			handoffStarted.resolve();
+			await releaseFailedHandoff.promise;
+			throw new Error("overlapping handoff failed");
+		});
+		sessionManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "handoff seed" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "stop",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		});
+		const failedHandoff = session.handoff().catch(() => undefined);
+		await handoffStarted.promise;
+		const ordinaryStop = {
+			role: "assistant" as const,
+			content: [{ type: "text" as const, text: "finished" }],
+			api: "anthropic-messages" as const,
+			provider: "anthropic" as const,
+			model: "claude-sonnet-4-5",
+			stopReason: "stop" as const,
+			usage: {
+				input: 100,
+				output: 10,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 110,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now() + 1,
+		};
+		let ordinarySettled = false;
+		const unsubscribe = session.subscribe(event => {
+			if (event.type === "agent_end") ordinarySettled = true;
+		});
+		session.agent.emitExternalEvent({ type: "message_end", message: ordinaryStop });
+		await scheduler.yield();
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [ordinaryStop] });
+		await scheduler.yield();
+		unsubscribe();
+		expect(ordinarySettled).toBe(true);
+		expect(session.isGeneratingHandoff).toBe(true);
+		const firstKeptEntryId = sessionManager.getBranch().at(-1)?.id;
+		if (!firstKeptEntryId) throw new Error("ordinary stop was not persisted");
+		const preparation: compactionModule.CompactionPreparation = {
+			firstKeptEntryId,
+			messagesToSummarize: [{ role: "user", content: "hello", timestamp: Date.now() }],
+			turnPrefixMessages: [],
+			recentMessages: [ordinaryStop],
+			isSplitTurn: false,
+			tokensBefore: 150_000,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: session.settings.getGroup("compaction"),
+		};
+		vi.spyOn(compactionModule, "prepareCompaction").mockReturnValue(preparation);
+
+		const lengthStop = {
+			role: "assistant" as const,
+			content: [{ type: "thinking" as const, thinking: "unfinished reasoning" }],
+			api: "anthropic-messages" as const,
+			provider: "anthropic" as const,
+			model: "claude-sonnet-4-5",
+			stopReason: "length" as const,
+			usage: {
+				input: 150_000,
+				output: 50_000,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 200_000,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: ordinaryStop.timestamp + 1,
+		};
+		session.agent.emitExternalEvent({ type: "message_end", message: lengthStop });
+		await scheduler.yield();
+		releaseFailedHandoff.resolve();
+		await failedHandoff;
+		expect(session.isGeneratingHandoff).toBe(false);
+
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [lengthStop] });
+		await compactionDone;
+		await continueStarted.promise;
+		await session.waitForIdle();
+		expect(continueSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("retries a small-window overflow when the reserve exceeds the model window", async () => {

@@ -21,6 +21,7 @@ import { resolveModelThinking } from "../src/model-thinking";
 import { isOllamaCloudOutputCapped, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS } from "../src/provider-models/ollama";
 import {
 	ALIBABA_TOKEN_PLAN_STATIC_MODELS,
+	applyXaiResponsesThinkingPolicy,
 	OPENAI_GPT_56_LONG_CONTEXT_COSTS,
 	resolveWaferServerlessThinkingFormat,
 } from "../src/provider-models/openai-compat";
@@ -206,6 +207,14 @@ export function applyGeneratedModelPolicies(models: ModelSpec<Api>[]): void {
  */
 export function rebakeModelThinking(model: ModelSpec<Api>): void {
 	if (isVariantCollapsedSpec(model)) return;
+	if (
+		model.compat &&
+		"thinkingFormat" in model.compat &&
+		model.compat.thinkingFormat === "chat-template" &&
+		model.thinking
+	) {
+		return;
+	}
 	if (
 		model.provider === "alibaba-token-plan" &&
 		(model.id === "qwen3.8-max-preview" || model.id === "qwen3.8-max") &&
@@ -393,6 +402,10 @@ export function applyNoSystemPromptCapability(models: ModelSpec<Api>[]): void {
 }
 
 function applyGeneratedModelPolicy(model: ModelSpec<Api>): void {
+	if ((model.provider === "xai" || model.provider === "xai-oauth") && model.api === "openai-responses") {
+		const updated = applyXaiResponsesThinkingPolicy(model as ModelSpec<"openai-responses">);
+		model.compat = updated.compat;
+	}
 	const copilotLimits = model.provider === "github-copilot" ? COPILOT_GENERATED_LIMITS[model.id] : undefined;
 	if (copilotLimits) {
 		model.contextWindow = copilotLimits.contextWindow;
@@ -407,9 +420,12 @@ function applyGeneratedModelPolicy(model: ModelSpec<Api>): void {
 		model.omitMaxOutputTokens = true;
 	}
 
-	// GLM Coding Plan: GLM-5.2 is the selectable 1M served id; pin it so
-	// endpoint discovery or older bundled fallbacks cannot regress to 200k.
-	if ((model.provider === "zai" || model.provider === "zhipu-coding-plan") && model.id === "glm-5.2") {
+	// GLM Coding Plan: GLM-5.2+ base ids are the selectable 1M served ids; pin
+	// released SKUs so endpoint discovery or older fallbacks cannot regress them.
+	if (
+		(model.provider === "zai" || model.provider === "zhipu-coding-plan") &&
+		(model.id === "glm-5.2" || model.id === "glm-5.3")
+	) {
 		model.contextWindow = 1_000_000;
 		model.maxTokens = 131_072;
 	}

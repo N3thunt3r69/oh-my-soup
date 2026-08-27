@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-soup/omstype";
+import { Tokenizer } from "@oh-my-soup/pi-agent-core";
 import { arkToWireSchema } from "@oh-my-soup/pi-ai/utils/schema";
 import {
 	type ContextBreakdown,
@@ -15,6 +16,26 @@ import {
 	estimateToolSchemaTokens,
 	renderContextUsage,
 } from "@oh-my-soup/pi-coding-agent/modes/utils/context-usage";
+import { applyToolProxy } from "../../src/extensibility/tool-proxy";
+
+const tokenizer = new Tokenizer();
+
+const strictTokenizer = {
+	countTokens(input: string | readonly string[]): number {
+		const fragments = typeof input === "string" ? [input] : Array.from(input);
+		for (const fragment of fragments) {
+			if (typeof fragment !== "string") throw new TypeError("non-string token fragment");
+		}
+		return fragments.reduce((total, fragment) => total + fragment.length, 0);
+	},
+} as never;
+
+function bindCapableSchema() {
+	return Object.assign((value: unknown) => value, {
+		toJsonSchema: () => ({ type: "object", properties: { a: { type: "string" } } }),
+		assert: (value: unknown) => value,
+	});
+}
 
 describe("estimateToolSchemaTokens", () => {
 	it("counts arktype tool schemas by their wire JSON Schema, not arktype internals", () => {
@@ -22,13 +43,44 @@ describe("estimateToolSchemaTokens", () => {
 			"query /** search query */": "string",
 			"limit?": "number",
 		});
-		const arktypeEstimate = estimateToolSchemaTokens([
-			{ name: "web_search", description: "Searches the web.", parameters } as never,
-		]);
-		const wireEstimate = estimateToolSchemaTokens([
-			{ name: "web_search", description: "Searches the web.", parameters: arkToWireSchema(parameters) } as never,
-		]);
+		const arktypeEstimate = estimateToolSchemaTokens(
+			[{ name: "web_search", description: "Searches the web.", parameters } as never],
+			tokenizer,
+		);
+		const wireEstimate = estimateToolSchemaTokens(
+			[{ name: "web_search", description: "Searches the web.", parameters: arkToWireSchema(parameters) } as never],
+			tokenizer,
+		);
 		expect(arktypeEstimate).toBe(wireEstimate);
+	});
+
+	it("counts a proxied bind-capable callable schema like the unwrapped tool", () => {
+		const schema = bindCapableSchema();
+		const unwrapped = { name: "ext", description: "ext tool", parameters: schema };
+		const wrapper: Record<string, unknown> = {};
+		applyToolProxy(unwrapped, wrapper);
+
+		expect(estimateToolSchemaTokens([wrapper as never], tokenizer)).toBe(
+			estimateToolSchemaTokens([unwrapped as never], tokenizer),
+		);
+		expect(estimateToolSchemaTokens([wrapper as never], tokenizer)).toBeGreaterThan(0);
+	});
+
+	it("runs the full non-message breakdown on a proxied extension tool", () => {
+		const schema = bindCapableSchema();
+		const wrapper: Record<string, unknown> = {};
+		applyToolProxy({ name: "ext", description: "ext tool", parameters: schema }, wrapper);
+		const session = { systemPrompt: ["base"], agent: { state: { tools: [wrapper] } } };
+
+		expect(computeNonMessageBreakdown(session as never, tokenizer).toolsTokens).toBeGreaterThan(0);
+	});
+
+	it("skips a parameters value that stringifies to undefined", () => {
+		const estimate = estimateToolSchemaTokens(
+			[{ name: "odd", description: "odd tool", parameters: function bareSchema() {} } as never],
+			tokenizer,
+		);
+		expect(estimate).toBe(estimateToolSchemaTokens([{ name: "odd", description: "odd tool" } as never], tokenizer));
 	});
 });
 
@@ -103,38 +155,40 @@ describe("computeNonMessageTokens / computeNonMessageBreakdown memoization", () 
 
 	it("recomputes when the system prompt reference changes and caches otherwise", () => {
 		const session = makeSession(["system prompt alpha"]);
-		const first = computeNonMessageTokens(session as never);
+		const first = computeNonMessageTokens(session as never, tokenizer);
 		// Same inputs (identical refs) → cached, identical value.
-		expect(computeNonMessageTokens(session as never)).toBe(first);
+		expect(computeNonMessageTokens(session as never, tokenizer)).toBe(first);
 		// Replace the system prompt reference (mirrors setSystemPrompt).
 		session.systemPrompt = ["system prompt beta with more tokens than alpha"];
-		const afterChange = computeNonMessageTokens(session as never);
+		const afterChange = computeNonMessageTokens(session as never, tokenizer);
 		expect(afterChange).toBeGreaterThan(first);
 		// Cached on the new inputs.
-		expect(computeNonMessageTokens(session as never)).toBe(afterChange);
+		expect(computeNonMessageTokens(session as never, tokenizer)).toBe(afterChange);
 	});
 
 	it("recomputes the breakdown when the tools reference changes", () => {
 		const session = makeSession(["base"], []);
-		const before = computeNonMessageBreakdown(session as never);
+		const before = computeNonMessageBreakdown(session as never, tokenizer);
 		expect(before.toolsTokens).toBe(0);
 		// New tools array reference (mirrors setTools).
 		session.agent.state.tools = [{ name: "search", description: "search the web", parameters: {} }];
-		const after = computeNonMessageBreakdown(session as never);
+		const after = computeNonMessageBreakdown(session as never, tokenizer);
 		expect(after.toolsTokens).toBeGreaterThan(0);
 		// Cached on the new tools.
-		expect(computeNonMessageBreakdown(session as never).toolsTokens).toBe(after.toolsTokens);
+		expect(computeNonMessageBreakdown(session as never, tokenizer).toolsTokens).toBe(after.toolsTokens);
 	});
 
 	it("shares one cache entry so tokens and breakdown invalidate together", () => {
 		const session = makeSession(["shared prompt"]);
-		const tokens = computeNonMessageTokens(session as never);
-		const breakdown = computeNonMessageBreakdown(session as never);
+		const tokens = computeNonMessageTokens(session as never, tokenizer);
+		const breakdown = computeNonMessageBreakdown(session as never, tokenizer);
 		// Changing the system prompt ref must invalidate BOTH fields, not just
 		// the one most recently touched.
 		session.systemPrompt = ["shared prompt but longer now to shift the count"];
-		expect(computeNonMessageTokens(session as never)).not.toBe(tokens);
-		expect(computeNonMessageBreakdown(session as never).systemPromptTokens).not.toBe(breakdown.systemPromptTokens);
+		expect(computeNonMessageTokens(session as never, tokenizer)).not.toBe(tokens);
+		expect(computeNonMessageBreakdown(session as never, tokenizer).systemPromptTokens).not.toBe(
+			breakdown.systemPromptTokens,
+		);
 	});
 });
 
@@ -157,16 +211,70 @@ describe("computeNonMessageBreakdown skills filtering", () => {
 	}
 
 	it("excludes hidden skills and does not clamp System prompt to 0", () => {
-		const b = computeNonMessageBreakdown(session([readTool], [hidden, visible]));
+		const b = computeNonMessageBreakdown(session([readTool], [hidden, visible]), tokenizer);
 		// Only the visible skill is counted, not the large hidden one.
-		expect(b.skillsTokens).toBe(computeNonMessageBreakdown(session([readTool], [visible])).skillsTokens);
+		expect(b.skillsTokens).toBe(computeNonMessageBreakdown(session([readTool], [visible]), tokenizer).skillsTokens);
 		expect(b.skillsTokens).toBeLessThan(100);
 		expect(b.systemPromptTokens).toBeGreaterThan(0);
 	});
 
 	it("counts zero Skills tokens when the read tool is unavailable", () => {
-		const b = computeNonMessageBreakdown(session([], [hidden, visible]));
+		const b = computeNonMessageBreakdown(session([], [hidden, visible]), tokenizer);
 		expect(b.skillsTokens).toBe(0);
-		expect(b.systemPromptTokens).toBe(computeNonMessageBreakdown(session([], [])).systemPromptTokens);
+		expect(b.systemPromptTokens).toBe(computeNonMessageBreakdown(session([], []), tokenizer).systemPromptTokens);
+	});
+});
+
+describe("non-message estimates tolerate absent values without hiding malformed values", () => {
+	const readTool = { name: "read", description: "read files", parameters: {} };
+
+	it("accepts undefined tool and skill descriptions", () => {
+		const toolTokens = estimateToolSchemaTokens(
+			[{ name: "lens_tool", description: undefined, parameters: {} } as never],
+			strictTokenizer,
+		);
+		const breakdown = computeNonMessageBreakdown(
+			{
+				systemPrompt: ["You are an agent."],
+				agent: { state: { tools: [readTool] } },
+				skills: [{ name: "lens", description: undefined, filePath: "/s/l.md" } as never],
+			},
+			strictTokenizer,
+		);
+
+		expect(Number.isFinite(toolTokens)).toBe(true);
+		expect(breakdown.skillsTokens).toBe("lens".length);
+	});
+
+	it("densifies sparse system-prompt arrays in collapsed and breakdown estimates", () => {
+		const systemPrompt = new Array<string>(3);
+		systemPrompt[0] = "primary";
+		systemPrompt[2] = "trailing";
+		const session = { systemPrompt, agent: { state: { tools: [] } }, skills: [] };
+
+		expect(computeNonMessageTokens(session, strictTokenizer)).toBe("primarytrailing".length);
+		expect(computeNonMessageBreakdown(session, strictTokenizer)).toEqual({
+			skillsTokens: 0,
+			toolsTokens: 0,
+			systemContextTokens: "trailing".length,
+			systemPromptTokens: "primary".length,
+		});
+	});
+
+	it("still rejects present non-string prompt sections and descriptions", () => {
+		const malformedPrompt = {
+			systemPrompt: ["primary", { text: "not a string" } as never],
+			agent: { state: { tools: [] } },
+			skills: [],
+		};
+
+		expect(() => computeNonMessageTokens(malformedPrompt, strictTokenizer)).toThrow("non-string token fragment");
+		expect(() => computeNonMessageBreakdown(malformedPrompt, strictTokenizer)).toThrow("non-string token fragment");
+		expect(() =>
+			estimateToolSchemaTokens(
+				[{ name: "lens_tool", description: { text: "not a string" }, parameters: {} } as never],
+				strictTokenizer,
+			),
+		).toThrow("non-string token fragment");
 	});
 });

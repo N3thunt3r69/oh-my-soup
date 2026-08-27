@@ -58,6 +58,11 @@ export interface EffortVariantFamily {
 	 */
 	members: readonly string[];
 	/**
+	 * Preferred default wire id for the collapsed spec when this member is live.
+	 * Mandatory-reasoning families can default above their numeric floor.
+	 */
+	defaultMember?: string;
+	/**
 	 * Wire ids upstream no longer serves (e.g. a deployment killed while
 	 * discovery still advertises it). Fresh collapsing never routes to them,
 	 * and stale collapsed snapshots (bundled catalog, cache rows,
@@ -123,6 +128,7 @@ function devinTierFamily(
 	name: string,
 	routes: DevinTierRoutes,
 	efforts: readonly Effort[],
+	defaultMember?: string,
 ): EffortVariantFamily {
 	const routing: Partial<Record<Effort | "off", string>> = {};
 	if (routes.off) routing.off = routes.off;
@@ -167,6 +173,7 @@ function devinTierFamily(
 			efforts,
 			...(routes.off ? undefined : { requiresEffort: true }),
 		},
+		...(defaultMember !== undefined ? { defaultMember } : undefined),
 	};
 }
 
@@ -690,11 +697,65 @@ export const DEVIN_VARIANT_COLLAPSE_TABLE: VariantCollapseTable = {
 	],
 };
 
+const CURSOR_GROK_45_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High];
+const CURSOR_GROK_46_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh];
+const CURSOR_GPT_56_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max];
+
+/** Collapse Cursor Grok effort siblings separately for standard and fast lanes. */
+function cursorGrokFamilies(version: "4.5" | "4.6", efforts: readonly Effort[]): readonly EffortVariantFamily[] {
+	const build = (fast: boolean): EffortVariantFamily => {
+		const suffix = fast ? "-fast" : "";
+		const routes: DevinTierRoutes = {};
+		for (const effort of efforts) routes[effort] = `cursor-grok-${version}-${effort}${suffix}`;
+		return devinTierFamily(
+			`cursor-grok-${version}${suffix}`,
+			`Grok ${version}${fast ? " Fast" : ""}`,
+			routes,
+			efforts,
+			`cursor-grok-${version}-${Effort.Medium}${suffix}`,
+		);
+	};
+	return [build(false), build(true)];
+}
+
+/** Collapse Cursor GPT-5.6 effort siblings separately for standard and fast lanes. */
+function cursorGpt56Families(variant: "luna" | "sol" | "terra", name: string): readonly EffortVariantFamily[] {
+	const build = (fast: boolean): EffortVariantFamily => {
+		const suffix = fast ? "-fast" : "";
+		const base = `gpt-5.6-${variant}`;
+		return devinTierFamily(
+			`${base}${suffix}`,
+			`${name}${fast ? " Fast" : ""}`,
+			{
+				off: `${base}-none${suffix}`,
+				low: `${base}-low${suffix}`,
+				medium: `${base}-medium${suffix}`,
+				high: `${base}-high${suffix}`,
+				xhigh: `${base}-xhigh${suffix}`,
+				max: `${base}-max${suffix}`,
+			},
+			CURSOR_GPT_56_EFFORTS,
+		);
+	};
+	return [build(false), build(true)];
+}
+
+export const CURSOR_VARIANT_COLLAPSE_TABLE: VariantCollapseTable = {
+	families: [
+		...cursorGrokFamilies("4.5", CURSOR_GROK_45_EFFORTS),
+		...cursorGrokFamilies("4.6", CURSOR_GROK_46_EFFORTS),
+		...cursorGpt56Families("luna", "GPT-5.6 Luna"),
+		...cursorGpt56Families("sol", "GPT-5.6 Sol"),
+		...cursorGpt56Families("terra", "GPT-5.6 Terra"),
+	],
+};
+
 /** Provider id → hand collapse table. The CCA providers diverge on thinking transport. */
 export const VARIANT_COLLAPSE_TABLES: Readonly<Record<string, VariantCollapseTable>> = {
 	"google-antigravity": ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
 	"google-gemini-cli": GEMINI_CLI_VARIANT_COLLAPSE_TABLE,
 	devin: DEVIN_VARIANT_COLLAPSE_TABLE,
+	cursor: CURSOR_VARIANT_COLLAPSE_TABLE,
 };
 
 /**
@@ -916,6 +977,31 @@ function refreshCollapsedThinking<TSpec extends VariantSpecLike>(
 }
 
 /**
+ * Re-point a collapsed snapshot to the family's preferred default when that
+ * member is live. If account-specific discovery omitted it, the first live
+ * family member wins so a cached default never routes to an undiscovered tier.
+ */
+function reconcileDefaultMember<TSpec extends VariantSpecLike>(
+	spec: TSpec,
+	family: EffortVariantFamily,
+	presentMembers?: ReadonlySet<string>,
+): TSpec {
+	const defaultMember = family.defaultMember;
+	if (defaultMember === undefined || defaultMember === spec.id) return spec;
+	const target =
+		presentMembers === undefined || presentMembers.has(defaultMember)
+			? defaultMember
+			: family.members.find(id => presentMembers.has(id));
+	if (target === undefined || spec.requestModelId === target) return spec;
+	const routing = spec.thinking?.effortRouting;
+	if (routing === undefined) return spec;
+	for (const key in routing) {
+		if (routing[key as Effort | "off"] === target) return { ...spec, requestModelId: target };
+	}
+	return spec;
+}
+
+/**
  * Collapse every family in `table` found in `specs`. Non-member specs pass
  * through verbatim (by reference), order preserved; the collapsed spec
  * replaces the first occurrence of its family.
@@ -955,7 +1041,7 @@ export function collapseEffortVariants<TSpec extends VariantSpecLike>(
 			// Recycled extraAliases rows are healed in a later pass.
 			const refreshed =
 				existing !== undefined && existingCollapsed
-					? refreshCollapsedThinking(reconciled ?? existing, family, retired)
+					? reconcileDefaultMember(refreshCollapsedThinking(reconciled ?? existing, family, retired), family)
 					: reconciled;
 			if (refreshed !== undefined && refreshed !== existing) {
 				familyIdBySpecId.set(family.id, family.id);
@@ -968,9 +1054,9 @@ export function collapseEffortVariants<TSpec extends VariantSpecLike>(
 		if (existing) familyIdBySpecId.set(family.id, family.id);
 
 		if (existingCollapsed) {
-			// Mixed input: the collapsed entry (live truth) wins; stale raw
-			// members are deduped away. Retired targets are re-pointed first.
-			replacement.set(family.id, reconciled as TSpec);
+			// The collapsed snapshot wins over raw siblings, but live discovery
+			// decides whether the preferred default is actually selectable.
+			replacement.set(family.id, reconcileDefaultMember(reconciled as TSpec, family, new Set(rawPresent)));
 			continue;
 		}
 
@@ -1014,10 +1100,16 @@ export function collapseEffortVariants<TSpec extends VariantSpecLike>(
 			contextWindow: maxOrNull(memberSpecs.map(spec => spec.contextWindow)),
 			maxTokens: maxOrNull(memberSpecs.map(spec => spec.maxTokens)),
 		};
-		// The default wire id is the highest-priority live member; omit when it
-		// equals the logical id (bare/thinking pairs) — `resolveWireModelId`
-		// falls back. Retired members never become the default.
-		const defaultWireId = rawPresent.find(id => !retired?.has(id)) ?? rawPresent[0];
+		// Prefer the family's declared default only when live. Account-specific
+		// discovery is authoritative; absent or retired members never become the
+		// request route.
+		const preferredDefault =
+			family.defaultMember !== undefined &&
+			presentSet.has(family.defaultMember) &&
+			!retired?.has(family.defaultMember)
+				? family.defaultMember
+				: undefined;
+		const defaultWireId = preferredDefault ?? rawPresent.find(id => !retired?.has(id)) ?? rawPresent[0];
 		if (defaultWireId === family.id) {
 			if (usedAbsentEffortRoute) {
 				collapsed.requestModelId = defaultWireId as string;

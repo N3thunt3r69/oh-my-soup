@@ -130,7 +130,7 @@ describe("SearXNG web search provider", () => {
 					"\n",
 				),
 			);
-			await Settings.init({ agentDir });
+			await Settings.init({ agentDir, readOnly: true });
 
 			const captured: { url?: URL } = {};
 			const fetchMock: FetchImpl = input => {
@@ -177,7 +177,7 @@ describe("SearXNG web search provider", () => {
 					"",
 				].join("\n"),
 			);
-			await Settings.init({ agentDir });
+			await Settings.init({ agentDir, readOnly: true });
 
 			const captured: { headers?: Headers } = {};
 			const fetchMock: FetchImpl = (_input, init) => {
@@ -348,7 +348,7 @@ describe("SearXNG web search provider", () => {
 					"",
 				].join("\n"),
 			);
-			await Settings.init({ agentDir });
+			await Settings.init({ agentDir, readOnly: true });
 
 			const requested: URL[] = [];
 			const fetchMock: FetchImpl = input => {
@@ -391,7 +391,7 @@ describe("SearXNG web search provider", () => {
 				path.join(agentDir, "config.yml"),
 				["searxng:", "  endpoint: https://searx-noconfig.example.org", '  engines: "ddg,brave"', ""].join("\n"),
 			);
-			await Settings.init({ agentDir });
+			await Settings.init({ agentDir, readOnly: true });
 
 			const requested: URL[] = [];
 			const fetchMock: FetchImpl = input => {

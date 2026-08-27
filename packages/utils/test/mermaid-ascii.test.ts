@@ -80,6 +80,33 @@ describe("renderMermaidAscii", () => {
 		expect(rendered).toContain("Audit");
 	});
 
+	it("renders left-to-right diagrams whose subgraph shifts drawing past the grid extents", () => {
+		const rendered = renderMermaidAscii(
+			[
+				"graph LR",
+				"  subgraph S[Done]",
+				"    A",
+				"  end",
+				"  A --> C",
+				"  A --> D",
+				"  D --> E",
+				"  C --> F",
+				"  F --> G",
+				"  D --> G",
+			].join("\n"),
+			{ colorMode: "none" },
+		);
+
+		expect(rendered).toContain("Done");
+		for (const label of ["A", "C", "D", "E", "F", "G"]) {
+			expect(rendered).toContain(label);
+		}
+		const rows = rendered.split("\n");
+		for (const row of rows) {
+			expect(row.length).toBe(rows[0]!.length);
+		}
+	});
+
 	it("returns null when the destination attachment point is enclosed", () => {
 		const node: AsciiNode = {
 			name: "blocker",

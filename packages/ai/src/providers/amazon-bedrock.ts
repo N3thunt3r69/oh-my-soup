@@ -62,11 +62,24 @@ const BEDROCK_RESERVED_HEADERS = new Set(["content-type", "accept", "authorizati
 
 export type BedrockThinkingDisplay = "summarized" | "omitted";
 
+/** Bedrock guardrail trace verbosity, mirroring Converse `guardrailConfig.trace`. */
+export type BedrockGuardrailTrace = "enabled" | "disabled" | "enabled_full";
+
 export interface BedrockOptions extends StreamOptions {
 	region?: string;
 	profile?: string;
 	/** Amazon Bedrock API key sent as `Authorization: Bearer`, ahead of SigV4 credential resolution. */
 	bearerToken?: string;
+	/**
+	 * Amazon Bedrock Guardrail id or ARN. When set, the Converse request carries
+	 * `guardrailConfig`, including for accounts that gate model invocation on the
+	 * `bedrock:GuardrailIdentifier` condition key.
+	 */
+	guardrailIdentifier?: string;
+	/** Guardrail version to apply. Defaults to `"DRAFT"` when a guardrail is set. */
+	guardrailVersion?: string;
+	/** Guardrail trace verbosity. Omitted from the request unless provided. */
+	guardrailTrace?: BedrockGuardrailTrace;
 	toolChoice?: "auto" | "any" | "none" | { type: "tool"; name: string };
 	/* See https://docs.aws.amazon.com/bedrock/latest/userguide/inference-reasoning.html for supported models. */
 	reasoning?: Effort;
@@ -156,8 +169,8 @@ function regionServesGeo(region: string, geo: string): boolean {
  * ambient region (`AWS_REGION` / `AWS_DEFAULT_REGION`) is honored only when it
  * can serve the profile's geo; a mismatched or absent ambient region is
  * corrected to the geo default so an `eu.`/`apac.` profile never POSTs to a `us`
- * endpoint (and vice versa). `global.` profiles have no geo entry, so the
- * ambient region (or `us-east-1`) is used unchanged.
+ * endpoint (and vice versa). `global.` profiles have no geo entry, so the ambient
+ * region (or, when absent, a guardrail ARN's region or `us-east-1`) is used unchanged.
  */
 function resolveBedrockRegion(modelId: string, options: BedrockOptions): string {
 	const explicit = options.region || inferRegionFromBedrockArn(modelId);
@@ -168,7 +181,7 @@ function resolveBedrockRegion(modelId: string, options: BedrockOptions): string 
 		if (ambient && regionServesGeo(ambient, geo)) return ambient;
 		return INFERENCE_PROFILE_GEO_DEFAULT_REGION[geo];
 	}
-	return ambient || "us-east-1";
+	return ambient || inferRegionFromBedrockArn(options.guardrailIdentifier ?? "") || "us-east-1";
 }
 
 type Block = (TextContent | ThinkingContent | ToolCall) & {
@@ -253,11 +266,18 @@ interface BedrockToolPlan {
 	sentinelInjected: boolean;
 }
 
+interface WireGuardrailConfig {
+	guardrailIdentifier: string;
+	guardrailVersion: string;
+	trace?: BedrockGuardrailTrace;
+}
+
 interface ConverseStreamRequest {
 	messages: WireMessage[];
 	system?: SystemContent[];
 	inferenceConfig?: { maxTokens?: number; temperature?: number; topP?: number };
 	toolConfig?: WireToolConfig;
+	guardrailConfig?: WireGuardrailConfig;
 	additionalModelRequestFields?: Record<string, unknown>;
 }
 
@@ -351,6 +371,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					topP: options.topP,
 				},
 				toolConfig,
+				guardrailConfig: buildGuardrailConfig(options),
 				additionalModelRequestFields,
 			};
 			const replacementInput = await options?.onPayload?.(commandInput, model);
@@ -527,7 +548,12 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 						output.stopReason =
 							sentinelInjected && ev.stopReason === "tool_use" ? "stop" : mapStopReason(ev.stopReason);
 						if (output.stopReason === "error") {
-							output.errorMessage = `Generation failed with stop reason: ${ev.stopReason ?? "unknown"}`;
+							output.errorMessage =
+								ev.stopReason === "guardrail_intervened"
+									? `Response blocked by Amazon Bedrock guardrail (stop reason: ${ev.stopReason}).`
+									: ev.stopReason === "content_filtered"
+										? `Response filtered by Amazon Bedrock content filters (stop reason: ${ev.stopReason}).`
+										: `Generation failed with stop reason: ${ev.stopReason ?? "unknown"}`;
 						}
 						break;
 					}
@@ -1010,6 +1036,15 @@ function mapStopReason(reason: string | undefined): StopReason {
 		default:
 			return "error";
 	}
+}
+
+function buildGuardrailConfig(options: BedrockOptions): WireGuardrailConfig | undefined {
+	if (!options.guardrailIdentifier) return undefined;
+	return {
+		guardrailIdentifier: options.guardrailIdentifier,
+		guardrailVersion: options.guardrailVersion ?? "DRAFT",
+		...(options.guardrailTrace === undefined ? {} : { trace: options.guardrailTrace }),
+	};
 }
 
 function buildAdditionalModelRequestFields(

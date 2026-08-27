@@ -3,6 +3,7 @@ import {
 	createUnavailableWorker,
 	createWorkerHandle,
 	createWorkerSubprocess,
+	inferenceWorkerEnv,
 	logWorkerMessage,
 	resolveWorkerSpawnCmd,
 	SMOKE_TEST_TIMEOUT_MS,
@@ -10,7 +11,6 @@ import {
 	smokeTestWorker,
 	spawnWorkerOrUnavailable,
 	type WorkerHandle,
-	workerEnvFromParent,
 } from "../subprocess/worker-client";
 import type { MnemopiEmbedModelId, MnemopiEmbedWorkerInbound, MnemopiEmbedWorkerOutbound } from "./embed-protocol";
 
@@ -37,14 +37,14 @@ export const MNEMOPI_EMBED_WORKER_ARG = "__oms_worker_mnemopi_embed";
 /**
  * Spawn the mnemopi embeddings worker as a subprocess. Exported for tests and
  * the smoke probe; production callers go through {@link spawnMnemopiEmbedWorker}.
- * The child inherits the parent env verbatim — fastembed honours `HF_HUB_*`,
+ * The child inherits the parent env — fastembed honours `HF_HUB_*`,
  * `HTTPS_PROXY`, etc., and our `loadFastembed()` reads the same `OMS_*`
  * runtime-install knobs the parent uses.
  */
 export function createMnemopiEmbedSubprocess(): SpawnedSubprocess<MnemopiEmbedWorkerOutbound> {
 	return createWorkerSubprocess<MnemopiEmbedWorkerOutbound>({
 		spawnCommand: resolveWorkerSpawnCmd(MNEMOPI_EMBED_WORKER_ARG),
-		env: workerEnvFromParent(),
+		env: inferenceWorkerEnv(),
 		exitLabel: "mnemopi embed subprocess",
 	});
 }
@@ -197,9 +197,10 @@ export class MnemopiEmbedClient {
 
 	/**
 	 * Await one steady-state embed reply, bounded by
-	 * {@link EMBED_REQUEST_TIMEOUT_MS}. The timeout timer is `unref`'d so a
-	 * pending request never keeps the parent event loop alive on its own (the
-	 * awaiting caller does). On expiry the wedged worker is SIGKILL-reaped via
+	 * {@link EMBED_REQUEST_TIMEOUT_MS}. Keep the timeout referenced until the
+	 * request settles: a pending Promise alone does not keep the event loop
+	 * alive, so unref'ing the only wakeup can strand the awaiting caller. On
+	 * expiry the wedged worker is SIGKILL-reaped via
 	 * {@link terminate} — faulting any other in-flight request and letting the
 	 * next call respawn a fresh child — before the request rejects, so a hung
 	 * native runtime cannot pin a turn's recall or shutdown consolidation
@@ -208,7 +209,6 @@ export class MnemopiEmbedClient {
 	async #awaitRequest<T>(promise: Promise<T>): Promise<T> {
 		const { promise: timedOut, resolve: fire } = Promise.withResolvers<typeof REQUEST_TIMED_OUT>();
 		const timer = setTimeout(() => fire(REQUEST_TIMED_OUT), this.#requestTimeoutMs);
-		timer.unref();
 		try {
 			const winner = await Promise.race([promise, timedOut]);
 			if (winner === REQUEST_TIMED_OUT) {

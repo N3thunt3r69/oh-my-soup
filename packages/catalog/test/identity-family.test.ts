@@ -5,17 +5,21 @@ import {
 	isGeminiModelId,
 	isGlmVisionModelId,
 	isGrokModelId,
+	isGrokMultiAgentModelId,
 	isGrokReasoningEffortCapable,
+	isGrokXHighEffortCapable,
 	isKimiK26ModelId,
 	isKimiModelId,
 	isMinimaxM2FamilyModelId,
 	isMinimaxM3FamilyModelId,
 	isOpenAIGptOssModelId,
 	isOpenAIModelId,
+	isQwen38PlusTemplateEffortModelId,
 	isReasoningGlmModelId,
 	modelFamilyToken,
 	parseAnthropicModel,
 	supportsAdaptiveThinkingDisplay,
+	supportsHashlineEdits,
 	supportsMidConversationSystemMessages,
 } from "@oh-my-soup/pi-catalog/identity";
 
@@ -25,6 +29,42 @@ describe("isKimiModelId", () => {
 		expect(isKimiModelId("kimi-k2.6")).toBe(true);
 		expect(isKimiModelId("vendor/kimi.x")).toBe(true);
 		expect(isKimiModelId("akimbo-model")).toBe(false);
+	});
+});
+
+describe("isQwen38PlusTemplateEffortModelId", () => {
+	test("matches Qwen 3.8+ open-weight ids across id shapes and versions", () => {
+		expect(isQwen38PlusTemplateEffortModelId("qwen3.8-27b")).toBe(true);
+		expect(isQwen38PlusTemplateEffortModelId("qwen3.8-2.4t-a95b")).toBe(true);
+		expect(isQwen38PlusTemplateEffortModelId("qwen/qwen3.8-27b")).toBe(true);
+		expect(isQwen38PlusTemplateEffortModelId("Qwen3.8-27B-UD-Q6_K_XL")).toBe(true);
+		expect(isQwen38PlusTemplateEffortModelId("qwen3.8-27b:thinking")).toBe(true);
+		expect(isQwen38PlusTemplateEffortModelId("qwen3.10-27b")).toBe(true);
+	});
+
+	test("rejects pre-3.8 versions, parameter-count lookalikes, and API-only Max SKUs", () => {
+		expect(isQwen38PlusTemplateEffortModelId("qwen3-8b")).toBe(false);
+		expect(isQwen38PlusTemplateEffortModelId("qwen-3.6-27b")).toBe(false);
+		expect(isQwen38PlusTemplateEffortModelId("qwen3.7-plus")).toBe(false);
+		expect(isQwen38PlusTemplateEffortModelId("qwen2.5-coder-7b")).toBe(false);
+		expect(isQwen38PlusTemplateEffortModelId("qwen-3.8b")).toBe(false);
+		expect(isQwen38PlusTemplateEffortModelId("qwen3.8-max")).toBe(false);
+		expect(isQwen38PlusTemplateEffortModelId("qwen3.8-max-preview")).toBe(false);
+	});
+});
+
+describe("supportsHashlineEdits", () => {
+	test("declines families that miscount line anchors", () => {
+		expect(supportsHashlineEdits("openrouter/moonshotai/Kimi-K2-Instruct")).toBe(false);
+		expect(supportsHashlineEdits("xiaomi/MiMo-V2.5-Pro")).toBe(false);
+		expect(supportsHashlineEdits("tensormesh/deepseek-ai/DeepSeek-V4-Flash")).toBe(false);
+		expect(supportsHashlineEdits("kilo/stepfun/step-3.7-flash:free")).toBe(false);
+	});
+
+	test("accepts structured-edit-capable models without broad namespace exclusions", () => {
+		expect(supportsHashlineEdits("google/gemini-3.5-flash")).toBe(true);
+		expect(supportsHashlineEdits("claude-fable-5")).toBe(true);
+		expect(supportsHashlineEdits("moonshot/moonshot-v1-128k")).toBe(true);
 	});
 });
 
@@ -339,6 +379,7 @@ describe("isGrokReasoningEffortCapable", () => {
 		expect(isGrokReasoningEffortCapable("grok-4.20-multi-agent")).toBe(true);
 		expect(isGrokReasoningEffortCapable("xai-oauth/grok-4.3")).toBe(true);
 		expect(isGrokReasoningEffortCapable("xai-oauth/grok-4.5")).toBe(true);
+		expect(isGrokReasoningEffortCapable("xai-oauth/grok-4.6")).toBe(true);
 		expect(isGrokReasoningEffortCapable("openrouter/xai/grok-3-mini")).toBe(true);
 	});
 
@@ -347,5 +388,25 @@ describe("isGrokReasoningEffortCapable", () => {
 		expect(isGrokReasoningEffortCapable("grok-4.20-0309-reasoning")).toBe(false);
 		expect(isGrokReasoningEffortCapable("gpt-5")).toBe(false);
 		expect(isGrokReasoningEffortCapable("")).toBe(false);
+	});
+});
+
+describe("isGrokMultiAgentModelId", () => {
+	test("matches multi-agent SKUs across namespaces", () => {
+		expect(isGrokMultiAgentModelId("grok-4.20-multi-agent")).toBe(true);
+		expect(isGrokMultiAgentModelId("xai/grok-4.20-multi-agent-beta-latest")).toBe(true);
+		expect(isGrokMultiAgentModelId("grok-4.20-0309-reasoning")).toBe(false);
+		expect(isGrokMultiAgentModelId("grok-4.6")).toBe(false);
+	});
+});
+
+describe("isGrokXHighEffortCapable", () => {
+	test("matches Grok 4.6 and multi-agent while rejecting clamped SKUs", () => {
+		expect(isGrokXHighEffortCapable("grok-4.6")).toBe(true);
+		expect(isGrokXHighEffortCapable("xai-oauth/grok-4.6")).toBe(true);
+		expect(isGrokXHighEffortCapable("grok-4.20-multi-agent-0309")).toBe(true);
+		expect(isGrokXHighEffortCapable("grok-4.5")).toBe(false);
+		expect(isGrokXHighEffortCapable("grok-3-mini")).toBe(false);
+		expect(isGrokXHighEffortCapable("grok-build")).toBe(false);
 	});
 });

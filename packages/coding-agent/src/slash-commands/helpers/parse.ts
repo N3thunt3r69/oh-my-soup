@@ -35,9 +35,18 @@ export function parseSlashCommand(text: string): ParsedSlashCommand | null {
 	};
 }
 
-/** Mark a command as fully consumed in the ACP shape. */
-export function commandConsumed(): { consumed: true } {
-	return { consumed: true };
+/**
+ * Mark a command as fully consumed in the ACP shape.
+ *
+ * Pass `agentInvoked` when the command schedules a real agent turn whose events
+ * continue after the handler returns. RPC hosts use the marker to distinguish
+ * local-only commands from agent work.
+ */
+export function commandConsumed(options?: { agentInvoked?: boolean }): {
+	consumed: true;
+	agentInvoked?: boolean;
+} {
+	return options?.agentInvoked ? { consumed: true, agentInvoked: true } : { consumed: true };
 }
 
 /** Emit a usage/error message and consume the command. */

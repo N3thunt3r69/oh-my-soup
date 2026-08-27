@@ -200,7 +200,7 @@ describe("AgentSession context promotion", () => {
 		expect(session.providerSessionState.size).toBe(0);
 	});
 
-	it("promotes on 413 payload-too-large overflow errors", async () => {
+	it("promotes on token-evidenced 413 context overflows", async () => {
 		const smallModel = modelRegistry.find("openai-codex", "gpt-5.5");
 		const largeModel = modelRegistry.find("openai-codex", "gpt-5.6-sol");
 		if (!smallModel || !largeModel) {
@@ -230,7 +230,7 @@ describe("AgentSession context promotion", () => {
 
 		const overflowMessage = createOverflowMessage(
 			smallModel,
-			"413 Request Entity Too Large: payload too large for model request body",
+			"413 request_too_large: maximum context length is 272000 tokens",
 		);
 		session.agent.emitExternalEvent({ type: "message_end", message: overflowMessage });
 		session.agent.emitExternalEvent({ type: "agent_end", messages: [overflowMessage] });

@@ -804,7 +804,7 @@ describe("agent() through eval runtimes", () => {
 				kernelMode: "session",
 				toolSession: session,
 			});
-			expect(after.exitCode).toBe(0);
+			expect(after.exitCode, JSON.stringify(after)).toBe(0);
 			expect(after.output.trim()).toBe("4242");
 		},
 		30_000,

@@ -1,6 +1,8 @@
 import { type } from "@oh-my-soup/omstype";
 import { parseKnownModel, semverEqual } from "../identity/classify";
-import type { FetchImpl, ModelSpec } from "../types";
+import { getBundledModels } from "../models";
+import { resolveOpenAIDaybreakStandardCost } from "../openai-pricing";
+import type { FetchImpl, Model, ModelSpec } from "../types";
 import { discoveryFetch } from "../utils";
 import { CODEX_BASE_URL, CODEX_CLIENT_VERSION, OPENAI_HEADER_VALUES, OPENAI_HEADERS } from "../wire/codex";
 
@@ -15,6 +17,10 @@ const DEFAULT_MAX_TOKENS = 128_000;
  * fallback only when upstream reports no value.
  */
 const GPT_5_6_CONTEXT_WINDOW = 372_000;
+/** GPT-5.6 worker variants share the 1M capability of their canonical bundled SKUs. */
+const GPT_5_6_1M_CONTEXT_WINDOW = 1_000_000;
+const CODEX_GPT_5_6_1M_SLUGS: ReadonlySet<string> = new Set(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]);
+const CODEX_WORKER_SUFFIX = "-wm";
 const CODEX_REMOTE_COMPACTION = {
 	enabled: true,
 	api: "openai-codex-responses",
@@ -187,11 +193,21 @@ function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"ope
 	}
 
 	const entries = parsedResponse.models ?? parsedResponse.data ?? [];
-	const normalized: NormalizedCodexModel[] = [];
+	const parsedEntries: ParsedCodexModelEntry[] = [];
 	for (const entry of entries) {
-		const model = normalizeCodexModelEntry(entry, baseUrl);
-		if (model) {
-			normalized.push(model);
+		const parsed = parseCodexModelEntry(entry);
+		if (parsed) parsedEntries.push(parsed);
+	}
+
+	const advertisedSlugs = new Set(parsedEntries.map(parsed => parsed.slug));
+	const bundledCodexModels = new Map(getBundledModels("openai-codex").map(model => [model.id, model]));
+	const normalized: NormalizedCodexModel[] = [];
+	for (const parsed of parsedEntries) {
+		const canonicalSlug = plainCounterpartForWorkerSlug(parsed.slug, bundledCodexModels) ?? parsed.slug;
+		const canonicalCost = bundledCodexModels.get(canonicalSlug)?.cost;
+		normalized.push(buildNormalizedCodexModel(parsed, parsed.slug, canonicalSlug, canonicalCost, baseUrl));
+		if (canonicalSlug !== parsed.slug && !advertisedSlugs.has(canonicalSlug)) {
+			normalized.push(buildNormalizedCodexModel(parsed, canonicalSlug, canonicalSlug, canonicalCost, baseUrl));
 		}
 	}
 
@@ -205,56 +221,83 @@ function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"ope
 	return normalized.map(item => item.model);
 }
 
-function normalizeCodexModelEntry(entry: unknown, baseUrl: string): NormalizedCodexModel | null {
+function plainCounterpartForWorkerSlug(slug: string, bundledCodexModels: ReadonlyMap<string, Model>): string | null {
+	if (!slug.endsWith(CODEX_WORKER_SUFFIX)) return null;
+	const plain = slug.slice(0, -CODEX_WORKER_SUFFIX.length);
+	const reference = bundledCodexModels.get(plain);
+	return plain.length > 0 && reference?.api === "openai-codex-responses" ? plain : null;
+}
+
+interface ParsedCodexModelEntry {
+	slug: string;
+	name: string;
+	contextWindow: number | null;
+	reasoning: boolean;
+	input: ("text" | "image")[];
+	preferWebsockets: boolean;
+	useResponsesLite: boolean;
+	priority: number;
+}
+
+function parseCodexModelEntry(entry: unknown): ParsedCodexModelEntry | null {
 	const parsedEntry = codexModelEntrySchema(entry);
-	if (parsedEntry instanceof type.errors) {
-		return null;
-	}
+	if (parsedEntry instanceof type.errors) return null;
 
 	const payload: CodexModelEntry = parsedEntry;
 	const slug = toNonEmptyString(payload.slug) ?? toNonEmptyString(payload.id);
-	if (!slug) {
-		return null;
-	}
+	if (!slug) return null;
 
 	const visibility = toNonEmptyString(payload.visibility)?.toLowerCase();
-	if (visibility === "hide" || visibility === "hidden") {
-		return null;
-	}
-
-	const name = toNonEmptyString(payload.display_name) ?? slug;
-	// Codex discovery omits `context_window` for GPT-5.6 luna/sol/terra; the
-	// generic 272000 fallback understates their real 372000 window (#5705).
-	const parsed = parseKnownModel(slug);
-	const fallbackContextWindow =
-		parsed.family === "openai" && semverEqual(parsed.version, "5.6")
-			? GPT_5_6_CONTEXT_WINDOW
-			: DEFAULT_CONTEXT_WINDOW;
-	const contextWindow = toPositiveInt(payload.context_window) ?? fallbackContextWindow;
-	const maxTokens = Math.min(DEFAULT_MAX_TOKENS, contextWindow);
-	const reasoning = supportsReasoning(payload.default_reasoning_level, payload.supported_reasoning_levels);
-	const input = normalizeInputModalities(payload.input_modalities);
-	const preferWebsockets = toBoolean(payload.prefer_websockets) === true;
-	const useResponsesLite = toBoolean(payload.use_responses_lite) === true;
-	const priority = toFiniteNumber(payload.priority) ?? Number.MAX_SAFE_INTEGER;
+	if (visibility === "hide" || visibility === "hidden") return null;
 
 	return {
-		priority,
+		slug,
+		name: toNonEmptyString(payload.display_name) ?? slug,
+		contextWindow: toPositiveInt(payload.context_window),
+		reasoning: supportsReasoning(payload.default_reasoning_level, payload.supported_reasoning_levels),
+		input: normalizeInputModalities(payload.input_modalities),
+		preferWebsockets: toBoolean(payload.prefer_websockets) === true,
+		useResponsesLite: toBoolean(payload.use_responses_lite) === true,
+		priority: toFiniteNumber(payload.priority) ?? Number.MAX_SAFE_INTEGER,
+	};
+}
+
+function buildNormalizedCodexModel(
+	parsed: ParsedCodexModelEntry,
+	slug: string,
+	canonicalSlug: string,
+	canonicalCost: ModelSpec<"openai-codex-responses">["cost"] | undefined,
+	baseUrl: string,
+): NormalizedCodexModel {
+	const parsedKnown = parseKnownModel(canonicalSlug);
+	const fallbackContextWindow =
+		parsedKnown.family === "openai" && semverEqual(parsedKnown.version, "5.6")
+			? GPT_5_6_CONTEXT_WINDOW
+			: DEFAULT_CONTEXT_WINDOW;
+	const reportedContextWindow = parsed.contextWindow ?? fallbackContextWindow;
+	const contextWindow = CODEX_GPT_5_6_1M_SLUGS.has(canonicalSlug)
+		? Math.max(reportedContextWindow, GPT_5_6_1M_CONTEXT_WINDOW)
+		: reportedContextWindow;
+	const maxTokens = Math.min(DEFAULT_MAX_TOKENS, contextWindow);
+	const cost = resolveOpenAIDaybreakStandardCost(canonicalSlug) ?? canonicalCost;
+
+	return {
+		priority: parsed.priority,
 		model: {
 			id: slug,
-			name,
+			name: parsed.name,
 			api: "openai-codex-responses",
 			provider: "openai-codex",
 			baseUrl,
-			reasoning,
-			input,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			reasoning: parsed.reasoning,
+			input: parsed.input,
+			cost: cost ? { ...cost } : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			remoteCompaction: CODEX_REMOTE_COMPACTION,
 			contextWindow,
 			maxTokens,
-			...(preferWebsockets ? { preferWebsockets: true } : {}),
-			...(useResponsesLite ? { useResponsesLite: true } : {}),
-			...(priority !== Number.MAX_SAFE_INTEGER ? { priority } : {}),
+			...(parsed.preferWebsockets ? { preferWebsockets: true } : {}),
+			...(parsed.useResponsesLite ? { useResponsesLite: true } : {}),
+			...(parsed.priority !== Number.MAX_SAFE_INTEGER ? { priority: parsed.priority } : {}),
 		},
 	};
 }

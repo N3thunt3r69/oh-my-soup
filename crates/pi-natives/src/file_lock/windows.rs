@@ -27,6 +27,9 @@ pub fn try_acquire(path: &str) -> io::Result<Option<PlatformFileLock>> {
 	// SAFETY: the attributes pointer is null, and `wide_name` is a live,
 	// NUL-terminated UTF-16 string for the duration of the call.
 	unsafe { SetLastError(0) };
+	// SAFETY: `lpMutexAttributes` is null, and `wide_name` remains a live,
+	// NUL-terminated UTF-16 buffer for the duration of this call. A successful
+	// call returns a new owned handle that is wrapped below and closed once.
 	let raw_handle = unsafe { CreateMutexW(ptr::null(), 1, wide_name.as_ptr()) };
 	if raw_handle.is_null() {
 		return Err(io::Error::last_os_error());

@@ -21,9 +21,10 @@ export function parseNumstat(output: string): NumstatEntry[] {
 
 export function parseFileDiffs(diff: string): FileDiff[] {
 	const sections: FileDiff[] = [];
-	const parts = diff.split("\ndiff --git ");
-	for (let index = 0; index < parts.length; index += 1) {
-		const part = index === 0 ? parts[index] : `diff --git ${parts[index]}`;
+	// Keep each block's terminating newline(s). Consuming the delimiter drops
+	// the blank line that terminates `GIT binary patch` and corrupts reassembly.
+	const parts = diff.split(/^(?=diff --git )/m);
+	for (const part of parts) {
 		if (!part.trim()) continue;
 		const lines = part.split("\n");
 		const header = lines[0] ?? "";

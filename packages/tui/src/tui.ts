@@ -1334,6 +1334,10 @@ export class TUI extends Container {
 	#previousWindow: string[] = [];
 	#nativeScrollbackLiveRegionStart: number | undefined;
 	#nativeScrollbackLiveRegionPinned = false;
+	// Start row of the topmost live region that pinned itself. The topmost seam
+	// governs the exactness boundary and frame-wide pin policy, but a pinned
+	// region below an unpinned seam still must never commit its rows.
+	#nativeScrollbackPinnedBoundary: number | undefined;
 	#fullRedrawCount = 0;
 	// Caps how many inline images render as live graphics; older ones fall back
 	// to text via a purge + full redraw. Cap is configured by the host app.
@@ -1627,6 +1631,7 @@ export class TUI extends Container {
 		width = Math.max(1, width);
 		this.#nativeScrollbackLiveRegionStart = undefined;
 		this.#nativeScrollbackLiveRegionPinned = false;
+		this.#nativeScrollbackPinnedBoundary = undefined;
 		const children = this.children;
 		const previousSegments = this.#frameSegments;
 		const segments: FrameSegment[] = new Array(children.length);
@@ -1707,9 +1712,17 @@ export class TUI extends Container {
 			// transcript) must never overwrite it — moving the boundary down
 			// would commit the earlier child's still-mutable rows as stale
 			// history.
-			if (liveLocalStart !== undefined && this.#nativeScrollbackLiveRegionStart === undefined) {
-				this.#nativeScrollbackLiveRegionStart = offset + liveLocalStart;
-				this.#nativeScrollbackLiveRegionPinned = liveRegionPinned;
+			if (liveLocalStart !== undefined) {
+				const start = offset + liveLocalStart;
+				if (this.#nativeScrollbackLiveRegionStart === undefined) {
+					this.#nativeScrollbackLiveRegionStart = start;
+					this.#nativeScrollbackLiveRegionPinned = liveRegionPinned;
+				}
+				// A pinned region anywhere in the frame caps commits at its start,
+				// even when an earlier unpinned seam won the topmost merge.
+				if (liveRegionPinned && this.#nativeScrollbackPinnedBoundary === undefined) {
+					this.#nativeScrollbackPinnedBoundary = start;
+				}
 			}
 			if (chainStable) {
 				if (previous !== undefined && previous.component === child && previous.start === offset) {
@@ -3477,6 +3490,9 @@ export class TUI extends Container {
 		// reports no seam (shell semantics).
 		const frameLength = rawFrame.length;
 		const finalBoundary = Math.max(0, Math.min(frameLength, liveRegionStart ?? frameLength));
+		// A pinned region below an unpinned topmost seam still caps commits at
+		// its start, while the topmost seam continues to govern exactness.
+		const commitCeiling = this.#nativeScrollbackPinnedBoundary ?? frameLength;
 
 		// 2. Transition state captured before any emitter runs.
 		let prevWindowTop = this.#windowTopRow;
@@ -3695,7 +3711,7 @@ export class TUI extends Container {
 		if (fullPaint) {
 			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
-			chunkTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+			chunkTo = Math.min(windowTop, commitCeiling);
 		} else if (widthEpochReset) {
 			// A terminal width change ends the physical-row coordinate epoch.
 			// Resolve the last emitted logical source boundary at the new width;
@@ -3715,7 +3731,7 @@ export class TUI extends Container {
 				hasVisibleOverlay || widthEpochCurrentRows === undefined
 					? hasVisibleOverlay
 						? widthEpochAppendFrom
-						: Math.max(widthEpochAppendFrom, liveRegionPinned ? finalBoundary : frameLength)
+						: Math.max(widthEpochAppendFrom, commitCeiling)
 					: Math.max(widthEpochAppendFrom, widthEpochCurrentRows);
 		} else if (this.#widthEpochBaselineRows !== undefined) {
 			// Only rows physically appended after the width epoch may drive the
@@ -3726,7 +3742,7 @@ export class TUI extends Container {
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = this.#committedRows;
 			widthEpochAppendFrom = this.#widthEpochBaselineRows;
-			const appendBoundary = liveRegionPinned ? finalBoundary : frameLength;
+			const appendBoundary = commitCeiling;
 			widthEpochAppendTo = hasVisibleOverlay ? widthEpochAppendFrom : Math.max(widthEpochAppendFrom, appendBoundary);
 		} else if (
 			frameLength <= this.#committedRows ||
@@ -3747,7 +3763,7 @@ export class TUI extends Container {
 			// "duplication, never loss" is the ED3-unsafe fallback contract.
 			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
-			chunkTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+			chunkTo = Math.min(windowTop, commitCeiling);
 			this.#committedRows = chunkTo;
 			this.#committedPrefix = rawFrame.slice(0, chunkTo);
 		} else if (geometryChanged && Math.max(0, frameLength - height) < this.#committedRows) {
@@ -3779,9 +3795,7 @@ export class TUI extends Container {
 			chunkTo =
 				hasVisibleOverlay || geometryChanged
 					? this.#committedRows
-					: liveRegionPinned
-						? Math.min(windowTop, Math.max(this.#committedRows, finalBoundary))
-						: windowTop;
+					: Math.min(windowTop, Math.max(this.#committedRows, commitCeiling));
 			if (geometryChanged) {
 				committedPrefixResliced = true;
 				this.#committedPrefix = rawFrame.slice(0, this.#committedRows);
@@ -3891,7 +3905,7 @@ export class TUI extends Container {
 			let commitTo: number;
 			if (replayUnresolvedWidthEpoch) {
 				commitFrom = 0;
-				commitTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+				commitTo = Math.min(windowTop, commitCeiling);
 				scrollRows = commitTo;
 			} else if (logicalAppend && !logicalPrefixAppend) {
 				const sourceWindowTop = Math.max(0, widthEpochSourceBoundary - height);

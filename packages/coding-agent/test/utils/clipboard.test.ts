@@ -197,6 +197,16 @@ describe("readImageFromClipboard dispatch", () => {
 		expect(nativeSpy).toHaveBeenCalledTimes(1);
 	});
 
+	it("treats a throwing native image read as no image on linux with a display", async () => {
+		setPlatform("linux");
+		process.env.DISPLAY = ":0";
+		vi.spyOn(native, "readImageFromClipboard").mockRejectedValue(
+			new Error("Unknown error while interacting with the clipboard: incorrect type received from clipboard"),
+		);
+
+		expect(await readImageFromClipboard()).toBeNull();
+	});
+
 	it.each(["image/png", "image/jpeg", "image/gif", "image/webp"] as const)(
 		"reads %s bytes through wl-paste before the native bridge on Wayland-only Linux",
 		async mimeType => {

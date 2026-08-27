@@ -37,8 +37,76 @@ export interface SSHHostInfo {
 	compatEnabled: boolean;
 }
 
-const CONTROL_DIR = getSshControlDir();
-const CONTROL_PATH = path.join(CONTROL_DIR, "%C.sock");
+/**
+ * OpenSSH first binds an expanded ControlPath plus a "." and 16 random
+ * characters before renaming it into place. Reserve that temporary suffix,
+ * since paths at or above sockaddr_un.sun_path are rejected.
+ */
+const CONTROL_SOCKET_BASENAME = "%C.sock";
+const CONTROL_SOCKET_NAME_BYTES = 40 + ".sock".length;
+const MUX_TEMP_SUFFIX_BYTES = 1 + 16;
+
+export function controlPathFitsBudget(controlDir: string, platform: SshPlatform): boolean {
+	const sunPathLimit = platform === "darwin" ? 104 : 108;
+	const worstCase = Buffer.byteLength(controlDir) + 1 + CONTROL_SOCKET_NAME_BYTES + MUX_TEMP_SUFFIX_BYTES;
+	return worstCase < sunPathLimit;
+}
+
+/**
+ * Produce a deterministic, depth-bounded fallback keyed by uid and the fully
+ * resolved canonical control directory. Including the latter preserves
+ * isolation across profiles and distinct XDG state roots.
+ */
+export function sshControlFallbackDir(canonicalDir: string, uid: number, tmpBase = "/tmp"): string {
+	const key = new Bun.CryptoHasher("sha256")
+		.update(String(uid))
+		.update("\0")
+		.update(canonicalDir)
+		.digest("hex")
+		.slice(0, 20);
+	return path.join(tmpBase, `oms-${key}`);
+}
+
+interface ControlDirChoice {
+	dir: string;
+	shared: boolean;
+}
+
+export function resolveSshControlDir(opts: {
+	canonicalDir: string;
+	platform: SshPlatform;
+	uid: number | undefined;
+	tmpBase?: string;
+}): ControlDirChoice {
+	const { canonicalDir, platform, uid, tmpBase } = opts;
+	if (!supportsSshControlMaster(platform) || uid === undefined) return { dir: canonicalDir, shared: false };
+	if (controlPathFitsBudget(canonicalDir, platform)) return { dir: canonicalDir, shared: false };
+	return { dir: sshControlFallbackDir(canonicalDir, uid, tmpBase), shared: true };
+}
+
+interface ControlDirGuardStat {
+	isSymlink: boolean;
+	isDir: boolean;
+	uid: number;
+	mode: number;
+}
+
+export function controlDirGuardError(stat: ControlDirGuardStat, expectedUid: number | undefined): string | null {
+	if (stat.isSymlink) return "is a symlink";
+	if (!stat.isDir) return "is not a directory";
+	if (expectedUid !== undefined && stat.uid !== expectedUid) {
+		return `is owned by uid ${stat.uid}, not ${expectedUid}`;
+	}
+	if ((stat.mode & 0o777) !== 0o700) return `must be mode 0700, got ${(stat.mode & 0o777).toString(8)}`;
+	return null;
+}
+
+const { dir: CONTROL_DIR, shared: CONTROL_DIR_SHARED } = resolveSshControlDir({
+	canonicalDir: getSshControlDir(),
+	platform: process.platform,
+	uid: process.getuid?.(),
+});
+const CONTROL_PATH = path.join(CONTROL_DIR, CONTROL_SOCKET_BASENAME);
 const HOST_INFO_DIR = getRemoteHostDir();
 const HOST_INFO_VERSION = 4;
 
@@ -52,12 +120,61 @@ interface SSHArgsOptions {
 	allowStdin?: boolean;
 }
 
-function ensureControlDir() {
+/**
+ * Create the ControlMaster directory and enforce the shared fallback's trust
+ * boundary before either direct SSH or sshfs launches OpenSSH.
+ */
+export function ensureSshControlDir(): void {
 	fs.mkdirSync(CONTROL_DIR, { recursive: true, mode: 0o700 });
+	if (CONTROL_DIR_SHARED) {
+		assertOwnerPrivateDir(CONTROL_DIR);
+		return;
+	}
 	try {
 		fs.chmodSync(CONTROL_DIR, 0o700);
 	} catch (err) {
 		logger.debug("SSH control dir chmod failed", { path: CONTROL_DIR, error: String(err) });
+	}
+}
+
+/**
+ * Open the final component without following links, then inspect and normalize
+ * the same pinned inode through its descriptor. No second pathname lookup can
+ * turn a rejected symlink swap into an accepted directory.
+ */
+export function assertOwnerPrivateDir(dir: string): void {
+	const uid = process.getuid?.();
+	let fd: number;
+	try {
+		fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_DIRECTORY);
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code === "ELOOP" || code === "ENOTDIR") {
+			let isSymlink = false;
+			try {
+				isSymlink = fs.lstatSync(dir).isSymbolicLink();
+			} catch {}
+			throw new Error(`SSH control directory ${dir} ${isSymlink ? "is a symlink" : "is not a directory"}`);
+		}
+		throw err;
+	}
+	try {
+		let stat = fs.fstatSync(fd);
+		if ((uid === undefined || stat.uid === uid) && (stat.mode & 0o777) !== 0o700) {
+			try {
+				fs.fchmodSync(fd, 0o700);
+				stat = fs.fstatSync(fd);
+			} catch (err) {
+				logger.debug("SSH control dir chmod failed", { path: dir, error: String(err) });
+			}
+		}
+		const reason = controlDirGuardError(
+			{ isSymlink: false, isDir: stat.isDirectory(), uid: stat.uid, mode: stat.mode },
+			uid,
+		);
+		if (reason) throw new Error(`SSH control directory ${dir} ${reason}`);
+	} finally {
+		fs.closeSync(fd);
 	}
 }
 
@@ -576,7 +693,7 @@ export async function ensureConnection(host: SSHConnectionTarget): Promise<void>
 
 	const promise = (async () => {
 		ensureSshBinary();
-		ensureControlDir();
+		ensureSshControlDir();
 		await validateKeyPermissions(host.keyPath);
 
 		if (!registered) {

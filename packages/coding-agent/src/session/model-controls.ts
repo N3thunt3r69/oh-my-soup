@@ -144,6 +144,11 @@ export class ModelControls {
 		return this.#scopedModels;
 	}
 
+	/** Replace the Ctrl+P cycle scope after runtime provider discovery settles. */
+	setScopedModels(scopedModels: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>): void {
+		this.#scopedModels = scopedModels;
+	}
+
 	/** Live per-provider-family service-tier selection. */
 	get serviceTierByFamily(): ServiceTierByFamily {
 		return this.#serviceTierByFamily;

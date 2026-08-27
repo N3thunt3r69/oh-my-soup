@@ -598,10 +598,11 @@ export class Patcher {
 	 * Reject an anchored edit that references a line the read which minted
 	 * `expected` never displayed. `matchedSnapshot` is the store version whose
 	 * text equals the live normalized content — the exact snapshot the model
-	 * anchored against. Absent means no provenance was recorded (the tag was
-	 * externally minted or aged out), so the edit applies as before. Only runs
-	 * on the no-drift path, where anchor line numbers index the tagged content
-	 * 1:1.
+	 * anchored against. A missing snapshot or `seenLines === undefined` means
+	 * no provenance was recorded, so the edit applies as before. An empty set
+	 * means enforcement is active with zero authorized lines, so every anchor
+	 * remains guarded. Only runs on the no-drift path, where anchor line
+	 * numbers index the tagged content 1:1.
 	 *
 	 * The rejection inlines the actual file content at the unseen anchor lines
 	 * (from `matchedSnapshot.text`, which by definition equals the live
@@ -621,7 +622,7 @@ export class Patcher {
 	 */
 	#assertSeenLines(section: PatchSection, expected: string, matchedSnapshot: Snapshot | null): void {
 		const seen = matchedSnapshot?.seenLines;
-		if (!seen || seen.size === 0) return;
+		if (seen === undefined) return;
 		const unseen = section.collectAnchorLines().filter(line => !seen.has(line));
 		if (unseen.length === 0) return;
 		const sourceLines = matchedSnapshot?.text.split("\n") ?? [];

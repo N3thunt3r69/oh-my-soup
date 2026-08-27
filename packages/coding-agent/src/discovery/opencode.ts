@@ -15,6 +15,7 @@
  *
  * Priority: 55 (tool-specific provider)
  */
+import * as os from "node:os";
 import * as path from "node:path";
 import { isRecord, logger, parseFrontmatter } from "@oh-my-soup/pi-utils";
 import { JSONC } from "bun";
@@ -33,7 +34,6 @@ import {
 	buildExtensionModuleItems,
 	createSourceMeta,
 	discoverExtensionModulePaths,
-	expandEnvVarsDeep,
 	getProjectPath,
 	getUserPath,
 	loadFilesFromDir,
@@ -63,7 +63,7 @@ async function loadJsonConfig(
 
 	let parsed: unknown;
 	try {
-		parsed = JSONC.parse(content);
+		parsed = JSONC.parse(await substituteConfigVars(content, configPath));
 	} catch {
 		onInvalid(configPath);
 		return null;
@@ -73,6 +73,44 @@ async function loadJsonConfig(
 		return null;
 	}
 	return parsed;
+}
+
+/**
+ * Apply OpenCode's `{env:VAR}` and `{file:path}` substitutions before parsing
+ * its JSONC configuration.
+ */
+async function substituteConfigVars(text: string, configPath: string): Promise<string> {
+	const envExpanded = text.replace(/\{env:([^}]+)\}/g, (_, name: string) => Bun.env[name] ?? "");
+	const fileMatches = [...envExpanded.matchAll(/\{file:[^}]+\}/g)];
+	if (fileMatches.length === 0) return envExpanded;
+
+	const configDir = path.dirname(configPath);
+	let expanded = "";
+	let cursor = 0;
+	for (const match of fileMatches) {
+		const token = match[0];
+		const index = match.index ?? 0;
+		expanded += envExpanded.slice(cursor, index);
+		cursor = index + token.length;
+
+		const lineStart = envExpanded.lastIndexOf("\n", index - 1) + 1;
+		if (envExpanded.slice(lineStart, index).trimStart().startsWith("//")) {
+			expanded += token;
+			continue;
+		}
+
+		let filePath = token.slice("{file:".length, -1);
+		if (filePath.startsWith("~/")) filePath = path.join(os.homedir(), filePath.slice(2));
+		const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(configDir, filePath);
+		const fileContent = await readFile(resolved);
+		if (fileContent === null) {
+			logger.warn("OpenCode config references a missing file", { configPath, path: resolved });
+			continue;
+		}
+		expanded += JSON.stringify(fileContent.trim()).slice(1, -1);
+	}
+	expanded += envExpanded.slice(cursor);
+	return expanded;
 }
 
 /**
@@ -215,7 +253,7 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 
 	const items: MCPServer[] = [];
 	for (const [name, config] of mergedByName) {
-		const serverConfig = expandEnvVarsDeep(config) as OpenCodeMCPConfig;
+		const serverConfig = config as OpenCodeMCPConfig;
 		const source = sourceByName.get(name)!;
 		items.push(buildMCPServer(name, serverConfig, source));
 	}

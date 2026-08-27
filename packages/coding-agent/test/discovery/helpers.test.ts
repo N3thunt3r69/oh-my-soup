@@ -1,5 +1,11 @@
-import { describe, expect, test } from "bun:test";
-import { parseFrontmatter } from "@oh-my-soup/pi-utils";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { clearCache } from "@oh-my-soup/pi-coding-agent/capability/fs";
+import type { LoadContext } from "@oh-my-soup/pi-coding-agent/capability/types";
+import { loadFilesFromDir } from "@oh-my-soup/pi-coding-agent/discovery/helpers";
+import { parseFrontmatter, removeSyncWithRetries } from "@oh-my-soup/pi-utils";
 
 describe("parseFrontmatter", () => {
 	const parse = (content: string) => parseFrontmatter(content, { source: "tests:frontmatter", level: "off" });
@@ -145,5 +151,50 @@ Body content`;
 			nestedField: { innerKey: "value" },
 		});
 		expect(result.body).toBe("Body content");
+	});
+});
+
+describe("loadFilesFromDir recursion", () => {
+	let tempDir!: string;
+	let ctx!: LoadContext;
+
+	const writeFixture = (relativePath: string, content: string) => {
+		const fullPath = path.join(tempDir, relativePath);
+		fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+		fs.writeFileSync(fullPath, content);
+	};
+
+	beforeEach(() => {
+		clearCache();
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-loadfiles-recursion-"));
+		ctx = { cwd: tempDir, home: tempDir, repoRoot: tempDir };
+		writeFixture("my-tool.ts", "export default () => ({});\n");
+		writeFixture(
+			path.join("mineru", "Lib", "site-packages", "gradio", "assets", "svelte", "media-query-D37ajmZt.js"),
+			"window.matchMedia;\n",
+		);
+	});
+
+	afterEach(() => {
+		clearCache();
+		removeSyncWithRetries(tempDir);
+	});
+
+	const names = (recursive?: boolean) =>
+		loadFilesFromDir<{ name: string }>(ctx, tempDir, "test", "user", {
+			extensions: ["ts", "js"],
+			recursive,
+			transform: (_name, _content, filePath) => ({ name: path.relative(tempDir, filePath) }),
+		}).then(result => result.items.map(item => item.name).sort());
+
+	test("default scan stays top-level", async () => {
+		expect(await names()).toEqual(["my-tool.ts"]);
+	});
+
+	test("recursive scan includes nested files", async () => {
+		expect(await names(true)).toEqual([
+			path.join("mineru", "Lib", "site-packages", "gradio", "assets", "svelte", "media-query-D37ajmZt.js"),
+			"my-tool.ts",
+		]);
 	});
 });

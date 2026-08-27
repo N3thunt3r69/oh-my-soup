@@ -6,6 +6,7 @@ import { jsBackend, juliaBackend, pythonBackend, rubyBackend } from "../eval";
 import type { ExecutorBackend, ExecutorBackendResult } from "../eval/backend";
 import { EVAL_TIMEOUT_PAUSE_OP, EVAL_TIMEOUT_RESUME_OP } from "../eval/bridge-timeout";
 import { IdleTimeout } from "../eval/idle-timeout";
+import type { BackendProbeOptions } from "../eval/probe";
 import { defaultEvalSessionId } from "../eval/session-id";
 import type { EvalCellResult, EvalDisplayOutput, EvalLanguage, EvalStatusEvent, EvalToolDetails } from "../eval/types";
 import evalDescription from "../prompts/tools/eval.md" with { type: "text" };
@@ -18,7 +19,7 @@ import { truncateForPrompt } from "./approval";
 import { type EvalBackendsAllowance, resolveEvalBackends } from "./eval-backends";
 import { upsertStatusEvent } from "./eval-render";
 import { resolveOutputMaxColumns, resolveOutputSinkHeadBytes } from "./output-meta";
-import { ToolAbortError, ToolError } from "./tool-errors";
+import { ToolAbortError, ToolError, throwIfAborted } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout } from "./tool-timeouts";
 
@@ -217,7 +218,11 @@ function detailsNotice(cells: ResolvedEvalCell[]): string | undefined {
 	return notices.length > 0 ? notices.join(" ") : undefined;
 }
 
-async function resolveBackend(session: ToolSession, language: EvalLanguage): Promise<ResolvedBackend> {
+async function resolveBackend(
+	session: ToolSession,
+	language: EvalLanguage,
+	probeOptions?: BackendProbeOptions,
+): Promise<ResolvedBackend> {
 	const backends = resolveEvalBackends(session);
 	const allowPy = backends.python;
 	const allowJs = backends.js;
@@ -226,7 +231,9 @@ async function resolveBackend(session: ToolSession, language: EvalLanguage): Pro
 
 	if (language === "python") {
 		if (!allowPy) throw new ToolError("Python backend is disabled (PI_PY=0 or eval.py = false).");
-		if (!(await pythonBackend.isAvailable(session))) {
+		const available = await pythonBackend.isAvailable(session, probeOptions);
+		throwIfAborted(probeOptions?.signal);
+		if (!available) {
 			const alternatives = [allowJs ? '"js"' : null, allowRb ? '"rb"' : null, allowJl ? '"jl"' : null].filter(
 				Boolean,
 			);
@@ -240,7 +247,9 @@ async function resolveBackend(session: ToolSession, language: EvalLanguage): Pro
 	}
 	if (language === "ruby") {
 		if (!allowRb) throw new ToolError("Ruby backend is disabled (PI_RB=0 or eval.rb = false).");
-		if (!(await rubyBackend.isAvailable(session))) {
+		const available = await rubyBackend.isAvailable(session, probeOptions);
+		throwIfAborted(probeOptions?.signal);
+		if (!available) {
 			const alternatives = [allowJs ? '"js"' : null, allowPy ? '"py"' : null, allowJl ? '"jl"' : null].filter(
 				Boolean,
 			);
@@ -254,7 +263,9 @@ async function resolveBackend(session: ToolSession, language: EvalLanguage): Pro
 	}
 	if (language === "julia") {
 		if (!allowJl) throw new ToolError("Julia backend is disabled (PI_JL=0 or eval.jl = false).");
-		if (!(await juliaBackend.isAvailable(session))) {
+		const available = await juliaBackend.isAvailable(session, probeOptions);
+		throwIfAborted(probeOptions?.signal);
+		if (!available) {
 			const alternatives = [allowJs ? '"js"' : null, allowPy ? '"py"' : null, allowRb ? '"rb"' : null].filter(
 				Boolean,
 			);
@@ -414,13 +425,17 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 					: params.language === "jl"
 						? "julia"
 						: "js";
-		const resolved = await resolveBackend(session, cellLanguage);
+		const cellTimeoutMs =
+			params.timeout === 0
+				? 0
+				: clampTimeout("eval", params.timeout, session.settings.get("tools.maxTimeout")) * 1000;
+		const resolved = await resolveBackend(session, cellLanguage, { signal, timeoutMs: cellTimeoutMs });
 		const cells: ResolvedEvalCell[] = [
 			{
 				index: 0,
 				title: params.title,
 				code: params.code,
-				timeoutMs: (params.timeout ?? 30) * 1000,
+				timeoutMs: cellTimeoutMs,
 				reset: params.reset ?? false,
 				resolved,
 			},

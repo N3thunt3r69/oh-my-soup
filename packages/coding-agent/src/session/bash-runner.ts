@@ -91,6 +91,11 @@ export class BashRunner {
 				}
 			}
 
+			const shellEnv =
+				options?.useUserShell === true
+					? extensionRunner?.getRegisteredTool("bash")?.definition.shellEnv?.({ command, cwd, env: process.env })
+					: undefined;
+
 			const abortController = new AbortController();
 			this.#abortControllers.add(abortController);
 			let result: BashResult;
@@ -102,6 +107,7 @@ export class BashRunner {
 					cwd,
 					timeout: clampTimeout("bash", undefined, this.#host.settings.get("tools.maxTimeout")) * 1000,
 					onMinimizedSave: originalText => this.#saveOriginalArtifact(target, originalText),
+					env: shellEnv,
 					useUserShell: options?.useUserShell,
 				});
 			} finally {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { RunOutput } from "@oh-my-soup/pi-coding-agent/tools/browser/run-output";
-import { formatSelectorMatchHint, toActionableHandle } from "@oh-my-soup/pi-coding-agent/tools/browser/tab-worker";
+import {
+	formatSelectorMatchHint,
+	type HandleOpGuard,
+	toActionableHandle,
+} from "@oh-my-soup/pi-coding-agent/tools/browser/tab-worker";
 import type { ElementHandle } from "puppeteer-core";
 
 // Regression coverage for the invisible-output failure mode: `display("string")`,
@@ -81,6 +85,98 @@ describe("browser handle enrichment — fill()", () => {
 		expect(calls).toEqual(["evaluate", "type"]);
 		expect(node.focused).toBe(true);
 		expect(node.value).toBe("fresh");
+	});
+});
+
+describe("browser handle enrichment — guarded actions", () => {
+	const makeGuard = (timeoutMs: number): { guard: HandleOpGuard; labels: string[] } => {
+		const labels: string[] = [];
+		return {
+			labels,
+			guard: (label, fn) => {
+				labels.push(label);
+				const signal = AbortSignal.timeout(timeoutMs);
+				return fn(signal).catch((error: unknown) => {
+					if (signal.aborted) throw new Error(`${label} timed out after ${timeoutMs}ms`);
+					throw error;
+				});
+			},
+		};
+	};
+
+	it("fails a stalled handle action fast and blocks a retry before dispatch", async () => {
+		let dispatches = 0;
+		let disposals = 0;
+		const stub = {
+			click: () => {
+				dispatches++;
+				return new Promise<void>(() => {});
+			},
+			type: async () => {},
+			evaluate: async () => {},
+			dispose: async () => {
+				disposals++;
+			},
+		} as unknown as ElementHandle;
+		const { guard } = makeGuard(10);
+		const handle = toActionableHandle(stub, guard, async () => {});
+
+		await expect(handle.click()).rejects.toThrow("handle.click() timed out after 10ms");
+		await expect(handle.click()).rejects.toThrow("this handle was invalidated");
+		expect(dispatches).toBe(1);
+		expect(disposals).toBe(1);
+	});
+
+	it("rewraps a cached handle from raw methods rather than a prior run's guard", async () => {
+		const guards: string[] = [];
+		let clicks = 0;
+		const stub = {
+			click: async () => {
+				clicks++;
+			},
+			type: async () => {},
+			evaluate: async () => {},
+		} as unknown as ElementHandle;
+		const first = toActionableHandle(stub, (label, fn) => {
+			guards.push(`old:${label}`);
+			return fn(new AbortController().signal);
+		});
+		await first.click();
+		const second = toActionableHandle(stub, (label, fn) => {
+			guards.push(`new:${label}`);
+			return fn(new AbortController().signal);
+		});
+		await second.click();
+
+		expect(clicks).toBe(2);
+		expect(guards).toEqual(["old:handle.click()", "new:handle.click()"]);
+	});
+
+	it("guards drag, touch, and autofill inputs while preserving their results", async () => {
+		const calls: string[] = [];
+		const stub = {
+			type: async () => {},
+			evaluate: async () => {},
+			drag: async () => {
+				calls.push("drag");
+				return { items: [] };
+			},
+			touchStart: async () => {
+				calls.push("touchStart");
+			},
+			autofill: async () => {
+				calls.push("autofill");
+			},
+		} as unknown as ElementHandle;
+		const { guard, labels } = makeGuard(1_000);
+		const handle = toActionableHandle(stub, guard);
+
+		await handle.drag({ x: 1, y: 2 });
+		await handle.touchStart();
+		await handle.autofill({ creditCard: { number: "4111111111111111" } } as never);
+
+		expect(calls).toEqual(["drag", "touchStart", "autofill"]);
+		expect(labels).toEqual(["handle.drag()", "handle.touchStart()", "handle.autofill()"]);
 	});
 });
 

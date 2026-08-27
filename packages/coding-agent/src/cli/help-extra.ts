@@ -34,6 +34,8 @@ export function getExtraHelpText(): string {
   CURSOR_ACCESS_TOKEN        - Cursor AI models
   AI_GATEWAY_API_KEY         - Vercel AI Gateway
   WAFER_SERVERLESS_API_KEY   - Wafer Serverless (pay-as-you-go)
+  DEEPINFRA_API_KEY         - DeepInfra hosted models and media
+  YOLO_AUTO_API_KEY         - Yolo-Auto flat-rate DeepSeek models
 
   ${chalk.dim("# Cloud Providers")}
   AWS_PROFILE                - AWS Bedrock (or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY)

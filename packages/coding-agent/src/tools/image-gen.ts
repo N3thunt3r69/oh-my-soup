@@ -41,6 +41,8 @@ const DEFAULT_MODEL = "gemini-3-pro-image-preview";
 const DEFAULT_OPENROUTER_MODEL = "google/gemini-3-pro-image-preview";
 const DEFAULT_ANTIGRAVITY_MODEL = "gemini-3-pro-image";
 const DEFAULT_XAI_IMAGE_MODEL = "grok-imagine-image";
+const DEFAULT_DEEPINFRA_IMAGE_MODEL = "black-forest-labs/FLUX-2-pro";
+const DEEPINFRA_IMAGES_URL = "https://api.deepinfra.com/v1/openai/images/generations";
 const IMAGE_TIMEOUT = 3 * 60 * 1000; // 3 minutes
 const MAX_IMAGE_SIZE = 35 * 1024 * 1024;
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -528,6 +530,19 @@ async function findOpenRouterImageCredentials(
 	return null;
 }
 
+async function findDeepInfraImageCredentials(
+	modelRegistry?: ModelRegistry,
+	sessionId?: string,
+): Promise<ImageApiKey | null> {
+	if (modelRegistry) {
+		const apiKey = await modelRegistry.getApiKeyForProvider("deepinfra", sessionId);
+		if (apiKey) return { provider: "deepinfra", apiKey: modelRegistry.resolver("deepinfra", { sessionId }) };
+		return null;
+	}
+	const apiKey = getEnvApiKey("deepinfra");
+	return apiKey ? { provider: "deepinfra", apiKey } : null;
+}
+
 async function findGeminiImageCredentials(
 	modelRegistry?: ModelRegistry,
 	sessionId?: string,
@@ -616,6 +631,8 @@ function activeImageProvider(model: Model | undefined): Exclude<ImageProviderPre
 			return "xai";
 		case "openrouter":
 			return "openrouter";
+		case "deepinfra":
+			return "deepinfra";
 		case "google":
 			return "gemini";
 		default:
@@ -658,6 +675,8 @@ async function findImageApiKey(
 			return findXAIImageCredentials(modelRegistry);
 		case "openrouter":
 			return findOpenRouterImageCredentials(modelRegistry, sessionId);
+		case "deepinfra":
+			return findDeepInfraImageCredentials(modelRegistry, sessionId);
 		case "gemini":
 			return findGeminiImageCredentials(modelRegistry, sessionId);
 	}
@@ -1114,6 +1133,7 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 			const fetchImpl = ctx.fetch ?? fetch;
 			const failures: Array<{ provider: ImageProvider; error: ProviderHttpError }> = [];
 			let unsupportedAspectRatioProvider: ImageProvider | undefined;
+			let editUnsupportedProvider: ImageProvider | undefined;
 			let foundCredentials = false;
 			let resolvedImageCache: InlineImageData[] | undefined;
 
@@ -1142,7 +1162,9 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 									? DEFAULT_OPENROUTER_MODEL
 									: provider === "xai"
 										? DEFAULT_XAI_IMAGE_MODEL
-										: DEFAULT_MODEL;
+										: provider === "deepinfra"
+											? DEFAULT_DEEPINFRA_IMAGE_MODEL
+											: DEFAULT_MODEL;
 					const resolvedModel = provider === "openrouter" ? resolveOpenRouterModel(model) : model;
 					if (
 						params.aspect_ratio &&
@@ -1552,6 +1574,93 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 						};
 					}
 
+					if (provider === "deepinfra") {
+						if (resolvedImages.length > 0) {
+							editUnsupportedProvider ??= provider;
+							continue;
+						}
+						const size = resolveOpenAIImageSize(params.aspect_ratio, params.image_size);
+						const requestBody = {
+							model: resolvedModel,
+							prompt: assemblePrompt(params),
+							n: 1,
+							response_format: "b64_json" as const,
+							...(size ? { size } : {}),
+						};
+						const rawText = await withAuth(
+							apiKey.apiKey,
+							async key => {
+								const response = await fetchImpl(DEEPINFRA_IMAGES_URL, {
+									method: "POST",
+									headers: {
+										Authorization: `Bearer ${key}`,
+										"Content-Type": "application/json",
+										"User-Agent": USER_AGENT,
+									},
+									body: JSON.stringify(requestBody),
+									signal: requestSignal,
+								});
+								const text = await response.text();
+								if (!response.ok) {
+									let message = text;
+									try {
+										const parsed = JSON.parse(text) as { detail?: string; error?: { message?: string } };
+										message = parsed.detail ?? parsed.error?.message ?? message;
+									} catch {
+										// Preserve the provider's raw error body.
+									}
+									throw new ProviderHttpError(
+										`DeepInfra image request failed (${response.status}): ${message}`,
+										response.status,
+										{ headers: response.headers },
+									);
+								}
+								return text;
+							},
+							{ signal: requestSignal },
+						);
+						const data = JSON.parse(rawText) as {
+							data?: Array<{ b64_json?: string | null; url?: string | null }>;
+						};
+						const inlineImages: InlineImageData[] = [];
+						for (const entry of data.data ?? []) {
+							if (entry.b64_json) {
+								const bytes = Buffer.from(entry.b64_json, "base64");
+								inlineImages.push({
+									data: entry.b64_json,
+									mimeType: parseImageMetadata(bytes)?.mimeType ?? "image/png",
+								});
+							} else if (entry.url) {
+								inlineImages.push(await loadImageFromUrl(entry.url, fetchImpl, requestSignal));
+							}
+						}
+						if (inlineImages.length === 0) {
+							return {
+								content: [{ type: "text", text: "No image data returned." }],
+								details: {
+									provider,
+									model: resolvedModel,
+									imageCount: 0,
+									imagePaths: [],
+									images: [],
+								},
+							};
+						}
+						const imagePaths = await saveImagesToTemp(inlineImages);
+						return {
+							content: [
+								{ type: "text", text: buildResponseSummary(provider, resolvedModel, imagePaths, undefined) },
+							],
+							details: {
+								provider,
+								model: resolvedModel,
+								imageCount: inlineImages.length,
+								imagePaths,
+								images: inlineImages,
+							},
+						};
+					}
+
 					const parts = [] as Array<{ text?: string; inlineData?: InlineImageData }>;
 					for (const image of resolvedImages) {
 						parts.push({ inlineData: image });
@@ -1663,12 +1772,18 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 
 			if (!foundCredentials) {
 				throw new Error(
-					"No image API credentials found. Connect a Codex (ChatGPT) subscription, use a GPT Responses/Codex model with OpenAI credentials, log in with google-antigravity or xAI Grok OAuth, or set OPENAI_API_KEY, XAI_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY.",
+					"No image API credentials found. Connect a Codex (ChatGPT) subscription, use a GPT Responses/Codex model with OpenAI credentials, log in with google-antigravity or xAI Grok OAuth, or set OPENAI_API_KEY, XAI_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY, or DEEPINFRA_API_KEY.",
 				);
 			}
 
 			if (failures.length === 0 && unsupportedAspectRatioProvider) {
 				assertImageAspectRatioSupported(unsupportedAspectRatioProvider, params.aspect_ratio);
+			}
+
+			if (failures.length === 0 && editUnsupportedProvider) {
+				throw new Error(
+					`${editUnsupportedProvider} image generation is text-to-image only and cannot edit input images. Configure an edit-capable provider or retry without input images.`,
+				);
 			}
 
 			throw new AggregateError(

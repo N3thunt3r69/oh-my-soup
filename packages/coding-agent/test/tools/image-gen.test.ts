@@ -803,4 +803,51 @@ describe("imageGenTool", () => {
 		expect(requestUrls).toEqual(["https://api.x.ai/v1/images/generations"]);
 		expect(result.details?.provider).toBe("xai");
 	});
+	it("routes DeepInfra text-to-image through its OpenAI-compatible endpoint", async () => {
+		let requestUrl: string | undefined;
+		let requestBody: Record<string, unknown> | undefined;
+		const captured: { authorization: string | null } = { authorization: null };
+		const fetchMock = (async (input: string | URL | Request, init?: RequestInit) => {
+			requestUrl = String(input);
+			requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			captured.authorization = new Headers(init?.headers).get("authorization");
+			return Response.json({
+				data: [{ b64_json: Buffer.from("deepinfra-image").toString("base64") }],
+			});
+		}) as typeof fetch;
+		const ctx = {
+			fetch: fetchMock,
+			sessionManager: {
+				getCwd: () => "/tmp",
+				getSessionId: () => "test-session",
+			} as unknown as ReadonlySessionManager,
+			modelRegistry: {
+				getApiKeyForProvider: async (provider: string) => (provider === "deepinfra" ? "di-key" : undefined),
+				resolver: () => async () => "di-key",
+			} as unknown as ModelRegistry,
+			model: undefined,
+			isIdle: () => true,
+			hasQueuedMessages: () => false,
+			abort: () => {},
+		} satisfies CustomToolContext;
+
+		const result = await imageGenTool.execute(
+			"call-deepinfra",
+			{ subject: "a cat", aspect_ratio: "16:9", provider: "deepinfra" },
+			undefined,
+			ctx,
+		);
+		generatedImagePaths.push(...(result.details?.imagePaths ?? []));
+
+		expect(requestUrl).toBe("https://api.deepinfra.com/v1/openai/images/generations");
+		expect(captured.authorization).toBe("Bearer di-key");
+		expect(requestBody).toMatchObject({
+			model: "black-forest-labs/FLUX-2-pro",
+			prompt: "a cat.",
+			n: 1,
+			response_format: "b64_json",
+			size: "1536x1024",
+		});
+		expect(result.details).toMatchObject({ provider: "deepinfra", imageCount: 1 });
+	});
 });

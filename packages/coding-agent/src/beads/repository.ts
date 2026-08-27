@@ -881,6 +881,16 @@ export function findBeadsWorkspaceRoot(cwd: string, homeDirectory = os.homedir()
 				});
 			}
 		}
+		const gitEntry = path.join(current, ".git");
+		try {
+			fs.statSync(gitEntry);
+			return null;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR") {
+				throw new NativeBeadsError(`Unable to inspect Git workspace candidate ${gitEntry}.`, { cause: error });
+			}
+		}
 		const parent = path.dirname(current);
 		if (parent === current) return null;
 		current = parent;

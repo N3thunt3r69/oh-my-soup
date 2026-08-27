@@ -14,8 +14,12 @@
  */
 import { peekFile, peekFileSync } from "./peek-file";
 
-/** Header window sniffed for the binary heuristic; mirrors git's 8000-byte scan. */
-const BINARY_SNIFF_BYTES = 8192;
+/**
+ * Header window sniffed for the binary heuristic; mirrors git's 8000-byte scan.
+ * Exported so callers that already hold the file can sniff the identical prefix
+ * without reopening it.
+ */
+export const BINARY_SNIFF_BYTES = 8192;
 
 /**
  * Classify an in-memory byte header as binary (non-UTF-8-text).

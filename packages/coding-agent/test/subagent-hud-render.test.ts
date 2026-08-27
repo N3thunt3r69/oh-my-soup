@@ -1,9 +1,9 @@
 /**
  * Contract: the anchored subagent HUD (rendered above the editor, next to the
  * Todos block) lists exactly the running *detached* subagents as
- * `Id: description` rows and yields no output once nothing qualifies, so the
- * block self-clears. Sync task spawns and eval `agent()` spawns are excluded:
- * their progress is already rendered inline (tool block / eval cell).
+ * `Id ⟨role⟩: description` rows and yields no output once nothing qualifies,
+ * so the block self-clears. Sync task spawns and eval `agent()` spawns are
+ * excluded: their progress is already rendered inline (tool block / eval cell).
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
@@ -105,6 +105,55 @@ describe("subagent HUD lines", () => {
 		expect(out).toContain("Subagents");
 		expect(out).toContain("AuthLoader: Refactoring the auth flow");
 		expect(out).toContain("SchemaMigrator: Migrating the users table");
+	});
+
+	it("shows a non-default role badge and hides labels that only echo the spawn handle", () => {
+		const withRole = render([
+			makeSession({
+				id: "AuthLoader",
+				agent: "scout",
+				description: "Audit auth wiring",
+			}),
+		]);
+		expect(withRole).toContain("AuthLoader");
+		expect(withRole).toMatch(/AuthLoader.*scout/);
+		expect(withRole).toContain("Audit auth wiring");
+
+		const exactEcho = render([
+			makeSession({
+				id: "AuthLoader",
+				agent: "scout",
+				description: "AuthLoader",
+			}),
+		]);
+		expect(exactEcho).toMatch(/AuthLoader.*scout/);
+		expect(exactEcho).not.toContain("AuthLoader: AuthLoader");
+
+		const collisionEcho = render([
+			makeSession({
+				id: "AuthLoader-3",
+				agent: "scout",
+				description: "AuthLoader",
+			}),
+		]);
+		expect(collisionEcho).toMatch(/AuthLoader-3.*scout/);
+		expect(collisionEcho).not.toContain("AuthLoader-3: AuthLoader");
+
+		const mixedCaseEcho = render([
+			makeSession({
+				id: "AuthLoader-3",
+				agent: "scout",
+				description: "authloader",
+			}),
+		]);
+		expect(mixedCaseEcho).toContain("AuthLoader-3");
+		expect(mixedCaseEcho).not.toContain("AuthLoader-3: authloader");
+
+		const defaultWorker = render([
+			makeSession({ id: "SchemaMigrator", agent: "task", description: "Migrate users" }),
+		]);
+		expect(defaultWorker).toContain("SchemaMigrator: Migrate users");
+		expect(defaultWorker).not.toMatch(/SchemaMigrator.*task/);
 	});
 
 	it("only shows active subagents and clears once everything finished", () => {

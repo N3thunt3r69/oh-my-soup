@@ -30,10 +30,10 @@ export function startComputerWorker(): void {
 }
 
 // Direct-source fallback: loaded as a worker's entry module outside a CLI
-// host there is no selector argv, so start immediately. When any CLI-host
-// worker re-enters cli.ts (which imports this module statically), the
-// selector guard defers to the host's dispatch — an unguarded auto-start
-// would hijack the message port of every other worker kind.
+// host there is no selector argv, so start immediately. A CLI-host worker
+// imports this module only after the computer selector dispatches; the guard
+// still prevents direct imports under another declared selector from
+// hijacking that worker's message port.
 if (!Bun.argv.some(isWorkerHostSelector)) {
 	startComputerWorker();
 }

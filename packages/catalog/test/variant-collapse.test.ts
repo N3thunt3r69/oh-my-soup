@@ -10,11 +10,13 @@ import {
 import { Effort } from "@oh-my-soup/pi-catalog/effort";
 import { stripThinkingVariantToken } from "@oh-my-soup/pi-catalog/identity/family";
 import { resolveProviderModels } from "@oh-my-soup/pi-catalog/model-manager";
-import { resolveWireModelId } from "@oh-my-soup/pi-catalog/model-thinking";
+import { defaultSupportedEffort, resolveWireModelId } from "@oh-my-soup/pi-catalog/model-thinking";
 import { googleGeminiCliModelManagerOptions } from "@oh-my-soup/pi-catalog/provider-models/google";
 import type { ModelSpec } from "@oh-my-soup/pi-catalog/types";
 import {
 	ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
+	CURSOR_VARIANT_COLLAPSE_TABLE,
+	collapseBuiltModelVariants,
 	collapseEffortVariants,
 	collapseEffortVariantsAcrossProviders,
 	DEVIN_VARIANT_COLLAPSE_TABLE,
@@ -656,6 +658,116 @@ describe("Devin tier routing", () => {
 	});
 });
 
+describe("Cursor effort sibling routing", () => {
+	const cursorMemberSpec = (id: string): ModelSpec<"cursor-agent"> => ({
+		id,
+		name: id,
+		api: "cursor-agent",
+		provider: "cursor",
+		baseUrl: "https://api2.cursor.sh",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+	});
+
+	it("collapses Grok 4.5/4.6 tiers and preserves the fast lane", () => {
+		const raw = [
+			"cursor-grok-4.5-low",
+			"cursor-grok-4.5-medium",
+			"cursor-grok-4.5-high",
+			"cursor-grok-4.6-low-fast",
+			"cursor-grok-4.6-medium-fast",
+			"cursor-grok-4.6-high-fast",
+			"cursor-grok-4.6-xhigh-fast",
+		].map(cursorMemberSpec);
+		const collapsed = collapseEffortVariants(raw, CURSOR_VARIANT_COLLAPSE_TABLE);
+		expect(collapsed.map(model => model.id).sort()).toEqual(["cursor-grok-4.5", "cursor-grok-4.6-fast"]);
+		const grok45 = buildModel(collapsed.find(model => model.id === "cursor-grok-4.5")!);
+		const grok46Fast = buildModel(collapsed.find(model => model.id === "cursor-grok-4.6-fast")!);
+		expect(resolveWireModelId(grok45, Effort.Medium)).toBe("cursor-grok-4.5-medium");
+		expect(resolveWireModelId(grok46Fast, Effort.XHigh)).toBe("cursor-grok-4.6-xhigh-fast");
+	});
+
+	it("defaults every Grok lane to medium and clamps effort-less requests there", () => {
+		const rawIds = [
+			"cursor-grok-4.5-low",
+			"cursor-grok-4.5-medium",
+			"cursor-grok-4.5-high",
+			"cursor-grok-4.5-low-fast",
+			"cursor-grok-4.5-medium-fast",
+			"cursor-grok-4.5-high-fast",
+			"cursor-grok-4.6-low",
+			"cursor-grok-4.6-medium",
+			"cursor-grok-4.6-high",
+			"cursor-grok-4.6-xhigh",
+			"cursor-grok-4.6-low-fast",
+			"cursor-grok-4.6-medium-fast",
+			"cursor-grok-4.6-high-fast",
+			"cursor-grok-4.6-xhigh-fast",
+		];
+		const collapsed = collapseEffortVariants(rawIds.map(cursorMemberSpec), CURSOR_VARIANT_COLLAPSE_TABLE);
+		const defaults = [
+			["cursor-grok-4.5", "cursor-grok-4.5-medium"],
+			["cursor-grok-4.5-fast", "cursor-grok-4.5-medium-fast"],
+			["cursor-grok-4.6", "cursor-grok-4.6-medium"],
+			["cursor-grok-4.6-fast", "cursor-grok-4.6-medium-fast"],
+		] as const;
+		for (const [id, requestModelId] of defaults) {
+			const spec = collapsed.find(model => model.id === id);
+			if (!spec) throw new Error(`${id} did not collapse`);
+			expect(spec.requestModelId).toBe(requestModelId);
+			const model = buildModel(spec);
+			expect(defaultSupportedEffort(model)).toBe(Effort.Medium);
+			expect(resolveWireModelId(model, defaultSupportedEffort(model))).toBe(requestModelId);
+		}
+	});
+
+	it("heals stale defaults offline but lets live account tiers win deterministically", () => {
+		const stale: ModelSpec<"cursor-agent"> = {
+			...cursorMemberSpec("cursor-grok-4.6"),
+			name: "Grok 4.6",
+			reasoning: true,
+			requestModelId: "cursor-grok-4.6-low",
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+				requiresEffort: true,
+				effortRouting: {
+					[Effort.Low]: "cursor-grok-4.6-low",
+					[Effort.Medium]: "cursor-grok-4.6-medium",
+					[Effort.High]: "cursor-grok-4.6-high",
+					[Effort.XHigh]: "cursor-grok-4.6-xhigh",
+				},
+			},
+		};
+		const offline = collapseBuiltModelVariants([buildModel(stale)]);
+		expect(offline.find(model => model.id === stale.id)?.requestModelId).toBe("cursor-grok-4.6-medium");
+
+		const withoutMedium = collapseBuiltModelVariants([
+			buildModel({ ...stale, requestModelId: "cursor-grok-4.6-medium" }),
+			buildModel(cursorMemberSpec("cursor-grok-4.6-low")),
+			buildModel(cursorMemberSpec("cursor-grok-4.6-high")),
+		]);
+		expect(withoutMedium.find(model => model.id === stale.id)?.requestModelId).toBe("cursor-grok-4.6-low");
+	});
+
+	it("collapses GPT-5.6 tiers into separate standard and fast logical models", () => {
+		const raw = ["none", "low", "medium", "high", "xhigh", "max"].flatMap(tier => [
+			`gpt-5.6-sol-${tier}`,
+			`gpt-5.6-sol-${tier}-fast`,
+		]);
+		const collapsed = collapseEffortVariants(raw.map(cursorMemberSpec), CURSOR_VARIANT_COLLAPSE_TABLE);
+		expect(collapsed.map(model => model.id).sort()).toEqual(["gpt-5.6-sol", "gpt-5.6-sol-fast"]);
+		const standard = buildModel(collapsed.find(model => model.id === "gpt-5.6-sol")!);
+		const fast = buildModel(collapsed.find(model => model.id === "gpt-5.6-sol-fast")!);
+		expect(resolveWireModelId(standard, undefined)).toBe("gpt-5.6-sol-none");
+		expect(resolveWireModelId(standard, Effort.Max)).toBe("gpt-5.6-sol-max");
+		expect(resolveWireModelId(fast, Effort.High)).toBe("gpt-5.6-sol-high-fast");
+	});
+});
+
 describe("variant aliases", () => {
 	it("resolves members and recycled ids per provider", () => {
 		expect(resolveVariantAlias("google-antigravity", "gemini-3.5-flash-low")).toBe("gemini-3.5-flash");
@@ -847,17 +959,31 @@ describe("antigravity discovery collapsing", () => {
 		expect(flash25?.thinking?.effortRouting?.off).toBe("gemini-2.5-flash");
 	});
 
-	it("keeps collapsed routing through the gemini-cli re-provision", async () => {
+	it("discovers through Antigravity before provisioning Cloud Code Assist", async () => {
+		const requestedUrls: string[] = [];
+		const geminiCliFetcher = Object.assign(
+			(input: string | URL | Request, _init?: RequestInit) => {
+				const url = String(input);
+				requestedUrls.push(url);
+				if (!url.startsWith(ANTIGRAVITY_PRIMARY_ENDPOINT)) {
+					return Promise.resolve(new Response("Forbidden", { status: 403 }));
+				}
+				return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+			},
+			{ preconnect: fetch.preconnect },
+		);
 		const options = googleGeminiCliModelManagerOptions({
 			oauthToken: "t",
 			endpoint: "https://cca.test",
-			fetch: fetcher,
+			fetch: geminiCliFetcher,
 		});
 		const models = await options.fetchDynamicModels?.();
 
-		const flash = models?.find(m => m.id === "gemini-3.5-flash");
+		expect(requestedUrls).toContain(`${ANTIGRAVITY_PRIMARY_ENDPOINT}/v1internal:fetchAvailableModels`);
+		expect(models?.some(model => model.id === "claude-sonnet-4-6")).toBe(false);
+		expect(models?.every(model => model.baseUrl === "https://cca.test")).toBe(true);
+		const flash = models?.find(model => model.id === "gemini-3.5-flash");
 		expect(flash?.provider).toBe("google-gemini-cli");
-		expect(flash?.baseUrl).toBe("https://cca.test");
 		expect(flash?.requestModelId).toBe("gemini-3.5-flash-extra-low");
 		expect(flash?.thinking?.effortRouting?.off).toBe("gemini-3.5-flash-extra-low");
 	});

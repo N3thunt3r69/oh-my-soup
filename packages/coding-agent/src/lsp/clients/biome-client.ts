@@ -3,7 +3,7 @@
  * Uses Biome's CLI with JSON output instead of LSP (which has stale diagnostics issues).
  */
 import * as path from "node:path";
-import { logger } from "@oh-my-soup/pi-utils";
+import { logger, ptree } from "@oh-my-soup/pi-utils";
 import type { Diagnostic, DiagnosticSeverity, LinterClient, ServerConfig } from "../../lsp/types";
 
 // =============================================================================
@@ -91,22 +91,36 @@ async function runBiome(
 	args: string[],
 	cwd: string,
 	resolvedCommand?: string,
+	signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; success: boolean }> {
 	const command = resolvedCommand ?? "biome";
 
 	try {
-		const proc = Bun.spawn([command, ...args], {
+		signal?.throwIfAborted();
+		using child = ptree.spawn([command, ...args], {
 			cwd,
-			stdout: "pipe",
-			stderr: "pipe",
-			windowsHide: true,
+			stderr: "full",
 		});
+		const onAbort = () => {
+			// An abort that arrives after the OS has reported the exit must not
+			// turn an already-completed command into a cancellation.
+			if (child.exitCode !== null) return;
+			child.kill(new ptree.AbortError(signal?.reason, "<cancelled>"));
+		};
+		if (signal?.aborted) onAbort();
+		else signal?.addEventListener("abort", onAbort, { once: true });
 
-		const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-		const exitCode = await proc.exited;
-
-		return { stdout, stderr, success: exitCode === 0 };
+		try {
+			const result = await child.wait({ allowNonZero: true, stderr: "full" });
+			return { stdout: result.stdout, stderr: result.stderr, success: result.ok };
+		} finally {
+			signal?.removeEventListener("abort", onAbort);
+		}
 	} catch (err) {
+		if (err instanceof ptree.AbortError) {
+			signal?.throwIfAborted();
+			throw err;
+		}
 		return { stdout: "", stderr: String(err), success: false };
 	}
 }
@@ -155,9 +169,14 @@ export class BiomeClient implements LinterClient {
 		return content;
 	}
 
-	async lint(filePath: string): Promise<Diagnostic[]> {
+	async lint(filePath: string, signal?: AbortSignal): Promise<Diagnostic[]> {
 		// Run biome lint with JSON reporter
-		const result = await runBiome(["lint", "--reporter=json", filePath], this.cwd, this.config.resolvedCommand);
+		const result = await runBiome(
+			["lint", "--reporter=json", filePath],
+			this.cwd,
+			this.config.resolvedCommand,
+			signal,
+		);
 
 		// Biome exits non-zero when diagnostics are found, so only an empty
 		// stdout signals an actual run failure (missing binary, CLI error).

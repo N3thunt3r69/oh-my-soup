@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
+import { closeSharedModelCache } from "@oh-my-soup/pi-catalog/model-cache";
 import { resetSettingsForTest, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import {
 	SEARCH_PROVIDER_ORDER,
@@ -98,6 +99,7 @@ beforeEach(async () => {
 afterEach(async () => {
 	vi.restoreAllMocks();
 	resetSettingsForTest();
+	closeSharedModelCache();
 	setSearchProviderOrder([]);
 	setExcludedSearchProviders([]);
 	process.exitCode = originalExitCode;

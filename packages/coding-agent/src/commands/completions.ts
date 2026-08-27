@@ -5,7 +5,7 @@
  * (see `cli/completion-gen.ts`), so it never drifts from the actual CLI surface.
  */
 
-import { APP_NAME, VERSION } from "@oh-my-soup/pi-utils";
+import { APP_NAME, postmortem, VERSION } from "@oh-my-soup/pi-utils";
 import { Args, type CliConfig, Command, type CommandCtor } from "@oh-my-soup/pi-utils/cli";
 import { completionsHelp as commandHelp } from "../cli/command-help";
 import { buildSpec, generateCompletion, type Shell } from "../cli/completion-gen";
@@ -53,6 +53,7 @@ export default class Completions extends Command {
 		const config: CliConfig = { bin: APP_NAME, version: VERSION, commands: map };
 		const spec = buildSpec(config, ROOT_COMMAND, aliasMap);
 		await Bun.write(Bun.stdout, generateCompletion(shell, spec));
+		await postmortem.quit(0);
 	}
 }
 

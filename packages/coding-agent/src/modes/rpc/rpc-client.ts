@@ -129,6 +129,7 @@ const sessionEventTypes = new Set<AgentSessionEvent["type"]>([
 	"notice",
 	"thinking_level_changed",
 	"model_changed",
+	"advisor_cost_changed",
 	"goal_updated",
 ]);
 

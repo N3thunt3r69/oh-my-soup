@@ -57,6 +57,7 @@ _AGENT_HOME = Path("/srv/agent-home")
 _PRE_PR_FIX_TIMEOUT_SECONDS = 600.0
 _PRE_PR_CHECK_TIMEOUT_SECONDS = 600.0
 _PRE_PR_CHECK_MAX_OUTPUT = 12_000
+_DIFF_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 @dataclass(slots=True)
@@ -1741,6 +1742,79 @@ def _build_pr_review_comment(bindings: ToolBindings) -> HostTool[Any, Any]:
     )
 
 
+def _diff_anchorable_lines(patch: str) -> tuple[frozenset[int], frozenset[int]]:
+    """Map a unified-diff patch to (RIGHT, LEFT) anchorable line sets."""
+    right: set[int] = set()
+    left: set[int] = set()
+    new_line: int | None = None
+    old_line: int | None = None
+    for raw in patch.splitlines():
+        match = _DIFF_HUNK_RE.match(raw)
+        if match:
+            old_line = int(match.group(1))
+            new_line = int(match.group(2))
+            continue
+        if raw.startswith("\\"):
+            continue
+        # `+++`/`---` are file headers only before the first hunk. Inside a
+        # hunk, added or removed content may itself begin with those prefixes.
+        in_hunk = new_line is not None and old_line is not None
+        if raw.startswith(("+++", "---")) and not in_hunk:
+            continue
+        if not in_hunk:
+            continue
+        if raw.startswith("+"):
+            right.add(new_line)
+            new_line += 1
+        elif raw.startswith("-"):
+            left.add(old_line)
+            old_line += 1
+        else:
+            right.add(new_line)
+            left.add(old_line)
+            new_line += 1
+            old_line += 1
+    return frozenset(right), frozenset(left)
+
+
+def _filter_anchorable_comments(staged: list[Any], files: list[PullRequestFileInfo]) -> tuple[list[Any], list[Any]]:
+    """Partition staged comments by diff-hunk membership."""
+    by_path = {entry.path: entry for entry in files}
+    cache: dict[str, tuple[frozenset[int], frozenset[int]]] = {}
+    anchorable: list[Any] = []
+    dropped: list[Any] = []
+    for comment in staged:
+        entry = by_path.get(comment.path)
+        if entry is None:
+            dropped.append(comment)
+            continue
+        if entry.path not in cache:
+            cache[entry.path] = _diff_anchorable_lines(entry.patch)
+        right, left = cache[entry.path]
+        if not entry.patch:
+            # Binary files and platforms that omit patches fail open; endpoint
+            # validation and the 422/500 fallback remain authoritative.
+            anchorable.append(comment)
+            continue
+        side = str(comment.side or "RIGHT").upper()
+        lines = right if side == "RIGHT" else left
+        if comment.start_line is not None:
+            start_side = str(comment.start_side or side).upper()
+            if (
+                start_side != side
+                or comment.start_line > comment.line
+                or comment.start_line not in lines
+                or comment.line not in lines
+            ):
+                dropped.append(comment)
+                continue
+        elif comment.line not in lines:
+            dropped.append(comment)
+            continue
+        anchorable.append(comment)
+    return anchorable, dropped
+
+
 def _build_submit_pr_review(bindings: ToolBindings) -> HostTool[Any, Any]:
     def execute(args: dict[str, Any], _ctx: HostToolContext[Any]) -> str:
         _require_review_mode(bindings, "submit_pr_review", args)
@@ -1751,27 +1825,127 @@ def _build_submit_pr_review(bindings: ToolBindings) -> HostTool[Any, Any]:
             _raise_command(msg)
         staged = bindings.db.list_staged_review_comments(bindings.issue_key)
         comments = [_review_comment_to_payload(comment) for comment in staged]
+        commit_id: str | None = None
+        if getattr(bindings.github, "_platform", "github") == "forgejo":
+            try:
+                pr = _run_coro(
+                    bindings.loop,
+                    bindings.github.get_pull_request(
+                        repo=bindings.repo.full_name,
+                        number=bindings.default_comment_number,
+                    ),
+                )
+                commit_id = pr.head_sha or None
+            except GitHubError:
+                commit_id = None
+        body = body.strip()
+        dropped: list[Any] = []
+        if staged:
+            try:
+                pr_files = _run_coro(
+                    bindings.loop,
+                    bindings.github.list_pr_files(
+                        repo=bindings.repo.full_name,
+                        pr_number=bindings.default_comment_number,
+                    ),
+                )
+            except GitHubError as exc:
+                _audit(
+                    bindings,
+                    "submit_pr_review",
+                    args,
+                    error=f"anchor validation skipped: {exc.status} {exc.message}",
+                )
+            else:
+                filtered, dropped = _filter_anchorable_comments(staged, pr_files)
+                if dropped:
+                    _audit(
+                        bindings,
+                        "submit_pr_review",
+                        args,
+                        result={"dropped": [f"{comment.path}:{comment.line}" for comment in dropped]},
+                    )
+                    body += "\n\n## Not anchored to diff"
+                    for comment in dropped:
+                        body += f"\n- **`{comment.path}:{comment.line}`** — {comment.body}"
+                    comments = [_review_comment_to_payload(comment) for comment in filtered]
         try:
             review = _run_coro(
                 bindings.loop,
                 bindings.github.submit_pr_review(
                     repo=bindings.repo.full_name,
                     pr_number=bindings.default_comment_number,
-                    body=body.strip(),
+                    body=body,
                     event="COMMENT",
                     comments=comments,
+                    commit_id=commit_id,
                 ),
             )
         except GitHubError as exc:
             _audit(bindings, "submit_pr_review", args, error=str(exc))
-            _raise_command(f"GitHub rejected PR review: {exc.status} {exc.message}")
+            if exc.status not in (422, 500):
+                _raise_command(f"GitHub rejected PR review: {exc.status} {exc.message}")
+
+            def _note(comment: Any) -> str:
+                return f"**`{comment.path}:{comment.line}`**\n\n{comment.body}"
+
+            posted_inline = 0
+            try:
+                _run_coro(
+                    bindings.loop,
+                    bindings.github.post_comment(bindings.repo.full_name, bindings.default_comment_number, body),
+                )
+                for comment in staged:
+                    _run_coro(
+                        bindings.loop,
+                        bindings.github.post_comment(
+                            bindings.repo.full_name,
+                            bindings.default_comment_number,
+                            _note(comment),
+                        ),
+                    )
+                    posted_inline += 1
+            except GitHubError as fallback_exc:
+                _audit(bindings, "submit_pr_review", args, error=str(fallback_exc))
+                _raise_command(
+                    f"Review rejected ({exc.status}) and fallback comment posting failed: "
+                    f"{fallback_exc.status} {fallback_exc.message}"
+                )
+
+            cleared = bindings.db.clear_staged_review_comments(bindings.issue_key)
+            _audit(
+                bindings,
+                "submit_pr_review",
+                args,
+                result={
+                    "fallback": "issue_comments",
+                    "summary": True,
+                    "inline": posted_inline,
+                    "cleared": cleared,
+                },
+            )
+            return (
+                f"review rejected ({exc.status}); posted summary + {posted_inline} "
+                "inline comment(s) as issue comments"
+            )
         cleared = bindings.db.clear_staged_review_comments(bindings.issue_key)
         _audit(
             bindings,
             "submit_pr_review",
             args,
-            result={"review_id": review.id, "comments": len(comments), "cleared": cleared, "event": "COMMENT"},
+            result={
+                "review_id": review.id,
+                "comments": len(comments),
+                "dropped": len(dropped),
+                "cleared": cleared,
+                "event": "COMMENT",
+            },
         )
+        if dropped:
+            return (
+                f"submitted PR review id={review.id}; comments={len(comments)}; "
+                f"dropped={len(dropped)} not anchored to diff"
+            )
         return f"submitted PR review id={review.id}; comments={len(comments)}"
 
     return host_tool(

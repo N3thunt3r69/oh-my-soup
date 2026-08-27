@@ -315,6 +315,72 @@ describe("AsyncJobManager", () => {
 		expect(Date.now() - startedAt).toBeLessThan(150);
 		expect(manager.getAllJobs()).toHaveLength(0);
 	});
+	test("starts queued deliveries while an earlier consumer receipt is pending", async () => {
+		const releaseDeliveries = Promise.withResolvers<void>();
+		const bothStarted = Promise.withResolvers<void>();
+		const started: string[] = [];
+		const manager = new AsyncJobManager({});
+		manager.registerDeliverySink("Main", async jobId => {
+			started.push(jobId);
+			if (started.length === 2) bothStarted.resolve();
+			await releaseDeliveries.promise;
+		});
+
+		const firstId = manager.register("task", "first", async () => "first result", { ownerId: "Main" });
+		const secondId = manager.register("task", "second", async () => "second result", { ownerId: "Main" });
+		await manager.waitForAll();
+
+		await bothStarted.promise;
+		expect(started).toEqual([firstId, secondId]);
+		expect(manager.isJobResultConsumed(firstId)).toBe(false);
+		expect(manager.isJobResultConsumed(secondId)).toBe(false);
+
+		releaseDeliveries.resolve();
+		expect(await manager.drainDeliveries({ timeoutMs: 200 })).toBe(true);
+		expect(manager.isJobResultConsumed(firstId)).toBe(true);
+		expect(manager.isJobResultConsumed(secondId)).toBe(true);
+	});
+
+	test("cannot consume a reused job id from an older in-flight delivery", async () => {
+		const oldStarted = Promise.withResolvers<void>();
+		const newStarted = Promise.withResolvers<void>();
+		const releaseOld = Promise.withResolvers<void>();
+		const releaseNew = Promise.withResolvers<void>();
+		const manager = new AsyncJobManager({ retentionMs: 60_000 });
+		manager.registerDeliverySink("Main", async (_jobId, text) => {
+			if (text === "old result") {
+				oldStarted.resolve();
+				await releaseOld.promise;
+				return;
+			}
+			newStarted.resolve();
+			await releaseNew.promise;
+		});
+
+		const oldId = manager.register("task", "old", async () => "old result", {
+			id: "reused",
+			ownerId: "Main",
+		});
+		await manager.getJob(oldId)?.promise;
+		await oldStarted.promise;
+		expect(manager.evictCompletedJobs({ ownerId: "Main" })).toBe(1);
+
+		const newId = manager.register("task", "new", async () => "new result", {
+			id: "reused",
+			ownerId: "Main",
+		});
+		await manager.getJob(newId)?.promise;
+		await newStarted.promise;
+
+		releaseOld.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(manager.isJobResultConsumed(newId)).toBe(false);
+
+		releaseNew.resolve();
+		expect(await manager.drainDeliveries({ timeoutMs: 200 })).toBe(true);
+		expect(manager.isJobResultConsumed(newId)).toBe(true);
+	});
 
 	test("scoped delivery drain returns once matching owner deliveries finish", async () => {
 		let mainJobId = "";

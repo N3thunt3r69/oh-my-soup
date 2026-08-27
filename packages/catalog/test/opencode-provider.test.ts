@@ -54,6 +54,37 @@ describe("OpenCode provider discovery", () => {
 		});
 	});
 
+	test("pins gateway-only Muse Spark ids to Responses and invalidates stale routes", async () => {
+		const options = opencodeGoModelManagerOptions({
+			apiKey: "test-key",
+			fetch: async () => modelListResponse(["muse-spark-1.2", "muse-spark-1.2-contributor", "kimi-k3"]),
+		});
+		const models = await options.fetchDynamicModels?.();
+		const byId = new Map((models ?? []).map(model => [model.id, model]));
+		for (const id of ["muse-spark-1.2", "muse-spark-1.2-contributor"]) {
+			expect(byId.get(id)).toMatchObject({
+				api: "openai-responses",
+				baseUrl: "https://opencode.ai/zen/go/v1",
+			});
+		}
+		expect(byId.get("kimi-k3")).toMatchObject({ api: "openai-completions" });
+		expect(options.dropCachedModelIdsOnStaticMismatch).toContain("muse-spark-1.2-contributor");
+	});
+
+	test("routes gateway-first ids via sibling and billing-variant evidence", async () => {
+		const options = opencodeGoModelManagerOptions({
+			apiKey: "test-key",
+			fetch: async () =>
+				modelListResponse(["gpt-5.5", "deepseek-v4-flash-free", "minimax-m2.5-free", "brand-new-model"]),
+		});
+		const models = await options.fetchDynamicModels?.();
+		const apiById = new Map((models ?? []).map(model => [model.id, model.api]));
+		expect(apiById.get("gpt-5.5")).toBe("openai-responses");
+		expect(apiById.get("deepseek-v4-flash-free")).toBe("openai-responses");
+		expect(apiById.get("minimax-m2.5-free")).toBe("openai-completions");
+		expect(apiById.get("brand-new-model")).toBe("openai-completions");
+	});
+
 	test("replaces stale bundled Zen models with each credential's live endpoint list", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-opencode-zen-"));
 		try {

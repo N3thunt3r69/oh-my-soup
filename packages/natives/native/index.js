@@ -1,4 +1,5 @@
 import { loadNative } from "./loader-state.js";
+import { adaptDesktopSession } from "./desktop-adapter.js";
 
 /**
  * Native addon entrypoint.
@@ -18,7 +19,7 @@ const nativeBindings = loadNative();
 // classes
 export const AudioCapture = nativeBindings.AudioCapture;
 export const AudioPlayback = nativeBindings.AudioPlayback;
-export const DesktopSession = nativeBindings.DesktopSession;
+export const DesktopSession = adaptDesktopSession(nativeBindings.DesktopSession);
 export const FileLock = nativeBindings.FileLock;
 export const LiveWebRtcPeer = nativeBindings.LiveWebRtcPeer;
 export const MacAppearanceObserver = nativeBindings.MacAppearanceObserver;
@@ -100,6 +101,14 @@ export const Ellipsis = {
 export const Encoding = {
 	O200kBase: "O200kBase",
 	Cl100kBase: "Cl100kBase",
+	ClaudeV3: "ClaudeV3",
+	ClaudeV47: "ClaudeV47",
+	ClaudeV5: "ClaudeV5",
+	ClaudeV5Sonnet: "ClaudeV5Sonnet",
+	Qwen3: "Qwen3",
+	DeepSeekV3: "DeepSeekV3",
+	KimiK2: "KimiK2",
+	Glm5: "Glm5",
 };
 export const FileType = {
 	File: 1,

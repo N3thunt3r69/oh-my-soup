@@ -8,7 +8,7 @@ import type { OAuthCredentials } from "@oh-my-soup/pi-ai/oauth/types";
 import { buildModel } from "@oh-my-soup/pi-catalog/build";
 import { writeModelCache } from "@oh-my-soup/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
-import { resolveOllamaModelCacheProviderId } from "@oh-my-soup/pi-catalog/provider-models";
+import { resolveModelCacheProviderId, resolveOllamaModelCacheProviderId } from "@oh-my-soup/pi-catalog/provider-models";
 import type { ModelSpec, OpenAICompat } from "@oh-my-soup/pi-catalog/types";
 import {
 	applyLlamaCppQwenThinking,
@@ -2363,6 +2363,7 @@ providers:
 					data: [
 						{
 							model_group: "gpt-big",
+							providers: ["openai"],
 							max_input_tokens: 262_144,
 							max_output_tokens: 16_384,
 							supports_vision: true,
@@ -2383,6 +2384,7 @@ providers:
 		expect(model?.maxTokens).toBe(16_384);
 		expect(model?.input).toEqual(["text", "image"]);
 		expect(model?.reasoning).toBe(true);
+		expect(model?.api).toBe("openai-responses");
 	});
 
 	test("litellm discovery enriches configured proxy models with bundled references", async () => {
@@ -2432,7 +2434,7 @@ providers:
 				return new Response("{}", { status: 404 });
 			}
 			if (url === "http://localhost:4000/v1/models") {
-				return Response.json({ data: [{ id: "default-litellm" }] });
+				return Response.json({ data: [{ id: "default-litellm" }, { id: "openai/gpt-5" }] });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		};
@@ -2440,6 +2442,7 @@ providers:
 		await registry.refresh();
 
 		expect(registry.find("litellm-test", "default-litellm")?.baseUrl).toBe("http://localhost:4000/v1");
+		expect(registry.find("litellm-test", "openai/gpt-5")?.api).toBe("openai-responses");
 	});
 
 	test("litellm discovery reuses configured bearer on rich and fallback requests", async () => {
@@ -2542,52 +2545,66 @@ providers:
 		expect(registry.find("litellm-test", "deployment-id")).toBeUndefined();
 	});
 
-	test("startup restores a legacy stale-marked Copilot -1m variant via requestModelId", () => {
+	test("startup restores a legacy stale-marked Copilot -1m variant via requestModelId", async () => {
 		// Regression for #6037/#6284: a synthesized Copilot `-1m` long-context
 		// variant keeps the base model's transport headers via `requestModelId`.
 		// The v10 cache omits headers, and legacy rows written by the old id-only
 		// writer flag the variant unrestorable (its base is a different id). The
-		// startup loader must still recover the headers from the bundled base and
-		// keep the model selectable instead of dropping it.
-		const bundledBase = getBundledModel("github-copilot", "gpt-5.6-sol");
+		// credential-scoped startup hydration must still recover the headers from
+		// the bundled base and keep the model selectable instead of dropping it.
+		const bundledBase = getBundledModel("github-copilot", "gpt-5.4");
 		if (!bundledBase?.headers) {
 			throw new Error("Expected bundled Copilot base to carry transport headers");
 		}
 		const cachedVariant = buildModel({
 			...(bundledBase as ModelSpec<"openai-responses">),
-			id: "gpt-5.6-sol-1m",
-			name: "GPT-5.6 Sol (1M)",
-			requestModelId: "gpt-5.6-sol",
-			contextWindow: 1_050_000,
+			id: "gpt-5.4-1m",
+			name: "GPT-5.4 (1M)",
+			requestModelId: "gpt-5.4",
+			contextWindow: 1_000_000,
 		});
+		const apiKey = "copilot-test-key";
+		const cacheProviderId = resolveModelCacheProviderId("github-copilot", {
+			apiKey,
+			baseUrl: bundledBase.baseUrl,
+		});
+		authStorage.setRuntimeApiKey("github-copilot", apiKey);
 		// Emulate a legacy write: the variant has no same-id static header source,
 		// so it is flagged unrestorable even though its base carries the headers.
-		writeModelCache("github-copilot", Date.now(), [cachedVariant], true, "", cacheDbPath);
+		writeModelCache(cacheProviderId, Date.now(), [cachedVariant], true, "", cacheDbPath);
 		const db = new Database(cacheDbPath);
-		db.run("UPDATE model_cache SET header_restore_version = 0 WHERE provider_id = ?", ["github-copilot"]);
+		db.run("UPDATE model_cache SET header_restore_version = 0 WHERE provider_id = ?", [cacheProviderId]);
 		db.close();
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath);
+		await registry.hydrateCredentialScopedModelCaches();
 
-		const restored = registry.find("github-copilot", "gpt-5.6-sol-1m");
+		const restored = registry.find("github-copilot", "gpt-5.4-1m");
 		expect(restored?.headers).toEqual(bundledBase.headers);
 	});
 
-	test("startup drops a current Copilot alias whose headers differ from its bundled base", () => {
-		const bundledBase = getBundledModel("github-copilot", "gpt-5.6-sol");
+	test("startup drops a current Copilot alias whose headers differ from its bundled base", async () => {
+		const bundledBase = getBundledModel("github-copilot", "gpt-5.4");
 		if (!bundledBase?.headers) {
 			throw new Error("Expected bundled Copilot base to carry transport headers");
 		}
 		const cachedAlias = buildModel({
 			...(bundledBase as ModelSpec<"openai-responses">),
-			id: "gpt-5.6-sol-custom",
-			name: "GPT-5.6 Sol Custom Route",
-			requestModelId: "gpt-5.6-sol",
+			id: "gpt-5.4-custom",
+			name: "GPT-5.4 Custom Route",
+			requestModelId: "gpt-5.4",
 			headers: { "X-Tenant-Route": "tenant-a" },
 		});
-		writeModelCache("github-copilot", Date.now(), [cachedAlias], true, "", cacheDbPath, [bundledBase]);
+		const apiKey = "copilot-test-key";
+		const cacheProviderId = resolveModelCacheProviderId("github-copilot", {
+			apiKey,
+			baseUrl: bundledBase.baseUrl,
+		});
+		authStorage.setRuntimeApiKey("github-copilot", apiKey);
+		writeModelCache(cacheProviderId, Date.now(), [cachedAlias], true, "", cacheDbPath, [bundledBase]);
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath);
+		await registry.hydrateCredentialScopedModelCaches();
 
 		expect(registry.find("github-copilot", cachedAlias.id)).toBeUndefined();
 		expect(registry.find("github-copilot", bundledBase.id)?.headers).toEqual(bundledBase.headers);

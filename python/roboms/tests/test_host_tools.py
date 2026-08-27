@@ -62,6 +62,19 @@ def _stub_repo() -> RepoInfo:
     )
 
 
+# Unified diff whose anchorable lines are RIGHT {10..14} / LEFT {9..12}.
+_PATCH = "@@ -9,5 +10,6 @@ def f():\n ctx1\n-old10\n+new11\n ctx2\n+new13\n ctx3\n"
+
+
+def _pr_files_response(request: httpx.Request, patch: str = _PATCH, *, status: int = 200) -> httpx.Response:
+    if status != 200:
+        return httpx.Response(status, json={"message": "files fetch failed"})
+    return httpx.Response(
+        200,
+        json=[{"filename": "src/app.py", "status": "modified", "additions": 1, "deletions": 1, "patch": patch}],
+    )
+
+
 def _make_loop_in_background() -> tuple[asyncio.AbstractEventLoop, threading.Thread]:
     loop = asyncio.new_event_loop()
     t = threading.Thread(target=loop.run_forever, daemon=True)
@@ -1112,9 +1125,13 @@ def _pr_bindings(
 
 
 def _review_bindings(
-    db: Database, tmp_path: Path, transport: httpx.MockTransport
+    db: Database,
+    tmp_path: Path,
+    transport: httpx.MockTransport,
+    *,
+    platform: str = "github",
 ) -> tuple[ToolBindings, asyncio.AbstractEventLoop, threading.Thread]:
-    github = GitHubClient("token", transport=transport)
+    github = GitHubClient("token", transport=transport, platform=platform)
     loop, thread = _make_loop_in_background()
     issue = IssueInfo(
         repo="octo/widget",
@@ -1234,6 +1251,8 @@ def test_pr_review_comment_stages_and_submit_flushes_one_comment_review(db: Data
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
         if request.url.path.endswith("/reviews"):
             captured["path"] = request.url.path
             captured["body"] = json.loads(request.content)
@@ -1315,11 +1334,12 @@ def test_submit_pr_review_posts_summary_only_when_no_staged_comments(db: Databas
 
 
 def test_submit_pr_review_failure_keeps_staged_comments(db: Database, tmp_path: Path) -> None:
-    bindings, loop, t = _review_bindings(
-        db,
-        tmp_path,
-        httpx.MockTransport(lambda _request: httpx.Response(422, json={"message": "Validation failed"})),
-    )
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        return httpx.Response(403, json={"message": "forbidden"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
     try:
         stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
         submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
@@ -1332,6 +1352,224 @@ def test_submit_pr_review_failure_keeps_staged_comments(db: Database, tmp_path: 
     rows = db.list_staged_review_comments(bindings.issue_key)
     assert len(rows) == 1
     assert rows[0].path == "src/app.py"
+
+
+def test_submit_pr_review_filters_unanchorable_comments_and_folds_them_into_summary(
+    db: Database, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "roboms-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "in-hunk finding"}, _ctx())
+        stage_tool.execute({"path": "src/app.py", "line": 15, "body": "gap finding"}, _ctx())
+        stage_tool.execute({"path": "src/app.py", "line": 10, "side": "LEFT", "body": "old-line finding"}, _ctx())
+        stage_tool.execute({"path": "src/other.py", "line": 3, "body": "stale-path finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert captured["body"]["comments"] == [
+        {"path": "src/app.py", "line": 12, "side": "RIGHT", "body": "in-hunk finding"},
+        {"path": "src/app.py", "line": 10, "side": "LEFT", "body": "old-line finding"},
+    ]
+    assert captured["body"]["body"] == (
+        "summary\n\n## Not anchored to diff"
+        "\n- **`src/app.py:15`** — gap finding"
+        "\n- **`src/other.py:3`** — stale-path finding"
+    )
+    assert "comments=2" in result
+    assert "dropped=2" in result
+    assert db.list_staged_review_comments(bindings.issue_key) == []
+
+
+def test_submit_pr_review_validation_fails_open_for_missing_patch_or_files_fetch(
+    db: Database, tmp_path: Path
+) -> None:
+    submitted: list[dict[str, Any]] = []
+    files_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal files_calls
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            files_calls += 1
+            if files_calls == 1:
+                return _pr_files_response(request, patch="")
+            return _pr_files_response(request, status=500)
+        if request.url.path.endswith("/reviews"):
+            body = json.loads(request.content)
+            submitted.append(body)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 40 + len(submitted),
+                    "user": {"login": "roboms-bot"},
+                    "body": body["body"],
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 99, "body": "binary finding"}, _ctx())
+        first = submit_tool.execute({"body": "empty patch"}, _ctx())
+        stage_tool.execute({"path": "src/app.py", "line": 99, "body": "fetch failure finding"}, _ctx())
+        second = submit_tool.execute({"body": "fetch failed"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert submitted[0]["comments"][0]["body"] == "binary finding"
+    assert submitted[1]["comments"][0]["body"] == "fetch failure finding"
+    assert "dropped" not in first
+    assert "dropped" not in second
+
+
+def test_submit_pr_review_forgejo_fetches_head_commit_id(db: Database, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99":
+            return httpx.Response(
+                200,
+                json={
+                    "number": 99,
+                    "html_url": "https://forge.example/octo/widget/pull/99",
+                    "head": {"ref": "fix-crash", "sha": "abc123456789"},
+                    "base": {"ref": "main"},
+                    "state": "open",
+                    "user": {"login": "alice"},
+                },
+            )
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "roboms-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(
+        db, tmp_path, httpx.MockTransport(handler), platform="forgejo"
+    )
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert "submitted PR review" in result
+    assert captured["body"]["commit_id"] == "abc123456789"
+    assert captured["body"]["comments"] == [
+        {"path": "src/app.py", "body": "finding", "new_position": 12}
+    ]
+
+
+@pytest.mark.parametrize("review_status", [422, 500])
+def test_submit_pr_review_validation_error_falls_back_to_issue_comments(
+    db: Database, tmp_path: Path, review_status: int
+) -> None:
+    comment_bodies: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            return httpx.Response(review_status, json={"message": "review rejected"})
+        if request.url.path == "/repos/octo/widget/issues/99/comments":
+            body = json.loads(request.content)["body"]
+            comment_bodies.append(body)
+            return httpx.Response(200, json={"id": len(comment_bodies), "body": body})
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert f"review rejected ({review_status})" in result
+    assert comment_bodies == ["summary", "**`src/app.py:12`**\n\nfinding"]
+    assert db.list_staged_review_comments(bindings.issue_key) == []
+
+
+def test_submit_pr_review_fallback_failure_keeps_staged_comments(db: Database, tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            return httpx.Response(422, json={"message": "review rejected"})
+        if request.url.path == "/repos/octo/widget/issues/99/comments":
+            return httpx.Response(500, json={"message": "fallback failed"})
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "finding"}, _ctx())
+        with pytest.raises(RpcCommandError, match="fallback comment posting failed"):
+            submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    rows = db.list_staged_review_comments(bindings.issue_key)
+    assert len(rows) == 1
+    assert rows[0].body == "finding"
+
+
+def test_diff_anchorable_lines_handles_sides_boundaries_and_header_like_content() -> None:
+    right, left = host_tools._diff_anchorable_lines(_PATCH)
+    assert right == frozenset({10, 11, 12, 13, 14})
+    assert left == frozenset({9, 10, 11, 12})
+
+    right, left = host_tools._diff_anchorable_lines("@@ -0,0 +1,2 @@\n+a\n+b\n")
+    assert right == frozenset({1, 2})
+    assert left == frozenset()
+
+    right, left = host_tools._diff_anchorable_lines("@@ -5,3 +5,0 @@\n-a\n-b\n-c\n")
+    assert right == frozenset()
+    assert left == frozenset({5, 6, 7})
+
+    patch = "+++ b/src/app.py\n--- a/src/app.py\n@@ -1,2 +1,3 @@\n ctx\n tail\n--- removed\n+++ added\n"
+    right, left = host_tools._diff_anchorable_lines(patch)
+    assert right == frozenset({1, 2, 3})
+    assert left == frozenset({1, 2, 3})
 
 
 def test_review_tools_reject_outside_review_mode(db: Database, tmp_path: Path) -> None:

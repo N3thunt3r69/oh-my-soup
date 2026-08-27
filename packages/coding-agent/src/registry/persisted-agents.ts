@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-soup/pi-ai";
+import { logger } from "@oh-my-soup/pi-utils";
 import { ADVISOR_TRANSCRIPT_FILENAME, isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import { resolveExplicitModelRole } from "../config/model-resolver";
 import { assistantTurnProducedOutput } from "../session/messages";
@@ -12,6 +13,7 @@ import { persistedVibeChildIds } from "../vibe/runtime";
 import {
 	type AgentHistorySummary,
 	type AgentMetricsSummary,
+	type AgentRef,
 	type AgentRegistry,
 	getAgentTombstonePath,
 	MAIN_AGENT_ID,
@@ -19,6 +21,8 @@ import {
 
 /** Maximum prefix entries inspected for task metadata. */
 const MAX_METADATA_LINES = 64;
+/** Bounds pathological legacy advisor transcripts during Hub roster scans. */
+const MAX_ADVISOR_HISTORY_LINES = 200_000;
 
 interface PersistedAgentMetadata {
 	activity?: string;
@@ -153,7 +157,12 @@ async function readPersistedAgentHistory(
 				const message = recordOf(record.message);
 				if (message?.role === "assistant") assistantById.set(id, assistantMetrics(message));
 			},
-			{ shouldContinue },
+			{
+				shouldContinue,
+				maxRecords: isAdvisorTranscriptName(path.basename(transcript.sessionFile))
+					? MAX_ADVISOR_HISTORY_LINES
+					: undefined,
+			},
 		);
 	} catch {
 		return {};
@@ -313,6 +322,80 @@ async function readPersistedVibeChildIds(sessionFile: string, shouldContinue: ()
 		return new Set();
 	}
 }
+const kPersistedRosterLatches = Symbol("persistedRosterLatches");
+const kPersistedRosterRestoreTail = Symbol("persistedRosterRestoreTail");
+
+interface RegistryWithPersistedRosterLatches extends AgentRegistry {
+	[kPersistedRosterLatches]?: Map<string, Promise<void>>;
+	[kPersistedRosterRestoreTail]?: Promise<void>;
+}
+
+async function resolveRootSessionFile(registry: AgentRegistry, hint?: string | null): Promise<string | undefined> {
+	const mainFile = registry.get(MAIN_AGENT_ID)?.sessionFile;
+	const candidate =
+		typeof hint === "string" && hint.endsWith(".jsonl")
+			? hint
+			: typeof mainFile === "string" && mainFile.endsWith(".jsonl")
+				? mainFile
+				: undefined;
+	if (candidate === undefined) return undefined;
+	let current = path.resolve(candidate);
+	for (let depth = 0; depth < 8; depth++) {
+		const parentFile = `${path.dirname(current)}.jsonl`;
+		if (!(await Bun.file(parentFile).exists())) return current;
+		current = parentFile;
+	}
+	return current;
+}
+
+/** True when an agent transcript belongs to the selected interactive session tree. */
+export function isAgentRefInSessionRoot(ref: AgentRef, rootSessionFile: string | undefined): boolean {
+	if (!rootSessionFile) return true;
+	if (!ref.sessionFile) return ref.status !== "parked";
+	const resolvedSessionFile = path.resolve(ref.sessionFile);
+	if (resolvedSessionFile === rootSessionFile) return true;
+	const relative = path.relative(rootSessionFile.slice(0, -".jsonl".length), resolvedSessionFile);
+	return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+/**
+ * Restore parked sibling transcripts once per interactive session root.
+ * Failed scans remain retryable and never prevent the active session opening.
+ */
+export async function ensurePersistedRoster(
+	registry: AgentRegistry,
+	sessionFileHint?: string | null,
+): Promise<string | undefined> {
+	let root: string | undefined;
+	try {
+		root = await resolveRootSessionFile(registry, sessionFileHint);
+	} catch (error) {
+		logger.warn("Failed to resolve persisted agent roster", { error: String(error) });
+		return undefined;
+	}
+	if (!root) return undefined;
+	const resolvedRoot = root;
+
+	const taggedRegistry = registry as RegistryWithPersistedRosterLatches;
+	const latches = taggedRegistry[kPersistedRosterLatches] ?? new Map<string, Promise<void>>();
+	taggedRegistry[kPersistedRosterLatches] = latches;
+	const existing = latches.get(resolvedRoot);
+	if (existing) {
+		await existing;
+		return resolvedRoot;
+	}
+	const priorRestore = taggedRegistry[kPersistedRosterRestoreTail] ?? Promise.resolve();
+	const pending = priorRestore
+		.then(() => registerPersistedSubagents(registry, resolvedRoot))
+		.catch(error => {
+			latches.delete(resolvedRoot);
+			logger.warn("Failed to restore persisted agent roster", { root: resolvedRoot, error: String(error) });
+		});
+	taggedRegistry[kPersistedRosterRestoreTail] = pending;
+	latches.set(resolvedRoot, pending);
+	await pending;
+	return resolvedRoot;
+}
 
 /** Register persisted subagent and advisor transcripts as parked registry refs. */
 export async function registerPersistedSubagents(
@@ -422,6 +505,15 @@ async function registerPersistedSubagentsFromDir(
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
 		}
 		if (!shouldContinue()) return;
+		const existing = registry.get(id);
+		if (
+			existing?.kind === "sub" &&
+			existing.session === null &&
+			existing.sessionFile !== sessionFile &&
+			(existing.status === "parked" || existing.status === "aborted")
+		) {
+			registry.unregister(id, existing);
+		}
 		if (!registry.get(id)) {
 			const metadata = await readPersistedAgentMetadata(sessionFile);
 			if (!shouldContinue()) return;

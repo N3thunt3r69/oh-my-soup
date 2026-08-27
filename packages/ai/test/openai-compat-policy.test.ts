@@ -199,4 +199,62 @@ describe("OpenAI compat policy", () => {
 		expect(params.enable_thinking).toBe(true);
 		expect(params.reasoning_effort).toBeUndefined();
 	});
+
+	function localQwenModel(id: string, provider: string, baseUrl: string): Model<"openai-completions"> {
+		return buildModel({
+			id,
+			name: id,
+			api: "openai-completions",
+			provider,
+			baseUrl,
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262_144,
+			maxTokens: 32_768,
+		} satisfies ModelSpec<"openai-completions">);
+	}
+
+	it("routes local Qwen3.8 effort selections onto the chat template (llama.cpp qwen dialect)", () => {
+		const model = localQwenModel("qwen3.8-27b", "llama.cpp", "http://127.0.0.1:8080/v1");
+		for (const effort of [Effort.Low, Effort.Medium, Effort.XHigh]) {
+			const params = chatParams();
+			applyChatCompletionsCompatPolicy(
+				params,
+				resolveOpenAICompatPolicy(model, { endpoint: "chat-completions", reasoning: effort }),
+			);
+			expect(params.enable_thinking).toBe(true);
+			expect(params.reasoning_effort).toBe(effort);
+			expect(params.chat_template_kwargs).toEqual({ preserve_thinking: true, reasoning_effort: effort });
+			expect(params.preserve_thinking).toBe(true);
+		}
+	});
+
+	it("routes local Qwen3.8 effort selections via chat_template_kwargs only on vLLM", () => {
+		const model = localQwenModel("qwen3.8-27b", "vllm", "http://127.0.0.1:8000/v1");
+		const params = chatParams();
+		applyChatCompletionsCompatPolicy(
+			params,
+			resolveOpenAICompatPolicy(model, { endpoint: "chat-completions", reasoning: Effort.Medium }),
+		);
+		expect(params.enable_thinking).toBeUndefined();
+		expect(params.reasoning_effort).toBeUndefined();
+		expect(params.chat_template_kwargs).toEqual({
+			preserve_thinking: true,
+			enable_thinking: true,
+			reasoning_effort: Effort.Medium,
+		});
+	});
+
+	it("keeps pre-3.8 local Qwen on the bare enable_thinking toggle", () => {
+		const model = localQwenModel("qwen-3.6-27b", "llama.cpp", "http://127.0.0.1:8080/v1");
+		const params = chatParams();
+		applyChatCompletionsCompatPolicy(
+			params,
+			resolveOpenAICompatPolicy(model, { endpoint: "chat-completions", reasoning: Effort.High }),
+		);
+		expect(params.enable_thinking).toBe(true);
+		expect(params.reasoning_effort).toBeUndefined();
+		expect(params.chat_template_kwargs).toEqual({ preserve_thinking: true });
+	});
 });

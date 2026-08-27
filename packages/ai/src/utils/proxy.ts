@@ -1,7 +1,10 @@
 import * as net from "node:net";
 import * as tls from "node:tls";
-import * as AIError from "../error";
+import { AbortError } from "../error/abort";
+import { StreamTimeoutError, ValidationError } from "../error/validation";
 import type { FetchImpl } from "../types";
+
+type BunProxyRequestInit = RequestInit & { proxy: string };
 
 /**
  * Checks if a host is local or cloud metadata, which should always bypass the proxy
@@ -140,36 +143,56 @@ export function getProxyForUrl(provider: string, url: URL): string | undefined {
 }
 
 /**
- * Wraps a fetch implementation to inject proxy options for non-local hosts.
+ * Wraps `fetchImpl` so non-local requests tunnel through `proxyUrl`.
+ * A caller-supplied proxy wins, which makes nested global and provider-specific
+ * wrappers idempotent.
  */
-export function wrapFetchForProxy(fetchImpl: FetchImpl, provider: string): FetchImpl {
-	const proxyUrl = getProxyForProvider(provider);
-	if (!proxyUrl) {
-		return fetchImpl;
-	}
+function wrapFetchWithProxyUrl(fetchImpl: FetchImpl, proxyUrl: string | undefined): FetchImpl {
+	if (!proxyUrl) return fetchImpl;
 
 	const wrapped = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+		if ((init as { proxy?: unknown } | undefined)?.proxy) return fetchImpl(input, init);
+
 		const urlStr = input instanceof Request ? input.url : input.toString();
 		let urlObj: URL;
 		try {
 			urlObj = new URL(urlStr);
 		} catch {
-			// Fallback to calling fetch unmodified if URL is unparseable
 			return fetchImpl(input, init);
 		}
 
-		if (shouldBypassProxy(urlObj)) {
-			return fetchImpl(input, init);
-		}
-
-		const mergedInit = { ...(init ?? {}), proxy: proxyUrl };
-		return fetchImpl(input, mergedInit);
+		if (shouldBypassProxy(urlObj)) return fetchImpl(input, init);
+		const proxyInit: BunProxyRequestInit = { ...(init ?? {}), proxy: proxyUrl };
+		return fetchImpl(input, proxyInit);
 	};
 
-	if (fetchImpl.preconnect) {
-		wrapped.preconnect = fetchImpl.preconnect;
-	}
+	if (fetchImpl.preconnect) wrapped.preconnect = fetchImpl.preconnect;
 	return wrapped;
+}
+
+/** Wraps a fetch implementation with the provider's resolved proxy. */
+export function wrapFetchForProxy(fetchImpl: FetchImpl, provider: string): FetchImpl {
+	return wrapFetchWithProxyUrl(fetchImpl, getProxyForProvider(provider));
+}
+
+let globalProxyFetchInstalled = false;
+
+/** Test seam: allows a restored global fetch to be wrapped again. */
+export function __resetGlobalProxyFetch(): void {
+	globalProxyFetchInstalled = false;
+}
+
+/**
+ * Applies `PI_PROXY` to bare process-wide fetch calls such as OAuth, usage, and
+ * model discovery. Per-request provider proxies retain precedence, while local,
+ * private-range, metadata, and NO_PROXY targets remain direct.
+ */
+export function installGlobalProxyFetch(): void {
+	if (globalProxyFetchInstalled) return;
+	const proxyUrl = Bun.env.PI_PROXY?.trim();
+	if (!proxyUrl) return;
+	globalProxyFetchInstalled = true;
+	globalThis.fetch = wrapFetchWithProxyUrl(globalThis.fetch, proxyUrl) as typeof globalThis.fetch;
 }
 
 export interface ConnectProxiedSocketOptions {
@@ -191,7 +214,7 @@ export async function connectProxiedSocket(
 	options?: ConnectProxiedSocketOptions,
 ): Promise<tls.TLSSocket> {
 	if (options?.signal?.aborted) {
-		throw new AIError.AbortError("Proxy tunnel aborted");
+		throw new AbortError("Proxy tunnel aborted");
 	}
 
 	const proxyUrl = new URL(proxyUrlStr);
@@ -242,7 +265,7 @@ export async function connectProxiedSocket(
 		cleanup();
 		resolve(socket);
 	};
-	const onAbort = (): void => rejectOnce(new AIError.AbortError("Proxy tunnel aborted"));
+	const onAbort = (): void => rejectOnce(new AbortError("Proxy tunnel aborted"));
 	const onRawError = (error: Error): void => rejectOnce(error);
 	const onTunnelError = (error: Error): void => rejectOnce(error);
 	const onTunnelReady = (): void => {
@@ -259,7 +282,7 @@ export async function connectProxiedSocket(
 
 		const firstLine = responseData.split("\r\n")[0];
 		if (!firstLine.includes(" 200 ")) {
-			rejectOnce(new AIError.ValidationError(`Proxy tunnel failed: ${firstLine}`));
+			rejectOnce(new ValidationError(`Proxy tunnel failed: ${firstLine}`));
 			return;
 		}
 
@@ -293,7 +316,7 @@ export async function connectProxiedSocket(
 	if (options?.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) {
 		const timeoutMs = Math.trunc(options.timeoutMs);
 		timeout = setTimeout(() => {
-			rejectOnce(new AIError.StreamTimeoutError(`Proxy tunnel timed out after ${timeoutMs}ms`));
+			rejectOnce(new StreamTimeoutError(`Proxy tunnel timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
 		timeout.unref?.();
 	}

@@ -40,8 +40,10 @@ export interface Snapshot {
 	 * this tag. A partial read (range, or a structural summary that collapsed
 	 * bodies) leaves this sparse; a whole-file read fills every line. Multiple
 	 * reads of the same content union into one set. `undefined` means "no
-	 * provenance recorded" — the patcher then skips the seen-line check and
-	 * applies as before. Mutated in place as more of the same content is read.
+	 * provenance recorded" — the patcher skips the seen-line check. An empty
+	 * set means provenance is active with zero displayed lines, so every
+	 * anchored line remains guarded. Mutated in place as more of the same
+	 * content is read.
 	 */
 	seenLines?: Set<number>;
 }
@@ -84,8 +86,10 @@ export abstract class SnapshotStore {
 
 	/**
 	 * Record the full normalized text of `path` and return its content tag.
-	 * `seenLines` (optional) are the 1-indexed lines the producer displayed;
-	 * they merge into {@link Snapshot.seenLines} across reads of identical text.
+	 * `seenLines` are the 1-indexed lines the producer displayed; they merge
+	 * across reads of identical text. Omit the argument to disable provenance
+	 * for this snapshot. Pass an empty iterable to enable enforcement with zero
+	 * authorized lines.
 	 */
 	abstract record(path: string, fullText: string, seenLines?: Iterable<number>): string;
 

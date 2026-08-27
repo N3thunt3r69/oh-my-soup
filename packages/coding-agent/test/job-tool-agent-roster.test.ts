@@ -16,7 +16,8 @@ import { type CoordinationDetails, HubTool } from "../src/tools/hub";
 const managers: AsyncJobManager[] = [];
 
 function createManager(): AsyncJobManager {
-	const manager = new AsyncJobManager({ onJobComplete: () => {} });
+	const manager = new AsyncJobManager({});
+	manager.registerDeliverySink("Main", () => {});
 	managers.push(manager);
 	return manager;
 }
@@ -75,6 +76,40 @@ describe("hub jobs snapshot", () => {
 
 		expect(resultText(result)).toBe("No background jobs.");
 		expect((result.details as CoordinationDetails)?.jobs).toEqual([]);
+	});
+	test("omits result bodies already auto-delivered to the owning agent", async () => {
+		const manager = createManager();
+		const jobId = manager.register("task", "completed child", async () => "already delivered body", {
+			ownerId: "Main",
+		});
+		await manager.getJob(jobId)?.promise;
+		await manager.drainDeliveries({ timeoutMs: 200 });
+
+		const tool = new HubTool(createToolSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("call", { op: "jobs" });
+
+		expect(resultText(result)).not.toContain("already delivered body");
+		expect(resultText(result)).toContain("Delivery: already delivered or recovered.");
+		expect((result.details as CoordinationDetails)?.jobs?.[0]?.resultText).toBeUndefined();
+	});
+
+	test("returns an undelivered result body once for manual recovery", async () => {
+		const manager = new AsyncJobManager({});
+		managers.push(manager);
+		const jobId = manager.register("task", "orphaned child", async () => "recover this child report", {
+			ownerId: "Main",
+		});
+		await manager.getJob(jobId)?.promise;
+		await manager.drainDeliveries({ timeoutMs: 200 });
+
+		const tool = new HubTool(createToolSession({ manager, agentId: "Main" }));
+		const recovered = await tool.execute("first", { op: "jobs" });
+		const consumed = await tool.execute("second", { op: "jobs" });
+
+		expect(resultText(recovered)).toContain("recover this child report");
+		expect(resultText(recovered)).toContain("Delivery: not auto-delivered; recovered by this snapshot.");
+		expect(resultText(consumed)).not.toContain("recover this child report");
+		expect(resultText(consumed)).toContain("Delivery: already delivered or recovered.");
 	});
 
 	test("list surfaces running subagents that have no backing job", async () => {

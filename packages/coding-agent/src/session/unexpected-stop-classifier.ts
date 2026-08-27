@@ -1,4 +1,4 @@
-import { type AssistantMessage, completeSimple } from "@oh-my-soup/pi-ai";
+import { type AssistantMessage, completeSimple, retryTransientCompletion } from "@oh-my-soup/pi-ai";
 import { logger, prompt } from "@oh-my-soup/pi-utils";
 
 import type { ModelRegistry } from "../config/model-registry";
@@ -88,19 +88,23 @@ async function classifyOnline(text: string, deps: ClassifyUnexpectedStopDeps): P
 	const metadata = deps.metadataResolver?.(model.provider);
 	const maxTokens = REASONING_SAFE_MAX_TOKENS;
 
-	const response = await completeSimple(
-		model,
-		{
-			systemPrompt: [CLASSIFIER_SYSTEM_PROMPT],
-			messages: [{ role: "user", content: text, timestamp: Date.now() }],
-		},
-		{
-			apiKey: deps.registry.resolver(model, deps.sessionId),
-			maxTokens,
-			disableReasoning: true,
-			metadata,
-			signal: deps.signal,
-		},
+	const response = await retryTransientCompletion(
+		() =>
+			completeSimple(
+				model,
+				{
+					systemPrompt: [CLASSIFIER_SYSTEM_PROMPT],
+					messages: [{ role: "user", content: text, timestamp: Date.now() }],
+				},
+				{
+					apiKey: deps.registry.resolver(model, deps.sessionId),
+					maxTokens,
+					disableReasoning: true,
+					metadata,
+					signal: deps.signal,
+				},
+			),
+		{ signal: deps.signal },
 	);
 
 	if (response.stopReason === "error") {

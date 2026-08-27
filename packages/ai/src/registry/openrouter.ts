@@ -1,28 +1,21 @@
-import { createApiKeyLogin } from "./api-key-login";
 import type { OAuthLoginCallbacks } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
 
-/** OpenRouter login flow (API key paste, validated via /auth/key).
- *
- * `/api/v1/models` is public and returns 200 for any bearer (including bogus),
- * so it cannot validate auth. `/api/v1/auth/key` is the canonical "who am I"
- * endpoint — 200 for valid keys, 401 otherwise.
+/**
+ * OpenRouter login: Sign in with OpenRouter (OAuth PKCE) that mints a durable
+ * `sk-or-…` API key, with the manual-input race accepting a pasted existing
+ * key (validated via `/api/v1/auth/key`). Both paths return the durable key as
+ * a string so AuthStorage persists it as an `api_key` credential.
  */
-export const loginOpenRouter = createApiKeyLogin({
-	providerLabel: "OpenRouter",
-	authUrl: "https://openrouter.ai/keys",
-	instructions: "Create or copy your OpenRouter API key",
-	promptMessage: "Paste your OpenRouter API key",
-	placeholder: "sk-or-...",
-	validation: {
-		kind: "models-endpoint",
-		provider: "OpenRouter",
-		modelsUrl: "https://openrouter.ai/api/v1/auth/key",
-	},
-});
 
 export const openrouterProvider = {
 	id: "openrouter",
 	name: "OpenRouter",
-	login: (cb: OAuthLoginCallbacks) => loginOpenRouter(cb),
+	login: async (cb: OAuthLoginCallbacks) => {
+		const { loginOpenRouterOAuth } = await import("./oauth/openrouter");
+		const credentials = await loginOpenRouterOAuth(cb);
+		return credentials.access;
+	},
+	callbackPort: 54549,
+	pasteCodeFlow: true,
 } as const satisfies ProviderDefinition;

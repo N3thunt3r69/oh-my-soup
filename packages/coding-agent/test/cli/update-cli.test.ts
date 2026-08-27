@@ -98,3 +98,33 @@ describe("getLatestRelease rename pointers", () => {
 		expect(release.packages).toEqual({ pkg: "@oh-my-soup/pi-coding-agent", natives: "@oh-my-soup/pi-natives" });
 	});
 });
+
+describe("getLatestRelease proxy errors", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("translates Bun's proxy failure into actionable CLI guidance", async () => {
+		const fetchStub = Object.assign(
+			async () => {
+				throw new Error(
+					'UnsupportedProxyProtocol fetching "https://registry.npmjs.org/@oh-my-soup/pi-coding-agent/latest". ' +
+						"For more information, pass `verbose: true` in the second argument to fetch()",
+				);
+			},
+			{ preconnect: globalThis.fetch.preconnect },
+		);
+		vi.spyOn(globalThis, "fetch").mockImplementation(fetchStub);
+
+		const error = await getLatestRelease({ timeoutMs: 5000 }).then(
+			() => null,
+			(reason: unknown) => reason as Error,
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).not.toContain("verbose: true");
+		expect(error?.message).not.toContain("fetch()");
+		expect(error?.message).toMatch(/SOCKS/i);
+		expect(error?.message).toMatch(/https?:\/\//i);
+	});
+});

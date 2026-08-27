@@ -24,6 +24,18 @@ describe("applyToolProxy", () => {
 		expect(wrapper.parameters).toBeInstanceOf(Function);
 	});
 
+	it("preserves bind-capable schema callables from external arktype copies", () => {
+		const schema = Object.assign((value: unknown) => value, {
+			toJsonSchema: () => ({ type: "object" }),
+			assert: (value: unknown) => value,
+		});
+		const tool = { name: "ext", description: "ext tool", parameters: schema };
+		const wrapper: Record<string, unknown> = {};
+		applyToolProxy(tool, wrapper);
+		expect(wrapper.parameters).toBe(schema);
+		expect(isArkSchema(wrapper.parameters)).toBe(true);
+	});
+
 	it("binds prototype methods to the underlying tool", async () => {
 		const wrapper: Record<string, unknown> = {};
 		applyToolProxy(new DemoTool(), wrapper);

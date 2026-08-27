@@ -17,7 +17,7 @@ import { hostHasInheritableConsole } from "../eval/py/spawn-options";
 import { truncateHead, truncateHeadBytes, truncateTail, truncateTailBytes } from "../session/streaming-output";
 import { workerEnvFromParent } from "../subprocess/worker-client";
 import { daemonBrokerEndpoint } from "./paths";
-import { hasLiveDaemonProjectPresence } from "./presence";
+import { hasLiveDaemonProjectPresence, pruneDeadDaemonRuntimeDirs } from "./presence";
 import {
 	DAEMON_IDLE_GRACE_ENV,
 	DAEMON_PROJECT_DIR_ENV,
@@ -57,9 +57,16 @@ const PID_FILE = "broker.pid";
 const META_FILE = "meta.json";
 const LOG_FILE = "output.log";
 const PREVIOUS_LOG_FILE = "output.previous.log";
+const HOST_HAS_INHERITABLE_CONSOLE = hostHasInheritableConsole();
 const DAEMON_SPAWN_OPTIONS = resolveDaemonSpawnOptions({
 	platform: process.platform,
-	hostHasInheritableConsole: hostHasInheritableConsole(),
+	hostHasInheritableConsole: HOST_HAS_INHERITABLE_CONSOLE,
+	surviveParentExit: false,
+});
+const DETACHED_DAEMON_SPAWN_OPTIONS = resolveDaemonSpawnOptions({
+	platform: process.platform,
+	hostHasInheritableConsole: HOST_HAS_INHERITABLE_CONSOLE,
+	surviveParentExit: true,
 });
 
 const SIGNAL_NUMBER: Record<DaemonSignal, number> = {
@@ -807,7 +814,7 @@ class DaemonBroker {
 				cwd: record.spec.cwd,
 				env: workerEnvFromParent(record.spec.env),
 				stdio: ["ignore", output.fd, output.fd],
-				...DAEMON_SPAWN_OPTIONS,
+				...DETACHED_DAEMON_SPAWN_OPTIONS,
 			});
 			record.process = process;
 			record.snapshot.pid = process.pid;
@@ -1374,6 +1381,12 @@ export async function startDaemonBrokerFromEnvironment(): Promise<void> {
 	const lease = await acquireBrokerLease(runtimeDir);
 	if (!lease) return;
 	setProcessName("oms daemon broker");
+	// Reclaim dead sibling project scopes without delaying broker startup.
+	void pruneDeadDaemonRuntimeDirs(runtimeDir).catch(error => {
+		logger.warn("Daemon runtime prune failed", {
+			error: error instanceof Error ? error.message : String(error),
+		});
+	});
 	const token = (await Bun.file(path.join(runtimeDir, TOKEN_FILE)).text()).trim();
 	if (!token) throw new Error("Daemon broker token is empty");
 	const broker = new DaemonBroker(projectDir, runtimeDir, token, idleGraceMs);

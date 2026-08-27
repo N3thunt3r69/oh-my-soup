@@ -1187,9 +1187,20 @@ describe("TUI terminal-state regressions", () => {
 				await settle(term);
 
 				term.resize(40, 24);
+				// Wait for the content-bearing render itself. A fixed 1 ms settle is
+				// shorter than the renderer's cadence delay when the initial frame
+				// just finished, and can observe the synchronous resize paint instead.
+				const renderedLatestLines = Promise.withResolvers<void>();
+				const render = component.render.bind(component);
+				vi.spyOn(component, "render").mockImplementation(width => {
+					const lines = render(width);
+					renderedLatestLines.resolve();
+					return lines;
+				});
 				component.setLines(rows("line-", 19));
 				tui.requestRender();
-				await settle(term);
+				await renderedLatestLines.promise;
+				await term.flush();
 
 				// 19 lines fit inside the 24-row viewport: rows 0..18 hold content,
 				// 19..23 stay blank — with no 4-row (height delta) displacement.

@@ -4,7 +4,6 @@ import * as stream from "node:stream";
 import * as tls from "node:tls";
 import * as zlib from "node:zlib";
 import type { FetchImpl } from "../types";
-import { connectProxiedSocket } from "../utils/proxy";
 
 type CoworkTlsOptions = {
 	ca?: string | string[];
@@ -22,13 +21,8 @@ type CoworkRequestInit = RequestInit & {
 
 type RequestBody = string | Uint8Array;
 
-type AgentLease = {
-	agent: https.Agent;
-	release?: () => void;
-};
-
 const directAgent = new https.Agent({ keepAlive: true });
-const fallbackFetch: FetchImpl = globalThis.fetch;
+const fallbackFetch: FetchImpl = (input, init) => globalThis.fetch(input, init as RequestInit);
 
 function isHeaderRecord(headers: RequestInit["headers"]): headers is Record<string, string> {
 	return headers !== undefined && !(headers instanceof Headers) && !Array.isArray(headers);
@@ -74,19 +68,6 @@ function resolveTlsOptions(url: URL, options: CoworkTlsOptions | undefined): tls
 	if (options?.cert !== undefined) resolved.cert = options.cert;
 	if (options?.key !== undefined) resolved.key = options.key;
 	return resolved;
-}
-
-async function acquireAgent(
-	url: URL,
-	proxy: string | undefined,
-	tlsOptions: tls.ConnectionOptions,
-	signal: AbortSignal | undefined,
-): Promise<AgentLease> {
-	if (!proxy) return { agent: directAgent };
-	const socket = await connectProxiedSocket(proxy, url.origin, { signal, tls: tlsOptions });
-	const agent = new https.Agent({ keepAlive: false });
-	agent.createConnection = () => socket;
-	return { agent, release: () => agent.destroy() };
 }
 
 function responseHeaders(message: IncomingMessage): Headers {
@@ -135,13 +116,12 @@ async function sendCoworkRequest(
 	const method = init.method ?? "GET";
 	const signal = init.signal ?? undefined;
 	const tlsOptions = resolveTlsOptions(url, init.tls);
-	const lease = await acquireAgent(url, init.proxy, tlsOptions, signal);
+	const agent = directAgent;
 	const headers = buildOrderedHeaders(url, sourceHeaders, body);
 	const result = Promise.withResolvers<Response>();
 	let request: ClientRequest | undefined;
 	const release = (): void => {
 		signal?.removeEventListener("abort", abort);
-		lease.release?.();
 	};
 	const abort = (): void => {
 		const reason = signal?.reason;
@@ -160,7 +140,7 @@ async function sendCoworkRequest(
 			path: `${url.pathname}${url.search}`,
 			method,
 			headers,
-			agent: lease.agent,
+			agent,
 			...tlsOptions,
 		},
 		message => {
@@ -182,9 +162,19 @@ async function sendCoworkRequest(
 	return result.promise;
 }
 
-/** Sends Cowork-profiled HTTPS requests with stable header order, HTTP/1.1, and streaming decompression. */
+/**
+ * Sends Cowork-profiled HTTPS requests with stable header order, HTTP/1.1, and
+ * streaming decompression. Proxied requests use Bun fetch because Bun's
+ * node:https shim ignores custom agent connections and would silently discard
+ * the CONNECT tunnel.
+ */
 export const coworkFetch: FetchImpl = async (input, init) => {
-	if (input instanceof Request || init === undefined || !isHeaderRecord(init.headers)) {
+	if (
+		input instanceof Request ||
+		init === undefined ||
+		!isHeaderRecord(init.headers) ||
+		("proxy" in init && Boolean(init.proxy))
+	) {
 		return fallbackFetch(input, init);
 	}
 	let url: URL;
@@ -196,6 +186,5 @@ export const coworkFetch: FetchImpl = async (input, init) => {
 	if (url.protocol !== "https:") return fallbackFetch(input, init);
 	const body = resolveBody(init.body);
 	if (init.body != null && body === undefined) return fallbackFetch(input, init);
-	const coworkInit: CoworkRequestInit = init;
-	return sendCoworkRequest(url, coworkInit, init.headers, body);
+	return sendCoworkRequest(url, init, init.headers, body);
 };

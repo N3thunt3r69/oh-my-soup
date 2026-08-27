@@ -6,9 +6,15 @@
 
 - Added `--history <directory>` (`-H`) as a directory-backed session history option; it stores the authoritative chat transcript and session data there.
 - Added `--stream <directory>` (`-S`) for local Unix-socket integration: `chat.sock` emits live JSONL chat events and `session.sock` starts with a session snapshot then emits every appended session entry.
+- Added `tokenizer` to custom model and `modelOverrides` configuration. It overrides the catalog-resolved local tokenizer family for a model when a proxy serves a known model id with a different tokenizer.
+
+### Changed
+
+- Token counting is now scoped to the model being billed rather than to a process-global tokenizer: session maintenance, stats, advisors, `/context`, snapcompact inline imaging, and `compress` each count through the owning agent's `Tokenizer` (`agent.tokenizer`). Message counting is `Tokenizer.countMessage`/`countMessages`; the legacy coding-agent shim keeps a compatibility `estimateTokens` export for legacy extensions.
 
 ### Fixed
 
+- Split commits now reject truncated staged binary diffs instead of slicing incomplete output, and preserve `GIT binary patch` terminators byte-for-byte through parse/join.
 - Fast tool completions no longer leave a running summary that blocks transcript retirement and squeezes later tool output.
 - Reviving a finished subagent with a `hub` message no longer overwrites its completed `agent://<id>` output with an "exited without calling yield" warning; revival turns only rewrite the artifact when they produce a new `yield` result ([#9518](https://github.com/can1357/oh-my-pi/issues/9518)).
 - Settings → Plugins no longer renders empty on first open; the async plugin list schedules a repaint when it mounts ([#9526](https://github.com/can1357/oh-my-pi/issues/9526)).
@@ -22,6 +28,9 @@
 - Fixed `disasm open` appearing to hang or timing out on large existing IDA databases: managed IDALib workers now advertise loaded `.i64`/`.idb` targets without first draining the database's entire pending auto-analysis queue; raw input imports still wait for initial analysis.
 - Machine-global daemon brokers now detach into a hidden Windows process, so the browser relay survives the client that started it while another OMS process still holds the broker lease.
 - `oms gc --apply` now finalizes every history, stats, and WAL prepared statement before closing SQLite, preventing locked `history.db`/`stats.db` files and failed fixture or profile cleanup on Windows.
+- Fixed manual `/compact` failing on transient summarization overloads while preserving auto-compaction's existing outer retry budget.
+- Replay-safe title, classifier, TTS, commit-analysis, commit-message, memory, and mnemopi oneshots now retry transient provider failures with bounded backoff; side-effecting agent turns remain unchanged.
+- Commit analysis, summary, changelog, and reduction paths now surface final provider error stops rather than parsing error text as successful output.
 
 ## [17.3.2] - 2026-08-16
 

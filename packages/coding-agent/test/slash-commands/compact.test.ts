@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "bun:test";
+import { CompactionCancelledError } from "@oh-my-soup/pi-agent-core/compaction";
 import type { CompactOptions } from "@oh-my-soup/pi-coding-agent/extensibility/extensions/types";
 import type { InteractiveModeContext } from "@oh-my-soup/pi-coding-agent/modes/types";
 import type { CompactMode } from "@oh-my-soup/pi-coding-agent/session/compact-modes";
+import { USER_INTERRUPT_LABEL } from "@oh-my-soup/pi-coding-agent/session/messages";
 import {
 	ACP_BUILTIN_SLASH_COMMANDS,
 	executeAcpBuiltinSlashCommand,
@@ -64,6 +66,58 @@ describe("/compact dispatch (ACP)", () => {
 		expect(h.compact).not.toHaveBeenCalled();
 		expect(result).toEqual({ consumed: true });
 		expect((h.output.mock.calls[0]?.[0] as string) ?? "").toContain("snapcompact");
+	});
+
+	it("leaves the RPC command queue free while compaction runs", async () => {
+		const compactStarted = Promise.withResolvers<void>();
+		const compactFinished = Promise.withResolvers<void>();
+		const h = acpRuntime();
+		h.compact.mockImplementation(async () => {
+			compactStarted.resolve();
+			await compactFinished.promise;
+		});
+		const backgroundTasks: Promise<void>[] = [];
+		h.runtime.runCommandInBackground = task => {
+			backgroundTasks.push(task());
+		};
+
+		const result = await executeAcpBuiltinSlashCommand("/compact", h.runtime);
+		await compactStarted.promise;
+		expect(result).toEqual({ consumed: true });
+		expect(h.output).not.toHaveBeenCalled();
+
+		compactFinished.resolve();
+		await Promise.all(backgroundTasks);
+		expect(h.output).toHaveBeenCalledWith("Compaction complete.");
+	});
+
+	it("stays silent when a user interrupt cancels compaction", async () => {
+		const h = acpRuntime();
+		h.compact.mockRejectedValue(new CompactionCancelledError(undefined, { cause: USER_INTERRUPT_LABEL }));
+		const backgroundTasks: Promise<void>[] = [];
+		h.runtime.runCommandInBackground = task => {
+			backgroundTasks.push(task());
+		};
+
+		expect(await executeAcpBuiltinSlashCommand("/compact", h.runtime)).toEqual({ consumed: true });
+		await Promise.all(backgroundTasks);
+		expect(h.output).not.toHaveBeenCalled();
+	});
+
+	it("surfaces extension cancellation rather than treating it as an interrupt", async () => {
+		const h = acpRuntime();
+		h.compact.mockRejectedValue(new CompactionCancelledError());
+
+		await executeAcpBuiltinSlashCommand("/compact", h.runtime);
+		expect(h.output).toHaveBeenCalledWith("Compaction failed: Compaction cancelled");
+	});
+
+	it("surfaces provider failures behind the compaction prefix", async () => {
+		const h = acpRuntime();
+		h.compact.mockRejectedValue(new Error("no model selected"));
+
+		await executeAcpBuiltinSlashCommand("/compact", h.runtime);
+		expect(h.output).toHaveBeenCalledWith("Compaction failed: no model selected");
 	});
 
 	it("advertises the mode subcommands and input hint to ACP clients", () => {

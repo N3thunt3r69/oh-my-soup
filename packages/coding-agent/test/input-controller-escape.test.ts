@@ -189,6 +189,7 @@ function createContext(): {
 			getKeys: () => [],
 		} as unknown as InteractiveModeContext["keybindings"],
 		compactionQueuedMessages: [],
+		mcpTestEscapeHandlers: new Set(),
 		isBashMode: false,
 		isPythonMode: false,
 		optimisticUserMessageSignature: undefined,
@@ -436,6 +437,31 @@ describe("InputController escape behavior", () => {
 
 		expect(spies.abortEval).toHaveBeenCalledTimes(1);
 		expect(spies.abort).not.toHaveBeenCalled();
+	});
+
+	it("cancels every advertised /mcp test without stealing cancellation from the agent turn", () => {
+		const { ctx, editor, spies } = createContext();
+		mutableSessionState(ctx).isStreaming = true;
+		const firstTestEscapeHandler = vi.fn();
+		const latestTestEscapeHandler = vi.fn();
+		ctx.mcpTestEscapeHandlers.add(firstTestEscapeHandler);
+		ctx.mcpTestEscapeHandlers.add(latestTestEscapeHandler);
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onEscape?.();
+
+		expect(firstTestEscapeHandler).toHaveBeenCalledTimes(1);
+		expect(latestTestEscapeHandler).toHaveBeenCalledTimes(1);
+		expect(ctx.mcpTestEscapeHandlers.size).toBe(0);
+		expect(spies.abort).not.toHaveBeenCalled();
+
+		editor.onEscape?.();
+
+		expect(firstTestEscapeHandler).toHaveBeenCalledTimes(1);
+		expect(latestTestEscapeHandler).toHaveBeenCalledTimes(1);
+		expect(spies.abort).toHaveBeenCalledTimes(1);
+		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
 	});
 
 	it("dismisses an active /btw panel before aborting the main stream", () => {

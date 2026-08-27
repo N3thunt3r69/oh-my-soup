@@ -17,6 +17,7 @@ import { AgentStorage } from "@oh-my-soup/pi-coding-agent/session/agent-storage"
 import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, TempDir } from "@oh-my-soup/pi-utils";
+import * as advisorModule from "../src/advisor";
 
 describe("AgentSession advisor toggle", () => {
 	let sharedDir: TempDir;
@@ -318,6 +319,48 @@ describe("AgentSession advisor toggle", () => {
 		);
 	});
 
+	it("activates an enabled advisor once background model discovery settles", async () => {
+		const advisorSelector = `${replacementModel.provider}/${replacementModel.id}`;
+		const settings = Settings.isolated({ "compaction.enabled": false, "advisor.enabled": true });
+		settings.setModelRole("advisor", advisorSelector);
+
+		const fullCatalog = modelRegistry.getAvailable();
+		const catalogBeforeDiscovery = fullCatalog.filter(
+			candidate => !(candidate.provider === replacementModel.provider && candidate.id === replacementModel.id),
+		);
+		let discovered = false;
+		vi.spyOn(modelRegistry, "getAvailable").mockImplementation(() =>
+			discovered ? fullCatalog : catalogBeforeDiscovery,
+		);
+		const refreshSettled = Promise.withResolvers<void>();
+		vi.spyOn(modelRegistry, "awaitBackgroundRefresh").mockImplementation(() => refreshSettled.promise);
+
+		const raceSession = new AgentSession({
+			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
+			sessionManager,
+			settings,
+			modelRegistry,
+			advisorTools: [],
+		});
+		const advisorRebuilt = Promise.withResolvers<void>();
+		const unsubscribe = raceSession.subscribe(event => {
+			if (event.type === "model_changed") advisorRebuilt.resolve();
+		});
+		try {
+			expect(raceSession.isAdvisorEnabled()).toBe(true);
+			expect(raceSession.isAdvisorActive()).toBe(false);
+
+			discovered = true;
+			refreshSettled.resolve();
+			await advisorRebuilt.promise;
+			expect(raceSession.isAdvisorActive()).toBe(true);
+		} finally {
+			unsubscribe();
+			vi.restoreAllMocks();
+			await raceSession.dispose();
+		}
+	});
+
 	it("keeps sessions isolated when sharing a Settings instance", async () => {
 		const sharedSettings = Settings.isolated({ "compaction.enabled": false });
 		sharedSettings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
@@ -497,11 +540,74 @@ describe("AgentSession advisor toggle", () => {
 			enableLsp: false,
 		});
 		try {
+			await result.session.advisorCostRestore;
 			expect(result.session.getAdvisorCost()).toBeCloseTo(0.5, 8);
 		} finally {
 			await result.session.dispose();
 		}
 	});
+	it("reconciles turns billed while the background restore is running", async () => {
+		const restore = Promise.withResolvers<Map<string, number>>();
+		const events: string[] = [];
+		const unsubscribe = session.subscribe(event => events.push(event.type));
+		const load = vi.spyOn(advisorModule, "loadAdvisorTranscriptCosts").mockImplementation(async (_file, options) => {
+			await options?.beforeSnapshot;
+			options?.onSnapshot?.();
+			return restore.promise;
+		});
+		try {
+			const advisor = enableAdvisor();
+			session.beginInitialAdvisorCostRestore();
+			appendAdvisorCost(advisor, 0.25, 1);
+			restore.resolve(new Map([["", 0.5]]));
+			await session.advisorCostRestore;
+			expect(session.getAdvisorCost()).toBeCloseTo(0.75, 8);
+			expect(events).toContain("advisor_cost_changed");
+		} finally {
+			unsubscribe();
+			load.mockRestore();
+		}
+	});
+
+	it("ignores a stale background restore after the active session changes", async () => {
+		const restore = Promise.withResolvers<Map<string, number>>();
+		const load = vi.spyOn(advisorModule, "loadAdvisorTranscriptCosts").mockImplementation(async (_file, options) => {
+			await options?.beforeSnapshot;
+			options?.onSnapshot?.();
+			return restore.promise;
+		});
+		try {
+			session.beginInitialAdvisorCostRestore();
+			await session.newSession();
+			restore.resolve(new Map([["", 0.5]]));
+			await session.advisorCostRestore;
+			expect(session.getAdvisorCost()).toBe(0);
+		} finally {
+			load.mockRestore();
+		}
+	});
+
+	it("cancels a background restore when the session is disposed", async () => {
+		const restore = Promise.withResolvers<Map<string, number>>();
+		let shouldContinue: (() => boolean) | undefined;
+		const load = vi.spyOn(advisorModule, "loadAdvisorTranscriptCosts").mockImplementation((_file, options) => {
+			shouldContinue = options?.shouldContinue;
+			options?.onSnapshot?.();
+			return restore.promise;
+		});
+		try {
+			session.beginInitialAdvisorCostRestore();
+			expect(shouldContinue?.()).toBe(true);
+			session.beginDispose();
+			expect(shouldContinue?.()).toBe(false);
+			restore.resolve(new Map([["", 0.5]]));
+			await session.advisorCostRestore;
+			expect(session.getAdvisorCost()).toBe(0);
+		} finally {
+			load.mockRestore();
+		}
+	});
+
 	it("starts a new session with only post-transition advisor cost", async () => {
 		const advisor = enableAdvisor();
 		appendAdvisorCost(advisor, 0.5, 1);

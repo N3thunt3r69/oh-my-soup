@@ -84,12 +84,14 @@ These are consumed via `getEnvApiKey()` (`packages/ai/src/stream.ts`) unless not
 | `ALIBABA_CODING_PLAN_API_KEY`   | Alibaba Coding Plan auth                         | Using `alibaba-coding-plan` provider                           |                                                                                                     |
 | `ALIBABA_TOKEN_PLAN_API_KEY`    | QwenCloud Token Plan auth                        | Using `alibaba-token-plan` provider                            | Preferred provider-specific name                                                                    |
 | `BAILIAN_TOKEN_PLAN_API_KEY`    | QwenCloud Token Plan auth                        | Using `alibaba-token-plan` provider                            | Compatible with Qwen Code's Token Plan preset                                                       |
+| `DEEPINFRA_API_KEY`             | DeepInfra auth                                   | Using `deepinfra` provider                                     |                                                                                                     |
 | `DEEPSEEK_API_KEY`              | DeepSeek auth                                    | Using DeepSeek models                                          |                                                                                                     |
 | `SILICONFLOW_API_KEY`           | SiliconFlow auth                                 | Using `siliconflow` provider                                   |                                                                                                     |
 | `SILICONFLOW_CN_API_KEY`        | SiliconFlow (China) auth                         | Using `siliconflow-cn` provider                                |                                                                                                     |
 | `KILO_API_KEY`                  | Kilo auth                                        | Using Kilo models                                              |                                                                                                     |
 | `OLLAMA_CLOUD_API_KEY`          | Ollama Cloud auth                                | Using `ollama-cloud` provider                                  |                                                                                                     |
 | `WAFER_SERVERLESS_API_KEY`      | Wafer Serverless auth                            | Using `wafer-serverless` provider                              | Pay-as-you-go Wafer SKU; validated against `https://pass.wafer.ai/v1/models`                        |
+| `YOLO_AUTO_API_KEY`             | Yolo-Auto auth                                   | Using `yolo-auto` provider                                     |                                                                                                     |
 | `GITLAB_TOKEN`                  | GitLab Duo auth                                  | Using `gitlab-duo` provider                                    |                                                                                                     |
 
 ### GitHub/Copilot tokens
@@ -128,6 +130,14 @@ Provider HTTP fetches resolve proxies in this order after applying `NO_PROXY` / 
 4. `ALL_PROXY` / `all_proxy`
 
 Provider proxy lookups are cached for the process lifetime. Localhost targets bypass the provider fetch wrapper.
+
+`PI_PROXY` is also installed on the process-wide fetch path at CLI startup, so
+OAuth login and refresh, usage probes, and model discovery use it. The
+provider-specific `PI_PROXY_<PROVIDER>` form remains scoped to that provider's
+requests and takes precedence over the global proxy.
+
+Loopback, link-local, private-range (`10/8`, `172.16/12`, `192.168/16`), cloud
+metadata, and `NO_PROXY` targets always stay direct.
 
 ### Anthropic Foundry Gateway (Azure / enterprise proxy)
 

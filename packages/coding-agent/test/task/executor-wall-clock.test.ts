@@ -725,4 +725,110 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		// consumer's assignment is a straight copy, so undefined is acceptable.
 		expect(result.contextWindow).toBeUndefined();
 	});
+
+	it("attributes a budget hard-abort to the budget, not a timer that fires during teardown", async () => {
+		const settings = Settings.isolated({ "task.softRequestBudget": 1, "task.maxRuntimeMs": 400 });
+		const { promise: hang, resolve: releaseHang } = Promise.withResolvers<void>();
+		let listenerRef: ((event: AgentSessionEvent) => void) | undefined;
+		let abortCount = 0;
+		const session: Partial<AgentSession> = {
+			setIrcWakeTurnObserver: () => {},
+			subscribeRunState: () => () => {},
+			state: { messages: [] } as never,
+			agent: { state: { systemPrompt: ["test"] } } as never,
+			extensionRunner: undefined as never,
+			sessionManager: { appendSessionInit: () => {} } as never,
+			getActiveToolNames: () => ["read", "yield"],
+			getEnabledToolNames: () => ["read", "yield"],
+			setActiveToolsByName: async () => {},
+			subscribe: (listener: (event: AgentSessionEvent) => void) => {
+				listenerRef = listener;
+				return () => {};
+			},
+			hasPendingAsyncWork: () => false,
+			prompt: async () => {
+				for (let requestIndex = 0; requestIndex < 8; requestIndex++) {
+					listenerRef?.({
+						type: "message_end",
+						message: { role: "assistant", content: [{ type: "text", text: `step ${requestIndex}` }] },
+					} as unknown as AgentSessionEvent);
+				}
+				await hang;
+				return true;
+			},
+			waitForIdle: async () => {
+				await hang;
+			},
+			getLastAssistantMessage: () => undefined,
+			abort: async () => {
+				abortCount += 1;
+				// This regression is the real interleaving between setTimeout and
+				// async teardown; fake timers would prescribe rather than observe it.
+				await Bun.sleep(1500);
+				releaseHang();
+			},
+			dispose: async () => {},
+		};
+		mockCreateAgentSession(session as AgentSession);
+
+		const result = await runSubprocess({ ...baseOptions, id: "subagent-budget-then-timer", settings });
+
+		expect(abortCount).toBeGreaterThanOrEqual(1);
+		expect(result.aborted).toBe(true);
+		expect(result.abortReason).toContain("Soft request budget exceeded");
+		expect(result.abortReason).not.toContain("runtime limit exceeded");
+	});
+
+	it("does not flip a committed pre-deadline yield to an aborted timeout", async () => {
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 400 });
+		let listenerRef: ((event: AgentSessionEvent) => void) | undefined;
+		let abortCount = 0;
+		const session: Partial<AgentSession> = {
+			setIrcWakeTurnObserver: () => {},
+			subscribeRunState: () => () => {},
+			state: { messages: [] } as never,
+			agent: { state: { systemPrompt: ["test"] } } as never,
+			extensionRunner: undefined as never,
+			sessionManager: { appendSessionInit: () => {} } as never,
+			getActiveToolNames: () => ["read", "yield"],
+			getEnabledToolNames: () => ["read", "yield"],
+			setActiveToolsByName: async () => {},
+			subscribe: (listener: (event: AgentSessionEvent) => void) => {
+				listenerRef = listener;
+				return () => {};
+			},
+			hasPendingAsyncWork: () => false,
+			prompt: async () => {
+				listenerRef?.({
+					type: "tool_execution_end",
+					toolCallId: "tool-yield",
+					toolName: "yield",
+					result: {
+						content: [{ type: "text", text: "Result submitted." }],
+						details: { status: "success", data: { finding: "complete report" } },
+					},
+					isError: false,
+				} as AgentSessionEvent);
+				return true;
+			},
+			waitForIdle: async () => {},
+			getLastAssistantMessage: () => undefined,
+			abort: async () => {
+				abortCount += 1;
+				// The real deadline must fire while teardown is pending; fake
+				// timers would no longer exercise the platform-clock race.
+				await Bun.sleep(1500);
+			},
+			dispose: async () => {},
+		};
+		mockCreateAgentSession(session as AgentSession);
+
+		const result = await runSubprocess({ ...baseOptions, id: "subagent-yield-then-timer", settings });
+
+		expect(abortCount).toBeGreaterThanOrEqual(1);
+		expect(result.extractedToolData?.yield).toBeDefined();
+		expect(result.aborted).toBe(false);
+		expect(result.exitCode).toBe(0);
+		expect(result.abortReason).toBeUndefined();
+	});
 });

@@ -17,16 +17,17 @@ import {
 	parseDaemonRpcResult,
 	parseDaemonWireMessage,
 } from "./protocol";
-import type { DaemonSpawnOptions } from "./spawn-options";
+import { resolveDaemonSpawnOptions } from "./spawn-options";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const CONNECT_RETRY_MS = 50;
 const TOKEN_FILE = "broker.token";
 // A broker is a cross-process lease holder, not a managed command. It must
-// outlive the client that won the spawn race; hide its detached console on
-// Windows instead of applying the managed-daemon console inheritance policy.
-const BROKER_SPAWN_OPTIONS: DaemonSpawnOptions =
-	process.platform === "win32" ? { detached: true, windowsHide: true } : { detached: true };
+// outlive the client that won the spawn race.
+const BROKER_SPAWN_OPTIONS = resolveDaemonSpawnOptions({
+	platform: process.platform,
+	surviveParentExit: true,
+});
 
 interface PendingRequest {
 	operation: DaemonOperation;
@@ -524,8 +525,10 @@ export async function closeDaemonClients(): Promise<void> {
 
 /** Exercise worker-host broker startup and authenticated RPC for distribution smoke tests. */
 export async function smokeTestDaemonBroker(): Promise<void> {
-	const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-daemon-smoke-project-"));
-	const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-daemon-smoke-run-"));
+	const smokeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "oms-daemon-smoke-"));
+	const projectDir = path.join(smokeRoot, "project");
+	const runtimeDir = path.join(smokeRoot, "run");
+	await fs.mkdir(projectDir, { recursive: true });
 	const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 	try {
 		const ping = await client.request({ op: "ping" });
@@ -533,7 +536,6 @@ export async function smokeTestDaemonBroker(): Promise<void> {
 		await client.request({ op: "shutdown" });
 	} finally {
 		client.close();
-		await fs.rm(projectDir, { recursive: true, force: true });
-		await fs.rm(runtimeDir, { recursive: true, force: true });
+		await fs.rm(smokeRoot, { recursive: true, force: true });
 	}
 }

@@ -28,6 +28,17 @@ function stderrExitCommand(stderr: string, exitCode: number): { cmd: string[] } 
 	return { cmd: [process.execPath, "-e", script] };
 }
 
+/** Build a compact spawn command that generates large stderr inside the child. */
+function repeatedStderrExitCommand(
+	character: string,
+	count: number,
+	trailer: string,
+	exitCode: number,
+): { cmd: string[] } {
+	const script = `process.stderr.write(${JSON.stringify(character)}.repeat(${count}) + ${JSON.stringify(trailer)}); process.exit(${exitCode});`;
+	return { cmd: [process.execPath, "-e", script] };
+}
+
 /**
  * Resolve the first worker-error handler fires with. The subprocess wires the
  * error surface off `stderrDrained` so this always resolves after the stderr
@@ -61,10 +72,10 @@ describe("issue #4324 — worker subprocess stderr survives to the exit error", 
 	it("truncates a large stderr to the last ~16 KiB so a chatty runtime can't blow the parent up", async () => {
 		// Write well past the 16 KiB tail limit. A recognisable trailer must
 		// still land at the end so the diagnostic tail is what survives.
-		const filler = "A".repeat(64 * 1024);
+		const fillerBytes = 64 * 1024;
 		const trailer = "FATAL: onnxruntime session run failed\n";
 		const sub = createWorkerSubprocess<FakeWorkerOutbound>({
-			spawnCommand: stderrExitCommand(filler + trailer, 7),
+			spawnCommand: repeatedStderrExitCommand("A", fillerBytes, trailer, 7),
 			env: {},
 			exitLabel: "tts subprocess",
 		});

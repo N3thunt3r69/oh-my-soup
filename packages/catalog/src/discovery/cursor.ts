@@ -27,6 +27,11 @@ const CURSOR_1M_NAME_PATTERN = /\b1m\b/i;
 const CURSOR_MAX_MODE_1M_ID_PATTERN = /claude|gemini/;
 /** Kimi's official bare K3 id (`k3`, `kimi/k3`); `k3-256k` is the 256k SKU and stays out. */
 const CURSOR_KIMI_K3_BARE_ID_PATTERN = /(^|\/)k3$/i;
+/**
+ * Versioned Cursor Grok ids carry reasoning effort in per-tier sibling ids.
+ * `grok-code-*` coding models lack the version digit and remain non-reasoning.
+ */
+const CURSOR_GROK_REASONING_ID_PATTERN = /^cursor-grok-\d/i;
 
 /**
  * Model-id families whose native catalogs (anthropic, openai/openai-codex,
@@ -297,7 +302,11 @@ function normalizeCursorModel(
 
 	const name = pickModelDisplayName(details, id);
 	const reference = references.get(id);
-	const reasoning = isKimiK3ModelId(id) || Boolean(details.thinkingDetails) || reference?.reasoning === true;
+	const reasoning =
+		isKimiK3ModelId(id) ||
+		CURSOR_GROK_REASONING_ID_PATTERN.test(id) ||
+		Boolean(details.thinkingDetails) ||
+		reference?.reasoning === true;
 
 	if (reference) {
 		return {

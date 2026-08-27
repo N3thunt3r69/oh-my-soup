@@ -33,6 +33,24 @@ async function runSetupPython(cwd: string, envOverrides?: NodeJS.ProcessEnv): Pr
 	return { exitCode, output: stdout, error: stderr };
 }
 
+async function runSetup(cwd: string, ...setupArgs: string[]): Promise<CliProcessResult> {
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		NO_COLOR: "1",
+		PI_CODING_AGENT_DIR: path.join(cwd, "agent"),
+	};
+	const proc = Bun.spawn([process.execPath, cliEntry, "setup", ...setupArgs], {
+		cwd,
+		stdout: "pipe",
+		stderr: "pipe",
+		env,
+	});
+	const output = new Response(proc.stdout).text();
+	const error = new Response(proc.stderr).text();
+	const [exitCode, stdout, stderr] = await Promise.all([proc.exited, output, error]);
+	return { exitCode, output: stdout, error: stderr };
+}
+
 describe("oms setup python", () => {
 	let projectDir: TempDir | undefined;
 
@@ -97,4 +115,35 @@ describe("oms setup python", () => {
 			usingManagedEnv: false,
 		});
 	});
+});
+
+describe("oms setup without a component", () => {
+	let projectDir: TempDir | undefined;
+
+	afterEach(async () => {
+		await projectDir?.remove();
+		projectDir = undefined;
+	});
+
+	it("fails --check as a usage error", async () => {
+		projectDir = TempDir.createSync("@oms-setup-noarg-");
+		const result = await runSetup(projectDir.path(), "--check");
+
+		expect(result.exitCode).not.toBe(0);
+		expect(result.output).toBe("");
+		expect(result.error).toContain("requires a COMPONENT");
+	});
+
+	for (const flags of [["--json"], ["--check", "--json"]]) {
+		it(`keeps the failure machine-readable for ${["setup", ...flags].join(" ")}`, async () => {
+			projectDir = TempDir.createSync("@oms-setup-noarg-");
+			const result = await runSetup(projectDir.path(), ...flags);
+
+			expect(result.exitCode).not.toBe(0);
+			expect(result.error).toBe("");
+			expect(JSON.parse(result.output)).toEqual({
+				error: "setup --check/--json requires a COMPONENT (python|speech)",
+			});
+		});
+	}
 });

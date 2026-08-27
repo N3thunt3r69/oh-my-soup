@@ -11,6 +11,7 @@ import {
 	validateXAIBillingEndpoint,
 	validateXAIEndpoint,
 } from "../../../src/registry/oauth/xai-oauth";
+import type { FetchImpl } from "../../../src/types";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -285,6 +286,30 @@ describe("refreshXAIOAuthToken", () => {
 		});
 		expect(requests.map(request => request.url)).toEqual([DISCOVERY_URL, TOKEN_ENDPOINT, USERINFO_URL]);
 		expect(requests.find(request => request.url === TOKEN_ENDPOINT)?.init?.redirect).toBe("error");
+	});
+
+	it("binds discovery, token, and identity requests to caller cancellation", async () => {
+		const accessToken = jwtWithPayload({ sub: "jwt-sub" });
+		const controller = new AbortController();
+		const requests: RecordedRequest[] = [];
+		const fetchMock: FetchImpl = async (input, init) => {
+			const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
+			requests.push({ url, init });
+			if (url === DISCOVERY_URL) return jsonResponse({ token_endpoint: TOKEN_ENDPOINT });
+			if (url === TOKEN_ENDPOINT) {
+				return jsonResponse({ access_token: accessToken, expires_in: 3600 });
+			}
+			if (url === USERINFO_URL) return jsonResponse({ sub: "profile-sub" });
+			throw new Error(`Unexpected xAI OAuth request: ${url}`);
+		};
+
+		await refreshXAIOAuthToken("old-refresh-token", fetchMock, controller.signal);
+		const signals = requests.map(request => request.init?.signal);
+		expect(signals).toHaveLength(3);
+		expect(signals.every(signal => signal?.aborted === false)).toBe(true);
+
+		controller.abort(new Error("refresh ownership ended"));
+		expect(signals.every(signal => signal?.aborted === true)).toBe(true);
 	});
 });
 

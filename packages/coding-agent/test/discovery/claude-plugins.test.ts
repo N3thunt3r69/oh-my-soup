@@ -185,6 +185,90 @@ describe("listClaudePluginRoots", () => {
 		expect(result.roots.find(root => root.id === "active-plugin@market")?.scope).toBe("project");
 	});
 
+	test("honors enabledPlugins overrides from project settings", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const project = path.join(tempDir, "project");
+		await Promise.all([
+			fs.mkdir(pluginsDir, { recursive: true }),
+			fs.mkdir(path.join(project, ".claude"), { recursive: true }),
+			fs.mkdir(path.join(project, ".git"), { recursive: true }),
+		]);
+		const entry = (installPath: string) => ({
+			scope: "user",
+			installPath,
+			version: "1.0.0",
+			installedAt: "2025-01-01T00:00:00Z",
+			lastUpdated: "2025-01-01T00:00:00Z",
+		});
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"kept@market": [entry("/plugins/kept")],
+					"muted@market": [entry("/plugins/muted")],
+					"restored@market": [entry("/plugins/restored")],
+				},
+			}),
+		);
+		await fs.writeFile(
+			path.join(project, ".claude", "settings.json"),
+			JSON.stringify({ enabledPlugins: { "muted@market": false, "restored@market": false } }),
+		);
+		await fs.writeFile(
+			path.join(project, ".claude", "settings.local.json"),
+			JSON.stringify({ enabledPlugins: { "restored@market": true } }),
+		);
+
+		const inProject = await listClaudePluginRoots(tempDir, project);
+		expect(inProject.roots.map(root => root.id).sort()).toEqual(["kept@market", "restored@market"]);
+
+		const elsewhere = path.join(tempDir, "elsewhere");
+		await fs.mkdir(path.join(elsewhere, ".git"), { recursive: true });
+		const outside = await listClaudePluginRoots(tempDir, elsewhere);
+		expect(outside.roots.map(root => root.id).sort()).toEqual(["kept@market", "muted@market", "restored@market"]);
+	});
+
+	test("enabledPlugins true opts a local install into another project", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const parent = path.join(tempDir, "clients");
+		const child = path.join(parent, "acme");
+		await Promise.all([
+			fs.mkdir(pluginsDir, { recursive: true }),
+			fs.mkdir(path.join(child, ".claude"), { recursive: true }),
+			fs.mkdir(path.join(child, ".git"), { recursive: true }),
+		]);
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"acme@market": [
+						{
+							scope: "local",
+							installPath: "/plugins/acme",
+							projectPath: parent,
+							version: "1.0.0",
+							installedAt: "2025-01-01T00:00:00Z",
+							lastUpdated: "2025-01-01T00:00:00Z",
+						},
+					],
+				},
+			}),
+		);
+
+		expect((await listClaudePluginRoots(tempDir, child)).roots).toEqual([]);
+		clearClaudePluginRootsCache();
+		clearFsCache();
+		await fs.writeFile(
+			path.join(child, ".claude", "settings.local.json"),
+			JSON.stringify({ enabledPlugins: { "acme@market": true } }),
+		);
+		const enabled = await listClaudePluginRoots(tempDir, child);
+		expect(enabled.roots.map(root => root.id)).toEqual(["acme@market"]);
+		expect(enabled.roots[0]?.scope).toBe("project");
+	});
+
 	test("parses plugin with project scope", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		await fs.mkdir(pluginsDir, { recursive: true });

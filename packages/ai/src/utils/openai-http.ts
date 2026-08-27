@@ -35,6 +35,22 @@ const DEFAULT_MAX_ATTEMPTS = 6;
 /** Bound the `Error.message` allocation for proxy HTML error pages and the like. */
 const MAX_DETAIL_CHARS = 4096;
 
+/**
+ * LiteLLM (and compatible proxies) mark pre-upstream concurrency admission
+ * failures as `rate_limit_type: max_parallel_requests`. Session recovery owns
+ * concurrency backoff and model fallback, so transport retries must surface
+ * this response immediately. Ordinary RPM/quota 429s remain retryable.
+ */
+const CONCURRENCY_ADMISSION_LIMITER = "max_parallel_requests";
+const CONCURRENCY_ADMISSION_BODY_PATTERN = /"rate_limit_type"\s*:\s*"max_parallel_requests"/;
+
+function isConcurrencyAdmissionRejection(response: Response, bodyText: string): boolean {
+	return (
+		response.headers.get("rate_limit_type")?.trim() === CONCURRENCY_ADMISSION_LIMITER ||
+		CONCURRENCY_ADMISSION_BODY_PATTERN.test(bodyText)
+	);
+}
+
 export interface OpenAIStreamRequestInit {
 	url: string;
 	headers: Record<string, string>;
@@ -69,6 +85,7 @@ export async function postOpenAIStream<TEvent>(init: OpenAIStreamRequestInit): P
 		signal: init.signal,
 		fetch: init.fetch,
 		maxAttempts: DEFAULT_MAX_ATTEMPTS,
+		shouldRetryResponse: (response, bodyText) => !isConcurrencyAdmissionRejection(response, bodyText),
 		// Bun's native fetch enforces a hard ~300s pre-response timeout (issue #2422).
 		// Cold large-context streams legitimately exceed it; the caller's
 		// `firstEventTimeoutMs`/`AbortSignal` already govern stuck requests.

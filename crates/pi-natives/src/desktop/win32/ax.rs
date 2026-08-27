@@ -22,6 +22,28 @@ pub(super) struct Win32Ax {
 	displays:               Option<Vec<DesktopDisplay>>,
 }
 
+#[cfg(not(test))]
+macro_rules! uia_element {
+	($handle:expr) => {{
+		let AxHandle::Uia(element) = $handle;
+		element
+	}};
+}
+
+#[cfg(test)]
+macro_rules! uia_element {
+	($handle:expr) => {
+		match $handle {
+			AxHandle::Uia(element) => element,
+			AxHandle::Test(_) => {
+				return Err(DesktopError::ax_failed(
+					"accessibility handle does not belong to UI Automation",
+				));
+			},
+		}
+	};
+}
+
 impl Win32Ax {
 	pub(super) const fn new() -> Self {
 		Self { automation_initialized: false, displays: None }
@@ -34,14 +56,6 @@ impl Win32Ax {
 			let automation = UIAutomation::new().map_err(ax_error)?;
 			self.automation_initialized = true;
 			Ok(automation)
-		}
-	}
-
-	fn element(handle: &AxHandle) -> CoreResult<&UIElement> {
-		match handle {
-			AxHandle::Uia(element) => Ok(element),
-			#[cfg(test)]
-			_ => Err(DesktopError::ax_failed("accessibility handle does not belong to UI Automation")),
 		}
 	}
 
@@ -68,9 +82,9 @@ impl Win32Ax {
 				let physical_x = f64::from(display.x) * display.scale;
 				let physical_y = f64::from(display.y) * display.scale;
 				f64::from(left) >= physical_x
-					&& f64::from(left) < physical_x + f64::from(display.width) * display.scale
+					&& f64::from(left) < f64::from(display.width).mul_add(display.scale, physical_x)
 					&& f64::from(top) >= physical_y
-					&& f64::from(top) < physical_y + f64::from(display.height) * display.scale
+					&& f64::from(top) < f64::from(display.height).mul_add(display.scale, physical_y)
 			})
 			.or_else(|| displays.first())?;
 		let scale = display.scale.max(f64::EPSILON);
@@ -161,14 +175,13 @@ impl AxBackend for Win32Ax {
 	}
 
 	fn props(&mut self, handle: &AxHandle) -> CoreResult<AxProps> {
-		let element = Self::element(handle)?;
+		let element = uia_element!(handle);
 		let control_type = element.get_control_type().map_err(ax_error)?;
 		let native_role = control_type.to_string();
 		let walker = self.walker()?;
 		let child_count = walker
 			.get_children(element)
-			.map(|children| children.len().min(u32::MAX as usize) as u32)
-			.unwrap_or(0);
+			.map_or(0, |children| children.len().min(u32::MAX as usize) as u32);
 		let bounds = element.get_bounding_rectangle().ok().and_then(|rect| {
 			self.logical_bounds(rect.get_left(), rect.get_top(), rect.get_right(), rect.get_bottom())
 		});
@@ -187,7 +200,7 @@ impl AxBackend for Win32Ax {
 	}
 
 	fn children(&mut self, handle: &AxHandle) -> CoreResult<Vec<AxHandle>> {
-		let element = Self::element(handle)?;
+		let element = uia_element!(handle);
 		Ok(self
 			.walker()?
 			.get_children(element)
@@ -198,12 +211,12 @@ impl AxBackend for Win32Ax {
 	}
 
 	fn parent(&mut self, handle: &AxHandle) -> CoreResult<Option<AxHandle>> {
-		let element = Self::element(handle)?;
+		let element = uia_element!(handle);
 		Ok(self.walker()?.get_parent(element).ok().map(AxHandle::Uia))
 	}
 
 	fn perform(&mut self, handle: &AxHandle, action: &str) -> CoreResult<()> {
-		let element = Self::element(handle)?;
+		let element = uia_element!(handle);
 		match action.trim().to_ascii_lowercase().as_str() {
 			"press" => {
 				if let Ok(pattern) = element.get_pattern::<UIInvokePattern>() {
@@ -248,14 +261,14 @@ impl AxBackend for Win32Ax {
 	}
 
 	fn set_value(&mut self, handle: &AxHandle, value: &str) -> CoreResult<()> {
-		Self::element(handle)?
+		uia_element!(handle)
 			.get_pattern::<UIValuePattern>()
 			.and_then(|pattern| pattern.set_value(value))
 			.map_err(ax_error)
 	}
 
 	fn focus(&mut self, handle: &AxHandle) -> CoreResult<()> {
-		Self::element(handle)?.set_focus().map_err(ax_error)
+		uia_element!(handle).set_focus().map_err(ax_error)
 	}
 
 	fn element_at(&mut self, x: f64, y: f64) -> CoreResult<Option<AxHandle>> {
@@ -279,7 +292,7 @@ impl AxBackend for Win32Ax {
 	}
 
 	fn attributes(&mut self, handle: &AxHandle) -> CoreResult<Vec<(String, String)>> {
-		let element = Self::element(handle)?;
+		let element = uia_element!(handle);
 		let properties = [
 			UIProperty::RuntimeId,
 			UIProperty::BoundingRectangle,

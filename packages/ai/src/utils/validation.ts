@@ -1359,6 +1359,155 @@ function normalizeSingleStringField(schema: unknown, value: unknown): { value: u
 	}
 	return { value, changed: false };
 }
+// ============================================================================
+// Flattened array-property normalization (LLM quirk).
+// ============================================================================
+
+/** Cap array indices so hostile flattened paths cannot allocate unbounded sparse arrays. */
+const MAX_FLATTENED_INDEX = 100_000;
+
+type FlattenedPathStep = { kind: "prop"; name: string } | { kind: "index"; index: number };
+
+const FLATTENED_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+const FLATTENED_INDEX_RE = /^\[(\d+)\]/;
+
+/**
+ * Parse a provider-flattened array path. At least one array index is required,
+ * so ordinary dotted property names remain literal tool arguments.
+ */
+function parseFlattenedPath(key: string): FlattenedPathStep[] | null {
+	const first = FLATTENED_IDENT_RE.exec(key);
+	if (!first) return null;
+	const steps: FlattenedPathStep[] = [{ kind: "prop", name: first[0] }];
+	let position = first[0].length;
+	let sawIndex = false;
+	while (position < key.length) {
+		if (key[position] === ".") {
+			position += 1;
+			const property = FLATTENED_IDENT_RE.exec(key.slice(position));
+			if (!property) return null;
+			steps.push({ kind: "prop", name: property[0] });
+			position += property[0].length;
+			continue;
+		}
+		if (key[position] === "[") {
+			const indexed = FLATTENED_INDEX_RE.exec(key.slice(position));
+			if (!indexed) return null;
+			const index = Number(indexed[1]);
+			if (!Number.isSafeInteger(index) || index > MAX_FLATTENED_INDEX) return null;
+			steps.push({ kind: "index", index });
+			position += indexed[0].length;
+			sawIndex = true;
+			continue;
+		}
+		return null;
+	}
+	return sawIndex ? steps : null;
+}
+
+function defineFlattenedProperty(target: Record<string, unknown>, name: string, value: unknown): void {
+	// Assignment to `__proto__` invokes the legacy prototype setter. Defining an
+	// own data property keeps provider-controlled path segments inert.
+	Object.defineProperty(target, name, {
+		value,
+		writable: true,
+		enumerable: true,
+		configurable: true,
+	});
+}
+
+/**
+ * Build one flattened path. Any scalar/container or prefix/leaf collision
+ * rejects the entire normalization instead of overwriting provider data.
+ */
+function buildFlattenedPath(root: Record<string, unknown>, steps: FlattenedPathStep[], value: unknown): boolean {
+	let node: unknown = root;
+	for (let index = 0; index < steps.length - 1; index += 1) {
+		const step = steps[index];
+		const nextIsArray = steps[index + 1].kind === "index";
+		if (step.kind === "prop") {
+			if (node === null || typeof node !== "object" || Array.isArray(node)) return false;
+			const objectNode = node as Record<string, unknown>;
+			const hasExisting = Object.hasOwn(objectNode, step.name);
+			const existing = hasExisting ? objectNode[step.name] : undefined;
+			let child: unknown;
+			if (!hasExisting) {
+				child = nextIsArray ? [] : {};
+			} else {
+				if (Array.isArray(existing) !== nextIsArray) return false;
+				if (!nextIsArray && (existing === null || typeof existing !== "object")) return false;
+				child = existing;
+			}
+			defineFlattenedProperty(objectNode, step.name, child);
+			node = child;
+			continue;
+		}
+
+		if (!Array.isArray(node)) return false;
+		const hasExisting = Object.hasOwn(node, step.index);
+		const existing = hasExisting ? node[step.index] : undefined;
+		let child: unknown;
+		if (!hasExisting) {
+			child = nextIsArray ? [] : {};
+			node[step.index] = child;
+		} else {
+			if (Array.isArray(existing) !== nextIsArray) return false;
+			if (!nextIsArray && (existing === null || typeof existing !== "object")) return false;
+			child = existing;
+		}
+		node = child;
+	}
+
+	const last = steps[steps.length - 1];
+	if (last.kind === "prop") {
+		if (node === null || typeof node !== "object" || Array.isArray(node)) return false;
+		const objectNode = node as Record<string, unknown>;
+		if (Object.hasOwn(objectNode, last.name)) return false;
+		defineFlattenedProperty(objectNode, last.name, value);
+		return true;
+	}
+	if (!Array.isArray(node) || Object.hasOwn(node, last.index)) return false;
+	node[last.index] = value;
+	return true;
+}
+
+/**
+ * Rebuild arrays and nested objects from provider-flattened argument keys such
+ * as `questions[0].options[1].label`. Conflicts return the original object so
+ * normal schema validation can report the malformed payload without data loss.
+ */
+function normalizeFlattenedArrayProperties(value: unknown): { value: unknown; changed: boolean } {
+	if (!isPlainRecord(value)) return { value, changed: false };
+	const entries = Object.entries(value).map(([key, entry]) => ({ key, entry, steps: parseFlattenedPath(key) }));
+	const flattenedRoots = new Set(
+		entries
+			.map(({ steps }) => steps?.[0])
+			.filter((step): step is Extract<FlattenedPathStep, { kind: "prop" }> => step?.kind === "prop")
+			.map(step => step.name),
+	);
+	if (flattenedRoots.size === 0) return { value, changed: false };
+
+	// A literal root and a flattened path for that same root are ambiguous even
+	// when their shapes happen to be compatible. Refuse rather than mutate or
+	// silently merge caller-owned containers.
+	if (entries.some(({ key, steps }) => steps === null && flattenedRoots.has(key))) {
+		return { value, changed: false };
+	}
+
+	const rebuilt: Record<string, unknown> = {};
+	let changed = false;
+	for (const { key, entry, steps } of entries) {
+		if (!steps) {
+			if (Object.hasOwn(rebuilt, key)) return { value, changed: false };
+			defineFlattenedProperty(rebuilt, key, entry);
+			continue;
+		}
+		if (entry === undefined) continue;
+		if (!buildFlattenedPath(rebuilt, steps, entry)) return { value, changed: false };
+		changed = true;
+	}
+	return changed ? { value: rebuilt, changed: true } : { value, changed: false };
+}
 
 // Validation issue → coercion bridge
 
@@ -1762,6 +1911,14 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 	const keyNormalization = normalizeDoubleEncodedKeys(normalizedArgs);
 	if (keyNormalization.changed) {
 		normalizedArgs = keyNormalization.value;
+		changed = true;
+	}
+
+	// Some providers flatten array arguments into property paths rather than
+	// emitting real arrays. Rebuild them before the schema sees the payload.
+	const flattenedArgs = normalizeFlattenedArrayProperties(normalizedArgs);
+	if (flattenedArgs.changed) {
+		normalizedArgs = flattenedArgs.value;
 		changed = true;
 	}
 

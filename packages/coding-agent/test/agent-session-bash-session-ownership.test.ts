@@ -8,6 +8,7 @@ import { ModelRegistry } from "@oh-my-soup/pi-coding-agent/config/model-registry
 import { Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
 import * as bashExecutor from "@oh-my-soup/pi-coding-agent/exec/bash-executor";
 import type { ExtensionRunner } from "@oh-my-soup/pi-coding-agent/extensibility/extensions";
+import { createBashTool } from "@oh-my-soup/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
 import { AgentSession } from "@oh-my-soup/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-soup/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-soup/pi-coding-agent/session/session-manager";
@@ -113,6 +114,53 @@ describe("AgentSession bash session ownership", () => {
 		expect(session.messages.some(message => message.role === "bashExecution")).toBe(false);
 	});
 
+	it("applies the registered bash shell environment to user-shell commands", async () => {
+		const spawnHook = vi.fn(spawn => ({
+			...spawn,
+			env: { ...spawn.env, OMP_USER_SHELL_ENV: "extension-value" },
+		}));
+		const definition = createBashTool(tempDir.path(), { spawnHook });
+		const extensionRunner = {
+			hasHandlers: vi.fn(() => false),
+			getRegisteredTool: vi.fn((name: string) => (name === "bash" ? { definition } : undefined)),
+			emit: vi.fn().mockResolvedValue(undefined),
+			emitBeforeAgentStart: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ExtensionRunner;
+		createSession(undefined, extensionRunner);
+
+		const result = await session.executeBash('printf "%s" "$OMP_USER_SHELL_ENV"', undefined, {
+			useUserShell: true,
+		});
+
+		expect(result.output).toBe("extension-value");
+		expect(spawnHook).toHaveBeenCalledWith(
+			expect.objectContaining({
+				command: 'printf "%s" "$OMP_USER_SHELL_ENV"',
+				cwd: tempDir.path(),
+			}),
+		);
+	});
+
+	it("does not run the shell environment hook when a user_bash handler replaces the result", async () => {
+		const spawnHook = vi.fn(() => {
+			throw new Error("shell env hook must not run when user_bash supplies a replacement result");
+		});
+		const definition = createBashTool(tempDir.path(), { spawnHook });
+		const emitUserBash = vi.fn().mockResolvedValue({ result: bashResult });
+		const extensionRunner = {
+			hasHandlers: vi.fn((eventType: string) => eventType === "user_bash"),
+			emitUserBash,
+			getRegisteredTool: vi.fn((name: string) => (name === "bash" ? { definition } : undefined)),
+			emit: vi.fn().mockResolvedValue(undefined),
+			emitBeforeAgentStart: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ExtensionRunner;
+		createSession(undefined, extensionRunner);
+
+		const result = await session.executeBash("replaced-command", undefined, { useUserShell: true });
+
+		expect(result).toEqual(bashResult);
+		expect(spawnHook).not.toHaveBeenCalled();
+	});
 	it("keeps a queued bash result on the branch discarded by an empty stop", async () => {
 		const sessionManager = SessionManager.inMemory(tempDir.path());
 		let returnEmptyStop = true;
@@ -384,5 +432,19 @@ describe("AgentSession bash session ownership", () => {
 		expect(
 			session.messages.some(message => message.role === "bashExecution" && message.command === "old-branch-command"),
 		).toBe(false);
+	});
+});
+
+describe("legacy spawnHook shellEnv adapter", () => {
+	it("forwards only the hook's added or changed variables, not the spread baseline", () => {
+		const definition = createBashTool(process.cwd(), {
+			spawnHook: context => ({ ...context, env: { ...context.env, EXTRA: "1", CHANGED: "new" } }),
+		});
+		const result = definition.shellEnv?.({
+			command: "true",
+			cwd: process.cwd(),
+			env: { KEPT: "kept", CHANGED: "old" },
+		});
+		expect(result).toEqual({ EXTRA: "1", CHANGED: "new" });
 	});
 });

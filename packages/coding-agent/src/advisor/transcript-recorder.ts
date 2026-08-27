@@ -5,6 +5,7 @@ import type { Message, UserMessage } from "@oh-my-soup/pi-ai";
 import { logger } from "@oh-my-soup/pi-utils";
 import { visitEntriesFromFileStream } from "../session/session-loader";
 import { SessionManager } from "../session/session-manager";
+import { fingerprintMessage } from "./message-fingerprint";
 
 /**
  * Reserved transcript stem for advisor session files. Chosen so it cannot
@@ -33,6 +34,22 @@ export function isAdvisorTranscriptName(name: string): boolean {
 	);
 }
 
+/** Controls resume-time advisor transcript cost restoration. */
+export interface LoadAdvisorTranscriptCostsOptions {
+	/** Resolves once active recorder writes are paused at the snapshot boundary. */
+	beforeSnapshot?: Promise<unknown>;
+	/** Runs after transcript byte lengths are captured and before parsing begins. */
+	onSnapshot?: () => void;
+	/** Stop discovery and parsing when the owning session is stale or disposed. */
+	shouldContinue?: () => boolean;
+}
+
+interface AdvisorTranscriptCostFileSnapshot {
+	file: string;
+	slug: string;
+	maxBytes: number;
+}
+
 /**
  * Sum the advisor spend already persisted next to a primary session transcript,
  * keyed by advisor slug.
@@ -47,42 +64,62 @@ export function isAdvisorTranscriptName(name: string): boolean {
  * `<session>/<SubId>/__advisor.jsonl`, and their spend belongs to the subagent,
  * not to this roster. Hence the scan stays at the top level of the directory.
  */
-export async function loadAdvisorTranscriptCosts(sessionFile: string | undefined): Promise<Map<string, number>> {
+export async function loadAdvisorTranscriptCosts(
+	sessionFile: string | undefined,
+	options: LoadAdvisorTranscriptCostsOptions = {},
+): Promise<Map<string, number>> {
+	await options.beforeSnapshot;
+	const snapshots: AdvisorTranscriptCostFileSnapshot[] = [];
+	if (sessionFile?.endsWith(JSONL_SUFFIX)) {
+		const directory = sessionFile.slice(0, -JSONL_SUFFIX.length);
+		const dirents = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+		for (const dirent of dirents) {
+			if (options.shouldContinue?.() === false) break;
+			if (!dirent.isFile() || !isAdvisorTranscriptName(dirent.name)) continue;
+			const file = path.join(directory, dirent.name);
+			try {
+				snapshots.push({
+					file,
+					slug:
+						dirent.name === ADVISOR_TRANSCRIPT_FILENAME
+							? ""
+							: dirent.name.slice(`${ADVISOR_TRANSCRIPT_STEM}.`.length, -JSONL_SUFFIX.length),
+					maxBytes: (await fs.stat(file)).size,
+				});
+			} catch {}
+		}
+	}
+	options.onSnapshot?.();
+
 	const costs = new Map<string, number>();
-	if (!sessionFile?.endsWith(JSONL_SUFFIX)) return costs;
-	const directory = sessionFile.slice(0, -JSONL_SUFFIX.length);
-	const dirents = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
-	for (const dirent of dirents) {
-		if (!dirent.isFile() || !isAdvisorTranscriptName(dirent.name)) continue;
-		const slug =
-			dirent.name === ADVISOR_TRANSCRIPT_FILENAME
-				? ""
-				: dirent.name.slice(`${ADVISOR_TRANSCRIPT_STEM}.`.length, -JSONL_SUFFIX.length);
+	for (const snapshot of snapshots) {
 		let total = 0;
 		let validHeader: boolean | undefined;
 		try {
-			await visitEntriesFromFileStream(path.join(directory, dirent.name), entry => {
-				const isObject = typeof entry === "object" && entry !== null;
-				if (validHeader === undefined) {
-					validHeader = isObject && entry.type === "session" && typeof entry.id === "string";
-					return;
-				}
-				// A syntactically valid but non-object entry (e.g. a bare `null`
-				// line) must cost only itself, not crash entry.type access and
-				// discard everything accumulated for this transcript.
-				if (!validHeader || !isObject || entry.type !== "message") return;
-				const message = entry.message;
-				if (!message || typeof message !== "object" || message.role !== "assistant") return;
-				// One malformed usage block must cost that entry only, not the
-				// whole transcript's total.
-				const total_ = message.usage?.cost?.total;
-				if (typeof total_ === "number" && Number.isFinite(total_)) total += total_;
-			});
+			await visitEntriesFromFileStream(
+				snapshot.file,
+				entry => {
+					const isObject = typeof entry === "object" && entry !== null;
+					if (validHeader === undefined) {
+						validHeader = isObject && entry.type === "session" && typeof entry.id === "string";
+						return;
+					}
+					if (!validHeader || !isObject || entry.type !== "message") return;
+					const message = entry.message;
+					if (!message || typeof message !== "object" || message.role !== "assistant") return;
+					const entryTotal = message.usage?.cost?.total;
+					if (typeof entryTotal === "number" && Number.isFinite(entryTotal)) total += entryTotal;
+				},
+				{ maxBytes: snapshot.maxBytes, shouldContinue: options.shouldContinue },
+			);
 		} catch (err) {
-			logger.debug("advisor transcript cost read failed", { file: dirent.name, err: String(err) });
+			logger.debug("advisor transcript cost read failed", {
+				file: path.basename(snapshot.file),
+				err: String(err),
+			});
 			continue;
 		}
-		if (total > 0) costs.set(slug, total);
+		if (total > 0) costs.set(snapshot.slug, total);
 	}
 	return costs;
 }
@@ -114,6 +151,12 @@ export class AdvisorTranscriptRecorder {
 	#filename: string;
 	/** Serializes the async open/close against synchronous appends so records land in order. */
 	#queue: Promise<void>;
+	/** Ordered user-delta identities persisted since the last committed advisor turn. */
+	#replayWindow: bigint[] = [];
+	/** Cursor into the replay window, rewound for each delivery attempt. */
+	#replayCursor = 0;
+	/** Transcript target associated with the replay window. */
+	#windowFile: string | undefined;
 
 	/**
 	 * @param filename Transcript filename within the session dir. Defaults to
@@ -163,6 +206,25 @@ export class AdvisorTranscriptRecorder {
 		const sessionFile = this.resolveSessionFile();
 		if (!sessionFile?.endsWith(JSONL_SUFFIX)) return;
 		const file = path.join(sessionFile.slice(0, -JSONL_SUFFIX.length), this.#filename);
+		if (file !== this.#windowFile) {
+			this.#windowFile = file;
+			this.#replayWindow = [];
+			this.#replayCursor = 0;
+		}
+		if (message.role === "user") {
+			const fingerprint = fingerprintMessage(message);
+			if (fingerprint !== undefined) {
+				if (this.#replayCursor < this.#replayWindow.length) {
+					if (this.#replayWindow[this.#replayCursor] === fingerprint) {
+						this.#replayCursor++;
+						return;
+					}
+					this.#replayWindow.length = this.#replayCursor;
+				}
+				this.#replayWindow.push(fingerprint);
+				this.#replayCursor = this.#replayWindow.length;
+			}
+		}
 		const cwd = this.resolveCwd();
 		this.#enqueue(async () => {
 			if (file !== this.#file) {
@@ -175,6 +237,39 @@ export class AdvisorTranscriptRecorder {
 			}
 			this.#manager?.appendMessage(persisted);
 		});
+	}
+
+	/** Rewind positional replay matching for one advisor delivery attempt. */
+	beginTurn(): void {
+		this.#replayCursor = 0;
+	}
+
+	/** Commit one advisor turn, making identical deltas in the next turn distinct. */
+	commitTurn(): void {
+		this.#clearReplayWindow();
+	}
+
+	/** Discard replay identity for a failed batch that will not be retried. */
+	abandonTurn(): void {
+		this.#clearReplayWindow();
+	}
+
+	/**
+	 * Queue a barrier after all records accepted so far. Records accepted after
+	 * this call remain queued until `release` settles.
+	 */
+	blockWritesUntil(release: Promise<unknown>): Promise<void> {
+		const ready = Promise.withResolvers<void>();
+		this.#enqueue(async () => {
+			ready.resolve();
+			await release;
+		});
+		return ready.promise;
+	}
+
+	#clearReplayWindow(): void {
+		this.#replayWindow = [];
+		this.#replayCursor = 0;
 	}
 
 	/** Flush pending writes (best-effort). */

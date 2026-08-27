@@ -20,10 +20,12 @@ import {
 	resolveBunGlobalNodeModulesDirFromLocations,
 	resolveReleaseBinaryAsset,
 	resolveUpdateMethodForTest,
-	sweepStaleBackups,
+	sweepStaleUpdateArtifacts,
 	updateViaBinaryAt,
 } from "@oh-my-soup/pi-coding-agent/cli/update-cli";
 import Update from "@oh-my-soup/pi-coding-agent/commands/update";
+import { getThemeByName } from "@oh-my-soup/pi-coding-agent/modes/theme/loader";
+import { setThemeInstance } from "@oh-my-soup/pi-coding-agent/modes/theme/theme";
 import { removeWithRetries } from "@oh-my-soup/pi-utils";
 import type { CliConfig } from "@oh-my-soup/pi-utils/cli";
 
@@ -611,7 +613,7 @@ describe("update-cli release binary integrity", () => {
 			expect(metadataAuthorizations).toEqual(["Bearer test-token"]);
 			expect(await Bun.file(targetPath).text()).toBe(installed);
 			if (process.platform !== "win32") expect((await fs.stat(targetPath)).mode & 0o777).toBe(0o755);
-			expect(await Bun.file(`${targetPath}.new`).exists()).toBe(false);
+			expect((await fs.readdir(dir)).filter(name => name.endsWith(".new"))).toEqual([]);
 		} finally {
 			if (previousGitHubToken === undefined) delete Bun.env.GITHUB_TOKEN;
 			else Bun.env.GITHUB_TOKEN = previousGitHubToken;
@@ -788,25 +790,146 @@ describe("update-cli binary replacement on locked backups", () => {
 	});
 });
 
-describe("update-cli stale backup sweep", () => {
-	it("reclaims timestamped and legacy backups while leaving unrelated .bak files", async () => {
+describe("update-cli stale update artifact sweep", () => {
+	it("reclaims backups and orphaned temps while sparing in-progress temps and unrelated files", async () => {
 		const dir = await makeTempDir();
 		const targetPath = path.join(dir, "oms.exe");
 		await Bun.write(targetPath, "current binary");
 		await Bun.write(`${targetPath}.bak`, "legacy backup");
 		await Bun.write(`${targetPath}.1700000000000.4242.bak`, "timestamped backup");
 		await Bun.write(`${targetPath}.1800000000000.99.bak`, "another backup");
-		// Must survive: foreign basename and a non-numeric middle segment.
+		const stale = new Date(Date.now() - 60 * 60_000);
+		await Bun.write(`${targetPath}.new`, "legacy temp");
+		await fs.utimes(`${targetPath}.new`, stale, stale);
+		await Bun.write(`${targetPath}.1700000000000.4242.new`, "timestamped temp");
+		await fs.utimes(`${targetPath}.1700000000000.4242.new`, stale, stale);
+		await Bun.write(`${targetPath}.9999999999999.7.new`, "in-progress temp");
 		await Bun.write(path.join(dir, "notes.bak"), "keep me");
 		await Bun.write(`${targetPath}.config.bak`, "keep me too");
+		await Bun.write(`${targetPath}.config.new`, "keep me three");
 
-		await sweepStaleBackups(targetPath);
+		await sweepStaleUpdateArtifacts(targetPath);
 
 		expect(await Bun.file(targetPath).exists()).toBe(true);
 		expect(await Bun.file(`${targetPath}.bak`).exists()).toBe(false);
 		expect(await Bun.file(`${targetPath}.1700000000000.4242.bak`).exists()).toBe(false);
 		expect(await Bun.file(`${targetPath}.1800000000000.99.bak`).exists()).toBe(false);
+		expect(await Bun.file(`${targetPath}.new`).exists()).toBe(false);
+		expect(await Bun.file(`${targetPath}.1700000000000.4242.new`).exists()).toBe(false);
+		expect(await Bun.file(`${targetPath}.9999999999999.7.new`).exists()).toBe(true);
 		expect(await Bun.file(path.join(dir, "notes.bak")).exists()).toBe(true);
 		expect(await Bun.file(`${targetPath}.config.bak`).exists()).toBe(true);
+		expect(await Bun.file(`${targetPath}.config.new`).exists()).toBe(true);
+	});
+});
+
+describe("update-cli concurrent binary updates", () => {
+	const version = "999.0.0";
+	const binaryName = "oms-linux-x64";
+	const url = `https://github.com/pickpocket/oh-my-soup/releases/download/v${version}/${binaryName}`;
+	const payload = Buffer.alloc(2048, 0x41);
+	const digest = `sha256:${createHash("sha256").update(payload).digest("hex")}`;
+
+	function metadata(): Response {
+		return Response.json({
+			tag_name: `v${version}`,
+			draft: false,
+			prerelease: false,
+			assets: [{ name: binaryName, state: "uploaded", size: payload.byteLength, digest, browser_download_url: url }],
+		});
+	}
+
+	const fastFetch = async (input: string | URL | Request): Promise<Response> => {
+		const requestUrl = String(input);
+		if (requestUrl.startsWith("https://api.github.com/")) return metadata();
+		if (requestUrl === url) return new Response(payload);
+		throw new Error(`Unexpected request: ${requestUrl}`);
+	};
+	const verifyStaged = async (binaryPath: string) => ({ ok: true, path: binaryPath });
+	const verifyInstalled = async () => ({ ok: true, actual: version });
+
+	async function prepare(): Promise<{ dir: string; targetPath: string }> {
+		const loadedTheme = await getThemeByName("dark");
+		if (!loadedTheme) throw new Error("theme unavailable");
+		setThemeInstance(loadedTheme);
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const dir = await makeTempDir();
+		const targetPath = path.join(dir, "oms");
+		await Bun.write(targetPath, "old binary");
+		return { dir, targetPath };
+	}
+
+	it("lets an overlapping slow run install after a fast run completes", async () => {
+		const { dir, targetPath } = await prepare();
+		const firstChunkWritten = Promise.withResolvers<void>();
+		const finishSlowDownload = Promise.withResolvers<void>();
+		const slowFetch = async (input: string | URL | Request): Promise<Response> => {
+			const requestUrl = String(input);
+			if (requestUrl.startsWith("https://api.github.com/")) return metadata();
+			if (requestUrl === url) {
+				return new Response(
+					new ReadableStream<Uint8Array>({
+						async start(controller) {
+							controller.enqueue(payload.subarray(0, 1024));
+							firstChunkWritten.resolve();
+							await finishSlowDownload.promise;
+							controller.enqueue(payload.subarray(1024));
+							controller.close();
+						},
+					}),
+				);
+			}
+			throw new Error(`Unexpected request: ${requestUrl}`);
+		};
+
+		const slowRun = updateViaBinaryAt(targetPath, version, {
+			binaryName,
+			fetchImpl: slowFetch,
+			verifyBinary: verifyStaged,
+			verifyInstalledVersion: verifyInstalled,
+		});
+		await firstChunkWritten.promise;
+		await updateViaBinaryAt(targetPath, version, {
+			binaryName,
+			fetchImpl: fastFetch,
+			verifyBinary: verifyStaged,
+			verifyInstalledVersion: verifyInstalled,
+		});
+		finishSlowDownload.resolve();
+		await slowRun;
+
+		expect(await Bun.file(targetPath).bytes()).toEqual(new Uint8Array(payload));
+		expect((await fs.readdir(dir)).filter(name => name.endsWith(".new"))).toEqual([]);
+	});
+
+	it("rolls back its backup when verification fails while another update runs", async () => {
+		const { dir, targetPath } = await prepare();
+		const enteredVerify = Promise.withResolvers<void>();
+		const releaseVerify = Promise.withResolvers<void>();
+		const failingVerify = async () => {
+			enteredVerify.resolve();
+			await releaseVerify.promise;
+			return { ok: false, actual: "0.0.0", path: targetPath };
+		};
+
+		const failingRun = updateViaBinaryAt(targetPath, version, {
+			binaryName,
+			fetchImpl: fastFetch,
+			verifyBinary: verifyStaged,
+			verifyInstalledVersion: failingVerify,
+		});
+		await enteredVerify.promise;
+		const successfulRun = updateViaBinaryAt(targetPath, version, {
+			binaryName,
+			fetchImpl: fastFetch,
+			verifyBinary: verifyStaged,
+			verifyInstalledVersion: verifyInstalled,
+		});
+		releaseVerify.resolve();
+		await expect(failingRun).rejects.toThrow(/still reports 0\.0\.0 \(expected 999\.0\.0\)/);
+		await successfulRun;
+
+		expect(await Bun.file(targetPath).bytes()).toEqual(new Uint8Array(payload));
+		expect((await fs.readdir(dir)).filter(name => name.endsWith(".bak") || name.endsWith(".new"))).toEqual([]);
 	});
 });

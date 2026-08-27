@@ -43,10 +43,13 @@ function createJwtOnlyCredential(args: { suffix: string; accountId: string; emai
 function countCredentialRows(dbPath: string, provider: string): number {
 	const db = new Database(dbPath, { readonly: true });
 	try {
-		const row = db.prepare("SELECT COUNT(*) AS count FROM auth_credentials WHERE provider = ?").get(provider) as
-			| { count?: number }
-			| undefined;
-		return row?.count ?? 0;
+		const statement = db.prepare("SELECT COUNT(*) AS count FROM auth_credentials WHERE provider = ?");
+		try {
+			const row = statement.get(provider) as { count?: number } | undefined;
+			return row?.count ?? 0;
+		} finally {
+			statement.finalize();
+		}
 	} finally {
 		db.close();
 	}
@@ -55,12 +58,15 @@ function countCredentialRows(dbPath: string, provider: string): number {
 function readDisabledCauses(dbPath: string, provider: string): string[] {
 	const db = new Database(dbPath, { readonly: true });
 	try {
-		const rows = db
-			.prepare(
-				"SELECT disabled_cause FROM auth_credentials WHERE provider = ? AND disabled_cause IS NOT NULL ORDER BY id ASC",
-			)
-			.all(provider) as Array<{ disabled_cause?: string | null }>;
-		return rows.flatMap(row => (typeof row.disabled_cause === "string" ? [row.disabled_cause] : []));
+		const statement = db.prepare(
+			"SELECT disabled_cause FROM auth_credentials WHERE provider = ? AND disabled_cause IS NOT NULL ORDER BY id ASC",
+		);
+		try {
+			const rows = statement.all(provider) as Array<{ disabled_cause?: string | null }>;
+			return rows.flatMap(row => (typeof row.disabled_cause === "string" ? [row.disabled_cause] : []));
+		} finally {
+			statement.finalize();
+		}
 	} finally {
 		db.close();
 	}
@@ -72,9 +78,14 @@ function readStoredIdentityRows(
 ): Array<{ identity_key: string | null; disabled_cause: string | null }> {
 	const db = new Database(dbPath, { readonly: true });
 	try {
-		return db
-			.prepare("SELECT identity_key, disabled_cause FROM auth_credentials WHERE provider = ? ORDER BY id ASC")
-			.all(provider) as Array<{ identity_key: string | null; disabled_cause: string | null }>;
+		const statement = db.prepare(
+			"SELECT identity_key, disabled_cause FROM auth_credentials WHERE provider = ? ORDER BY id ASC",
+		);
+		try {
+			return statement.all(provider) as Array<{ identity_key: string | null; disabled_cause: string | null }>;
+		} finally {
+			statement.finalize();
+		}
 	} finally {
 		db.close();
 	}
@@ -83,10 +94,13 @@ function readStoredIdentityRows(
 function readAuthSchemaVersion(dbPath: string): number | null {
 	const db = new Database(dbPath, { readonly: true });
 	try {
-		const row = db.prepare("SELECT version FROM auth_schema_version WHERE id = 1").get() as
-			| { version?: number }
-			| undefined;
-		return typeof row?.version === "number" ? row.version : null;
+		const statement = db.prepare("SELECT version FROM auth_schema_version WHERE id = 1");
+		try {
+			const row = statement.get() as { version?: number } | undefined;
+			return typeof row?.version === "number" ? row.version : null;
+		} finally {
+			statement.finalize();
+		}
 	} finally {
 		db.close();
 	}
@@ -95,10 +109,13 @@ function readAuthSchemaVersion(dbPath: string): number | null {
 function readTableSql(dbPath: string, tableName: string): string | null {
 	const db = new Database(dbPath, { readonly: true });
 	try {
-		const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName) as
-			| { sql?: string | null }
-			| undefined;
-		return row?.sql ?? null;
+		const statement = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?");
+		try {
+			const row = statement.get(tableName) as { sql?: string | null } | undefined;
+			return row?.sql ?? null;
+		} finally {
+			statement.finalize();
+		}
 	} finally {
 		db.close();
 	}
@@ -118,7 +135,8 @@ describe("AuthStorage openai-codex email dedupe", () => {
 	});
 
 	afterEach(async () => {
-		store?.close();
+		if (authStorage) authStorage.close();
+		else store?.close();
 		store = null;
 		authStorage = null;
 		dbPath = "";
@@ -444,24 +462,27 @@ describe("AuthStorage openai-codex email dedupe", () => {
 
 		const futureDbPath = path.join(tempDir, "future-schema-agent.db");
 		const futureDb = new Database(futureDbPath);
-		futureDb.run(`
-			CREATE TABLE auth_schema_version (
-				id INTEGER PRIMARY KEY CHECK (id = 1),
-				version INTEGER NOT NULL
-			);
-			INSERT INTO auth_schema_version(id, version) VALUES (1, 8);
-			CREATE TABLE auth_credentials (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				provider TEXT NOT NULL,
-				credential_type TEXT NOT NULL,
-				data TEXT NOT NULL,
-				disabled_cause TEXT DEFAULT NULL,
-				identity_key TEXT DEFAULT NULL,
-				created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-				updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-			);
-		`);
-		futureDb.close();
+		try {
+			futureDb.run(`
+				CREATE TABLE auth_schema_version (
+					id INTEGER PRIMARY KEY CHECK (id = 1),
+					version INTEGER NOT NULL
+				);
+				INSERT INTO auth_schema_version(id, version) VALUES (1, 8);
+				CREATE TABLE auth_credentials (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					provider TEXT NOT NULL,
+					credential_type TEXT NOT NULL,
+					data TEXT NOT NULL,
+					disabled_cause TEXT DEFAULT NULL,
+					identity_key TEXT DEFAULT NULL,
+					created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+					updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+				);
+			`);
+		} finally {
+			futureDb.close();
+		}
 
 		const reopenedStore = await SqliteAuthCredentialStore.open(futureDbPath);
 		try {

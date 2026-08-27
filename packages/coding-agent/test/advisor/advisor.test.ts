@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-soup/omstype";
-import type { AgentMessage, AgentTelemetryConfig } from "@oh-my-soup/pi-agent-core";
+import { type AgentMessage, type AgentTelemetryConfig, Tokenizer } from "@oh-my-soup/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-soup/pi-ai";
 import * as AIError from "@oh-my-soup/pi-ai/error";
 import { kCursorExecResolved } from "@oh-my-soup/pi-ai/utils/block-symbols";
@@ -32,6 +32,8 @@ import { getThemeByName, setThemeInstance } from "../../src/modes/theme/theme";
 import { SecretObfuscator } from "../../src/secrets/obfuscator";
 import { formatSessionHistoryMarkdown } from "../../src/session/session-history-format";
 import { YieldQueue } from "../../src/session/yield-queue";
+
+const tokenizer = new Tokenizer();
 
 /** Poll until the drain loop reaches the asserted state — waitForCatchup
  *  releases IMMEDIATELY on advisor failure (the primary must never park on a
@@ -2426,8 +2428,9 @@ describe("advisor", () => {
 			const host: AdvisorRuntimeHost = {
 				snapshotMessages: () => messages,
 				enqueueAdvice: () => {},
-				maintainContext: async tokens => {
-					expect(tokens).toBeGreaterThan(0);
+				maintainContext: async incoming => {
+					if (incoming.role !== "user") throw new Error("Expected advisor maintenance user message");
+					expect(incoming.content).toBeTruthy();
 					return shouldResetContext;
 				},
 			};
@@ -2659,8 +2662,8 @@ describe("advisor", () => {
 				{
 					snapshotMessages: () => messages,
 					enqueueAdvice: () => {},
-					maintainContext: async incomingTokens => {
-						maintenanceTokens.push(incomingTokens);
+					maintainContext: async incoming => {
+						maintenanceTokens.push(tokenizer.countMessage(incoming));
 						if (maintenanceTokens.length === 4) fourthMaintenance.resolve();
 						return false;
 					},

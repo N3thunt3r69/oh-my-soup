@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Models now materialize an optional `tokenizer` family in the catalog (`claude-v3`/`v47`/`v5`, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+). The field follows `requestModelId`, applies to bundled, discovered, and custom models, and can be explicitly overridden in model configuration.
+- Added Z.AI `glm-5.3` with its documented 1M context window, 128K output limit, pay-as-you-go pricing, and forced `low`/`high`/`max` reasoning effort surface.
+
 ## [17.3.2] - 2026-08-16
 
 ### Changed

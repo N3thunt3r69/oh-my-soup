@@ -141,6 +141,29 @@ describe("AIError.finalize", () => {
 		expect(AIError.is(result.id, AIError.Flag.Transient)).toBe(true);
 	});
 
+	it("preserves nested token-overflow evidence through finalization", async () => {
+		const inner = Object.assign(new Error("maximum context length is 128000 tokens"), { status: 413 });
+		const result = await AIError.finalize(new Error("Provider returned error", { cause: inner }), {});
+		expect(AIError.is(result.id, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.is(result.id, AIError.Flag.PayloadRejected)).toBe(false);
+	});
+
+	it("lets final token evidence clear a status-inferred payload classification", () => {
+		const message: { errorStatus: number; errorMessage: string; errorId?: number } = {
+			errorStatus: 413,
+			errorMessage: "Content Too Large",
+		};
+		AIError.classifyMessage(message);
+		expect(AIError.is(message.errorId, AIError.Flag.PayloadRejected)).toBe(true);
+		const finalized = {
+			...message,
+			errorClassificationMessage: "maximum context length is 128000 tokens",
+		};
+		AIError.classifyMessage(finalized);
+		expect(AIError.is(finalized.errorId, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.is(finalized.errorId, AIError.Flag.PayloadRejected)).toBe(false);
+	});
+
 	it("keeps an incomplete-stream provider error retryable through finalize + classifyMessage", async () => {
 		const result = await AIError.finalize(
 			new AIError.ProviderResponseError("stream ended without a finish reason", { kind: "incomplete-stream" }),

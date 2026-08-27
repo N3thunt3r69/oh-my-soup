@@ -63,13 +63,15 @@ function makeEmptyContext(): SessionContext {
 	};
 }
 
-/** Build a minimal InteractiveModeContext mock, returning spies for assertions. */
-function makeCtx(): {
+interface RenderInitialMessagesTestContext {
 	ctx: InteractiveModeContext;
 	transcriptSpy: Mock<(options?: { collapseCompactedHistory?: boolean }) => SessionContext>;
 	llmContextSpy: Mock<() => SessionContext>;
 	renderSessionContextSpy: Mock<(...args: unknown[]) => Promise<void>>;
-} {
+}
+
+/** Build a minimal InteractiveModeContext mock, returning spies for assertions. */
+function makeCtx(): RenderInitialMessagesTestContext {
 	const transcriptSpy = vi.fn(() => makeEmptyContext());
 	const llmContextSpy = vi.fn(() => makeEmptyContext());
 	const renderSessionContextSpy = vi.fn(async () => {});
@@ -700,5 +702,50 @@ describe("UiHelpers.renderSessionContext — mid-stream tool call rebuild", () =
 
 		const rendered = Bun.stripANSI(chatContainer.render(120).join("\n"));
 		expect(rendered).toContain("GROWN_TAIL_SENTINEL");
+	});
+});
+
+describe("UiHelpers.renderInitialMessages — replay convergence", () => {
+	function replaceGetEntries(ctx: InteractiveModeContext, getEntries: () => unknown[]): void {
+		Object.defineProperty(ctx.viewSession.sessionManager, "getEntries", { configurable: true, value: getEntries });
+		Object.defineProperty(ctx.sessionManager, "getEntries", { configurable: true, value: getEntries });
+	}
+
+	function growingEntriesCtx(): RenderInitialMessagesTestContext {
+		const made = makeCtx();
+		let calls = 0;
+		const getEntries = vi.fn(() => {
+			calls++;
+			return Array.from({ length: calls }, () => ({ type: "message" }));
+		});
+		replaceGetEntries(made.ctx, getEntries);
+		return made;
+	}
+
+	it("terminates when entries are persisted during every replay pass", async () => {
+		const { ctx, transcriptSpy } = growingEntriesCtx();
+
+		await new UiHelpers(ctx).renderInitialMessages();
+
+		// The initial pass plus four retries reaches the five-attempt cap.
+		expect(transcriptSpy).toHaveBeenCalledTimes(5);
+		expect(ctx.initialChatRendered).toBeTrue();
+	});
+
+	it("still replays once more when a single entry lands mid-replay", async () => {
+		const { ctx, transcriptSpy } = makeCtx();
+		const lengths = [0, 1, 1, 1];
+		let call = 0;
+		const getEntries = vi.fn(() => {
+			const length = lengths[Math.min(call, lengths.length - 1)]!;
+			call++;
+			return Array.from({ length }, () => ({ type: "message" }));
+		});
+		replaceGetEntries(ctx, getEntries);
+
+		await new UiHelpers(ctx).renderInitialMessages();
+
+		expect(transcriptSpy).toHaveBeenCalledTimes(2);
+		expect(ctx.initialChatRendered).toBeTrue();
 	});
 });

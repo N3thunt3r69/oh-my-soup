@@ -1,6 +1,19 @@
+import { PERSONAL_GITHUB_COPILOT_BASE_URL } from "../wire/github-copilot";
+
 export interface ModelCacheProviderIdOptions {
 	apiKey?: string;
 	baseUrl?: string;
+}
+
+const CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS: Readonly<Record<string, true>> = {
+	"opencode-go": true,
+	"opencode-zen": true,
+	"github-copilot": true,
+};
+
+/** Whether a provider's model-cache namespace requires its resolved credential. */
+export function isCredentialScopedModelCacheProvider(providerId: string): boolean {
+	return CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS[providerId] === true;
 }
 
 export function getDefaultModelDiscoveryBaseUrl(providerId: string): string | undefined {
@@ -41,12 +54,13 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 		case "ollama":
 			return resolveOllamaModelCacheProviderId(providerId, options.baseUrl);
 		case "cursor":
-			// v3: max-mode Claude/Gemini rows cached before the 1M context-window
-			// discovery fix carry a stale 200k window and must be refetched.
-			return "cursor:max-mode-v3";
+			// v4: Grok 4.5/4.6 rows cached before the effort-less default-tier
+			// fix carry requestModelId "*-low"; refetch so live tier discovery
+			// can select the preferred medium member when the account serves it.
+			return "cursor:default-effort-v4";
 		case "litellm": {
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
-			return `litellm:rich-v5:${Bun.hash(baseUrl).toString(36)}`;
+			return `litellm:rich-v6:${Bun.hash(baseUrl).toString(36)}`;
 		}
 		case "opencode-go":
 		case "opencode-zen": {
@@ -56,11 +70,21 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			const scope = `${options.apiKey ?? ""}\u0000${discoveryBaseUrl}`;
 			return `${providerId}:models-v1:${Bun.hash(scope).toString(36)}`;
 		}
+		case "github-copilot": {
+			// Copilot model specs bake in the plan-specific endpoint resolved from
+			// the credential. Scope authoritative caches by credential and endpoint
+			// so switching accounts cannot reuse another account's model routes.
+			const baseUrl = options.baseUrl ?? PERSONAL_GITHUB_COPILOT_BASE_URL;
+			const scope = `${options.apiKey ?? ""}\u0000${baseUrl}`;
+			return `github-copilot:models-v1:${Bun.hash(scope).toString(36)}`;
+		}
 		case "openrouter":
 			return "openrouter:pseudo-api";
 		case "vllm": {
+			// v2: qwen3.8 rows cached before the reasoning/template-effort upgrade
+			// carry `reasoning: false` and must be refetched.
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
-			return `vllm:${Bun.hash(baseUrl).toString(36)}`;
+			return `vllm:models-v2:${Bun.hash(baseUrl).toString(36)}`;
 		}
 		default:
 			return providerId;

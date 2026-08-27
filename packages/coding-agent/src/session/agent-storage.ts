@@ -230,7 +230,13 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 `);
 
-		const settingsInfo = this.#db.prepare("PRAGMA table_info(settings)").all() as Array<{ name?: string }>;
+		const settingsInfoStmt = this.#db.prepare("PRAGMA table_info(settings)");
+		let settingsInfo: Array<{ name?: string }>;
+		try {
+			settingsInfo = settingsInfoStmt.all() as Array<{ name?: string }>;
+		} finally {
+			settingsInfoStmt.finalize();
+		}
 		const hasSettingsTable = settingsInfo.length > 0;
 		const hasKey = settingsInfo.some(column => column.name === "key");
 		const hasValue = settingsInfo.some(column => column.name === "value");
@@ -246,7 +252,13 @@ CREATE TABLE settings (
 		} else if (!hasKey || !hasValue) {
 			// Migrate v1 schema: single JSON blob in `data` column → per-key rows
 			let legacySettings: Record<string, unknown> | null = null;
-			const row = this.#db.prepare("SELECT data FROM settings WHERE id = 1").get() as { data?: string } | undefined;
+			const legacySettingsStmt = this.#db.prepare("SELECT data FROM settings WHERE id = 1");
+			let row: { data?: string } | undefined;
+			try {
+				row = legacySettingsStmt.get() as { data?: string } | undefined;
+			} finally {
+				legacySettingsStmt.finalize();
+			}
 			if (row?.data) {
 				try {
 					const parsed = JSON.parse(row.data);
@@ -273,11 +285,15 @@ CREATE TABLE settings (
 					const insert = this.#db.prepare(
 						`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ${SQLITE_NOW_EPOCH})`,
 					);
-					for (const [key, value] of Object.entries(settings)) {
-						if (value === undefined) continue;
-						const serialized = JSON.stringify(value);
-						if (serialized === undefined) continue;
-						insert.run(key, serialized);
+					try {
+						for (const [key, value] of Object.entries(settings)) {
+							if (value === undefined) continue;
+							const serialized = JSON.stringify(value);
+							if (serialized === undefined) continue;
+							insert.run(key, serialized);
+						}
+					} finally {
+						insert.finalize();
 					}
 				}
 			});
@@ -285,9 +301,13 @@ CREATE TABLE settings (
 			migrate(legacySettings);
 		}
 
-		const versionRow = this.#db.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").get() as
-			| { version?: number }
-			| undefined;
+		const versionStmt = this.#db.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1");
+		let versionRow: { version?: number } | undefined;
+		try {
+			versionRow = versionStmt.get() as { version?: number } | undefined;
+		} finally {
+			versionStmt.finalize();
+		}
 		const schemaVersion = typeof versionRow?.version === "number" ? versionRow.version : 0;
 		if (versionRow?.version !== undefined && versionRow.version !== SCHEMA_VERSION) {
 			logger.warn("AgentStorage schema version mismatch", {
@@ -298,7 +318,12 @@ CREATE TABLE settings (
 		if (schemaVersion < SCHEMA_VERSION) {
 			this.#migrateSchema(schemaVersion);
 		}
-		this.#db.prepare("INSERT OR REPLACE INTO schema_version(version) VALUES (?)").run(SCHEMA_VERSION);
+		const writeVersionStmt = this.#db.prepare("INSERT OR REPLACE INTO schema_version(version) VALUES (?)");
+		try {
+			writeVersionStmt.run(SCHEMA_VERSION);
+		} finally {
+			writeVersionStmt.finalize();
+		}
 	}
 
 	#migrateSchema(fromVersion: number): void {
@@ -315,7 +340,12 @@ CREATE TABLE settings (
 			// Purge the old aggregates and re-arm the stats.db backfill so
 			// history is re-imported through the corrected fold.
 			this.#db.run("DELETE FROM model_perf");
-			this.#db.prepare("DELETE FROM meta WHERE key = ?").run(MODEL_PERF_BACKFILL_KEY);
+			const clearBackfillStmt = this.#db.prepare("DELETE FROM meta WHERE key = ?");
+			try {
+				clearBackfillStmt.run(MODEL_PERF_BACKFILL_KEY);
+			} finally {
+				clearBackfillStmt.finalize();
+			}
 		}
 	}
 
@@ -536,15 +566,24 @@ FROM model_usage_legacy
 		if (!this.#autoPerfBackfill || this.#perfBackfillChecked) return;
 		this.#perfBackfillChecked = true;
 		try {
-			const marker = this.#db.prepare("SELECT value FROM meta WHERE key = ?").get(MODEL_PERF_BACKFILL_KEY);
+			const markerStmt = this.#db.prepare("SELECT value FROM meta WHERE key = ?");
+			let marker: unknown;
+			try {
+				marker = markerStmt.get(MODEL_PERF_BACKFILL_KEY);
+			} finally {
+				markerStmt.finalize();
+			}
 			if (marker) return;
 			const statsDbPath = getStatsDbPath();
 			if (!fs.existsSync(statsDbPath)) return;
 			void this.backfillModelPerfFromStats(statsDbPath)
 				.then(imported => {
-					this.#db
-						.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)")
-						.run(MODEL_PERF_BACKFILL_KEY, "complete");
+					const markCompleteStmt = this.#db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
+					try {
+						markCompleteStmt.run(MODEL_PERF_BACKFILL_KEY, "complete");
+					} finally {
+						markCompleteStmt.finalize();
+					}
 					logger.info("AgentStorage imported model perf history from stats.db", { imported });
 				})
 				.catch(error => {
@@ -572,9 +611,10 @@ FROM model_usage_legacy
 	 */
 	async backfillModelPerfFromStats(statsDbPath: string): Promise<number> {
 		const statsDb = new Database(statsDbPath, { readonly: true });
+		let select: Statement | undefined;
 		try {
 			statsDb.run(`PRAGMA busy_timeout = ${getDbBusyTimeoutMs()}`);
-			const select = statsDb.prepare(
+			select = statsDb.prepare(
 				`SELECT rowid, timestamp, provider, model, output_tokens, duration, ttft
 FROM messages
 WHERE (timestamp < ?1 OR (timestamp = ?1 AND rowid < ?2))
@@ -634,14 +674,19 @@ ON CONFLICT(model_key) DO UPDATE SET
 	ttft_ms = model_perf.ttft_ms + excluded.ttft_ms,
 	updated_at = ${SQLITE_NOW_EPOCH}`,
 				);
-				this.#db.transaction(() => {
-					for (const [key, accum] of sums) {
-						upsert.run(key, accum.samples, accum.outputTokens, accum.genMs, accum.ttftSamples, accum.ttftMs);
-					}
-				})();
+				try {
+					this.#db.transaction(() => {
+						for (const [key, accum] of sums) {
+							upsert.run(key, accum.samples, accum.outputTokens, accum.genMs, accum.ttftSamples, accum.ttftMs);
+						}
+					})();
+				} finally {
+					upsert.finalize();
+				}
 			}
 			return imported;
 		} finally {
+			select?.finalize();
 			statsDb.close();
 		}
 	}
@@ -680,13 +725,18 @@ ON CONFLICT(model_key) DO UPDATE SET
 				? "SELECT id, provider, credential_type, data, disabled_cause FROM auth_credentials WHERE provider = ? ORDER BY id ASC"
 				: "SELECT id, provider, credential_type, data, disabled_cause FROM auth_credentials ORDER BY id ASC",
 		);
-		const rows = (provider ? stmt.all(provider) : stmt.all()) as Array<{
+		let rows: Array<{
 			id: number;
 			provider: string;
 			credential_type: string;
 			data: string;
 			disabled_cause: string | null;
 		}>;
+		try {
+			rows = (provider ? stmt.all(provider) : stmt.all()) as typeof rows;
+		} finally {
+			stmt.finalize();
+		}
 
 		const results: StoredAuthCredential[] = [];
 		for (const row of rows) {

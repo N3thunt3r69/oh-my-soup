@@ -134,6 +134,10 @@ export const getModels = getBundledModels;
  *
  * Legacy `/compat` callers pass {@link SimpleStreamOptions}; routing through
  * `streamSimple` preserves option normalization before provider dispatch.
+ *
+ * Transient-failure retry (overload, rate-limit, 5xx) is the caller's
+ * responsibility. Replay-safe oneshot callers must wrap the full completion
+ * with `retryTransientCompletion` from `@oh-my-soup/pi-ai`.
  */
 export function streamSimpleOpenAIResponses(
 	model: Model<"openai-responses">,

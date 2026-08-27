@@ -11,6 +11,8 @@ import {
 	ensureIsolation,
 	getGitNoIndexNullPath,
 	getRepoRoot,
+	ISOLATION_BASELINE_MAX_CONTENT_BYTES,
+	IsolationBaselineTooLargeError,
 	mergeTaskBranches,
 	parseIsolationMode,
 } from "@oh-my-soup/pi-coding-agent/task/worktree";
@@ -82,6 +84,41 @@ describe("worktree isolation helpers", () => {
 		expect(parseIsolationMode("worktree")).toBe(natives.IsoBackendKind.Rcopy);
 	});
 
+	it("refuses to snapshot untracked content above the isolation budget", async () => {
+		const { repo } = await createGitRepo();
+		const half = Math.ceil(ISOLATION_BASELINE_MAX_CONTENT_BYTES / 2) + 1;
+		for (const name of ["big-a.bin", "big-b.bin"]) {
+			const file = path.join(repo, name);
+			await fs.writeFile(file, "");
+			await fs.truncate(file, half);
+		}
+
+		const error = await captureBaseline(repo).then(
+			() => null,
+			(reason: unknown) => reason,
+		);
+		expect(error).toBeInstanceOf(IsolationBaselineTooLargeError);
+		expect((error as IsolationBaselineTooLargeError).contentBytes).toBeGreaterThan(
+			ISOLATION_BASELINE_MAX_CONTENT_BYTES,
+		);
+		expect((error as Error).message).toContain("task.isolation.mode: none");
+	});
+
+	it("sizes an untracked symlink itself rather than its target", async () => {
+		if (process.platform === "win32") return;
+		const { repo } = await createGitRepo();
+		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-worktree-symlink-target-"));
+		tempDirs.push(targetDir);
+		const target = path.join(targetDir, "large.bin");
+		await fs.writeFile(target, "");
+		await fs.truncate(target, ISOLATION_BASELINE_MAX_CONTENT_BYTES + 1);
+		await fs.symlink(target, path.join(repo, "large-link.bin"));
+
+		const baseline = await captureBaseline(repo);
+		expect(baseline.root.untracked).toEqual(["large-link.bin"]);
+		expect(baseline.root.untrackedPatch).toContain(target);
+	});
+
 	// Real git worktree/stash/merge I/O is the contract under test and cannot be
 	// faked. One initialized fixture repo is built once in `beforeAll` (whose time
 	// is excluded from per-test body time) and shared: the costly `git init`,
@@ -97,6 +134,7 @@ describe("worktree isolation helpers", () => {
 		beforeAll(async () => {
 			repo = await fs.mkdtemp(path.join(os.tmpdir(), "oms-worktree-"));
 			await runGit(repo, ["init", "-q", "-b", BASE_BRANCH]);
+			await runGit(repo, ["config", "core.autocrlf", "false"]);
 			await runGit(repo, ["config", "user.email", "test@example.com"]);
 			await runGit(repo, ["config", "user.name", "Test User"]);
 			await Promise.all([
@@ -289,7 +327,8 @@ describe("worktree isolation helpers", () => {
 				// conflict. If the task branch also adds an ignore rule for that
 				// restored path, the fallback must clean the restored ignored path
 				// without interpreting stash-derived filenames as pathspec magic.
-				const magicName = ":(glob)*";
+				const magicName = process.platform === "win32" ? "[literal]" : ":(glob)*";
+				const magicIgnore = process.platform === "win32" ? String.raw`\[literal\]` : magicName;
 				const buildLog = path.join(repo, "build.log");
 				const ignoredBranch = "task/ignored-restored-untracked";
 				await fs.writeFile(path.join(repo, ".gitignore"), "*.log\n");
@@ -298,7 +337,7 @@ describe("worktree isolation helpers", () => {
 				await runGit(repo, ["checkout", "-q", "-b", ignoredBranch]);
 				await Promise.all([
 					fs.writeFile(path.join(repo, "merged.txt"), "task branch change\n"),
-					fs.writeFile(path.join(repo, ".gitignore"), `*.log\n${magicName}\n`),
+					fs.writeFile(path.join(repo, ".gitignore"), `*.log\n${magicIgnore}\n`),
 				]);
 				await runGit(repo, ["add", ".gitignore", "merged.txt"]);
 				await runGit(repo, ["commit", "-q", "-m", "task-change-ignored-note"]);
@@ -353,7 +392,8 @@ describe("worktree isolation helpers", () => {
 				const isoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "oms-worktree-iso-"));
 				tempDirs.push(isoRoot);
 				const iso = path.join(isoRoot, "repo");
-				await runGit(isoRoot, ["clone", "-q", repo, iso]);
+				await runGit(isoRoot, ["-c", "core.autocrlf=false", "clone", "-q", repo, iso]);
+				await runGit(iso, ["config", "core.autocrlf", "false"]);
 				await runGit(iso, ["config", "user.email", "test@example.com"]);
 				await runGit(iso, ["config", "user.name", "Test User"]);
 				const isolatedLines = parentDirtyLines.map((line, index) => (index === 4 ? "LINE5-AGENT-EDIT" : line));
@@ -629,6 +669,27 @@ describe("detachGitDir", () => {
 		expect(await runGit(wt, ["rev-parse", "oms-fetched"])).toBe(taskCommit);
 	});
 
+	it("keeps shared git metadata intact when the index cannot be read", async () => {
+		const { wt, commonDir } = await makeLinkedWorktree();
+		const iso = await copyTree(wt);
+		const gitEntry = path.join(iso, ".git");
+		const pointerBefore = await fs.readFile(gitEntry, "utf8");
+		const indexPath = await runGit(iso, ["rev-parse", "--path-format=absolute", "--git-path", "index"]);
+		const bunFile = Bun.file;
+		vi.spyOn(Bun, "file").mockImplementation(((file: string | URL, options?: BlobPropertyBag) => {
+			const handle = bunFile(file, options);
+			if (file.toString() === indexPath) {
+				vi.spyOn(handle, "bytes").mockRejectedValue(
+					Object.assign(new Error("permission denied"), { code: "EACCES" }),
+				);
+			}
+			return handle;
+		}) as typeof Bun.file);
+
+		await expect(git.detachGitDir(iso, commonDir)).rejects.toMatchObject({ code: "EACCES" });
+		expect(await fs.readFile(gitEntry, "utf8")).toBe(pointerBefore);
+		expect(await runGit(iso, ["status", "--porcelain=v1"])).toBe("");
+	});
 	it("leaves an already-independent full-copy checkout untouched", async () => {
 		const src = await fs.mkdtemp(path.join(os.tmpdir(), "oms-detach-src-"));
 		tempDirs.push(src);
@@ -822,6 +883,7 @@ describe("applyNestedPatches", () => {
 	beforeEach(async () => {
 		parentRepo = await fs.mkdtemp(path.join(os.tmpdir(), "oms-nested-apply-"));
 		await runGit(parentRepo, ["init", "-q", "-b", "main"]);
+		await runGit(parentRepo, ["config", "core.autocrlf", "false"]);
 		await runGit(parentRepo, ["config", "user.email", "test@example.com"]);
 		await runGit(parentRepo, ["config", "user.name", "Test User"]);
 		await fs.writeFile(path.join(parentRepo, ".gitignore"), "sub/\n");
@@ -832,6 +894,7 @@ describe("applyNestedPatches", () => {
 		nestedDir = path.join(parentRepo, nestedRel);
 		await fs.mkdir(nestedDir, { recursive: true });
 		await runGit(nestedDir, ["init", "-q", "-b", "main"]);
+		await runGit(nestedDir, ["config", "core.autocrlf", "false"]);
 		await runGit(nestedDir, ["config", "user.email", "test@example.com"]);
 		await runGit(nestedDir, ["config", "user.name", "Test User"]);
 		await fs.writeFile(path.join(nestedDir, "file.txt"), "v1\n");
@@ -938,6 +1001,7 @@ describe("commitToBranch preserves agent commits", () => {
 		parent = await fs.mkdtemp(path.join(os.tmpdir(), "oms-commit-parent-"));
 		isolation = await fs.mkdtemp(path.join(os.tmpdir(), "oms-commit-iso-"));
 		await gitr(parent, ["init", "-q", "-b", "main"]);
+		await gitr(parent, ["config", "core.autocrlf", "false"]);
 		await gitr(parent, ["config", "user.email", "user@example.com"]);
 		await gitr(parent, ["config", "user.name", "Parent User"]);
 		await fs.writeFile(
@@ -951,7 +1015,8 @@ describe("commitToBranch preserves agent commits", () => {
 		// commit objects live in `isolation/.git`, just like the overlay/rcopy
 		// isolation backends would arrange them at runtime.
 		await fs.rm(isolation, { recursive: true, force: true });
-		await gitr(parent, ["clone", "-q", "--no-hardlinks", "--local", parent, isolation]);
+		await gitr(parent, ["-c", "core.autocrlf=false", "clone", "-q", "--no-hardlinks", "--local", parent, isolation]);
+		await gitr(isolation, ["config", "core.autocrlf", "false"]);
 		await gitr(isolation, ["config", "user.email", "agent@example.com"]);
 		await gitr(isolation, ["config", "user.name", "Agent User"]);
 	});

@@ -823,6 +823,13 @@ export class AcpAgent implements Agent {
 			output: output => this.#emitCommandOutput(record, output),
 			refreshCommands: () => this.#emitAvailableCommandsUpdate(record),
 			reloadPlugins: () => this.#reloadPluginState(record),
+			keepTurnOpenUntilIdle: async () => {
+				await record.session.waitForIdle();
+				// AgentSession event listeners are asynchronous. The retried
+				// turn can be idle while its final ACP updates are still being
+				// delivered, so drain them before this prompt is settled.
+				await this.#waitForPromptEventHandlers(record);
+			},
 			notifyTitleChanged: async () => {
 				await this.#connection.sessionUpdate({
 					sessionId: record.session.sessionId,
@@ -839,7 +846,16 @@ export class AcpAgent implements Agent {
 		});
 		if (builtinResult !== false) {
 			if ("prompt" in builtinResult) {
-				await record.session.prompt(builtinResult.prompt, { images });
+				const residualBaseline = new Set(record.extensionUserMessageTasks);
+				const residualAgentInvoked = await record.session.prompt(builtinResult.prompt, { images });
+				// The residual may itself be a local extension/custom command. No
+				// agent turn means no agent_end event, so settle the ACP request once
+				// nested extension messages and their ordered event handlers drain.
+				if (!residualAgentInvoked) {
+					await this.#waitForExtensionUserMessages(record, residualBaseline);
+					await this.#waitForPromptEventHandlers(record);
+					this.#finishPrompt(record, { stopReason: "end_turn" });
+				}
 				return;
 			}
 			const promptTurn = record.promptTurn;

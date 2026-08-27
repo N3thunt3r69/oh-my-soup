@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import { Tokenizer } from "@oh-my-soup/pi-agent-core";
 import type { ImageContent } from "@oh-my-soup/pi-ai";
 import * as snapcompact from "@oh-my-soup/snapcompact";
-import { estimateTokens } from "../src/compaction/compaction";
 import { createCompactionSummaryMessage, defaultConvertToLlm } from "../src/compaction/messages";
+
+const tokenizer = new Tokenizer();
 
 describe("compaction summary message with snapcompact frames", () => {
 	const images: ImageContent[] = [
@@ -20,7 +22,9 @@ describe("compaction summary message with snapcompact frames", () => {
 			undefined,
 			images,
 		);
-		expect(estimateTokens(withFrames) - estimateTokens(bare)).toBe(2 * snapcompact.FRAME_TOKEN_ESTIMATE);
+		expect(tokenizer.countMessage(withFrames) - tokenizer.countMessage(bare)).toBe(
+			2 * snapcompact.FRAME_TOKEN_ESTIMATE,
+		);
 	});
 
 	it("defaultConvertToLlm appends frames as image blocks after the summary text", () => {

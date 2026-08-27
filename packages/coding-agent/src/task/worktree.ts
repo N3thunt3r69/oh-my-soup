@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as natives from "@oh-my-soup/pi-natives";
-import { getWorktreeDir, logger, Snowflake } from "@oh-my-soup/pi-utils";
+import { formatBytes, getWorktreeDir, logger, Snowflake } from "@oh-my-soup/pi-utils";
 import { shutdownClientsUnder } from "../lsp/client";
 import * as git from "../utils/git";
 import * as jj from "../utils/jj";
@@ -93,6 +93,45 @@ async function discoverNestedRepos(repoRoot: string): Promise<string[]> {
 	await walk(repoRoot);
 	return result;
 }
+/**
+ * Ceiling on the working-tree content a single repo baseline may buffer in
+ * memory. Baseline capture embeds every uncommitted byte — staged/unstaged
+ * binary diffs plus a `--no-index` binary diff of each untracked file — into
+ * in-memory strings. A binary diff is larger than the raw bytes, so refuse
+ * pathological non-ignored content before it can exhaust the host.
+ */
+export const ISOLATION_BASELINE_MAX_CONTENT_BYTES = 1024 * 1024 * 1024;
+
+/** Typed failure surfaced when isolation cannot safely snapshot a working tree. */
+export class IsolationBaselineTooLargeError extends Error {
+	constructor(
+		readonly repoRoot: string,
+		readonly contentBytes: number,
+	) {
+		super(
+			`Working tree at ${repoRoot} carries ${formatBytes(contentBytes)} of uncommitted content, ` +
+				`over the ${formatBytes(ISOLATION_BASELINE_MAX_CONTENT_BYTES)} isolation-snapshot budget. ` +
+				`Isolated task snapshots buffer this content in memory, so proceeding would exhaust the host. ` +
+				`Commit or gitignore the bulk (untracked files that aren't ignored are the usual culprit), ` +
+				`or set \`task.isolation.mode: none\` to run tasks without isolation.`,
+		);
+		this.name = "IsolationBaselineTooLargeError";
+	}
+}
+
+/** Sum untracked entry sizes without following symlinks, skipping entries that vanished. */
+async function sumUntrackedBytes(repoRoot: string, untracked: readonly string[]): Promise<number> {
+	if (untracked.length === 0) return 0;
+	const { results } = await mapWithConcurrencyLimit([...untracked], 16, async entry => {
+		try {
+			const stat = await fs.lstat(path.join(repoRoot, entry));
+			return stat.isFile() ? stat.size : 0;
+		} catch {
+			return 0;
+		}
+	});
+	return results.reduce((total: number, size) => total + (size ?? 0), 0);
+}
 
 async function captureUntrackedPatch(repoRoot: string, untracked: readonly string[]): Promise<string> {
 	if (untracked.length === 0) return "";
@@ -114,6 +153,11 @@ async function captureRepoBaseline(repoRoot: string): Promise<RepoBaseline> {
 	const staged = await git.diff(repoRoot, { binary: true, cached: true });
 	const unstaged = await git.diff(repoRoot, { binary: true });
 	const untracked = await git.ls.untracked(repoRoot);
+	const untrackedBytes = await sumUntrackedBytes(repoRoot, untracked);
+	const contentBytes = untrackedBytes + staged.length + unstaged.length;
+	if (contentBytes > ISOLATION_BASELINE_MAX_CONTENT_BYTES) {
+		throw new IsolationBaselineTooLargeError(repoRoot, contentBytes);
+	}
 	const untrackedPatch = await captureUntrackedPatch(repoRoot, untracked);
 	return { repoRoot, headCommit, staged, unstaged, untracked, untrackedPatch };
 }

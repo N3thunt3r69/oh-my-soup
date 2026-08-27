@@ -61,6 +61,8 @@ export interface BaseKernelOptions<TExecuteOptions extends KernelExecuteOptions 
 	traceIpc: boolean;
 	/** Wire payload asking the runner to exit cleanly. */
 	exitPayload: string;
+	/** Optional wire payload for cooperative interrupts; OS SIGINT remains the fallback. */
+	interruptPayload?: string;
 	/** How long to wait after SIGINT before escalating to subprocess termination. */
 	interruptEscalationMs: number;
 	/** Default grace period applied by {@link BaseKernel.shutdown}. */
@@ -323,6 +325,14 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 
 	async interrupt(): Promise<void> {
 		if (!this.#proc || this.#disposed) return;
+		if (this.#options.interruptPayload) {
+			try {
+				await this.#writeLine(this.#options.interruptPayload);
+				return;
+			} catch {
+				// Fall through to the process signal when the control channel is unavailable.
+			}
+		}
 		try {
 			this.#proc.kill("SIGINT");
 		} catch (err) {

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getLastChangelogVersionPath, isEnoent, logger } from "@oh-my-soup/pi-utils";
+import { getLastChangelogVersionPath, isEnoent, logger, VERSION } from "@oh-my-soup/pi-utils";
 import bundledChangelogPath from "../../CHANGELOG.md" with { type: "file" };
 import type { SettingValue } from "../config/settings";
 
@@ -149,9 +149,17 @@ export async function parseChangelog(changelogPath: string | undefined): Promise
 			}
 		}
 	}
+	const usingBundledChangelog = content === undefined;
 	content ??= await Bun.file(resolveBundledChangelogPath(bundledChangelogPath, import.meta.url)).text();
 
-	return parseChangelogContent(content);
+	const entries = parseChangelogContent(content);
+	if (!usingBundledChangelog) return entries;
+
+	// A merged source tree can contain release notes from a newer branch than
+	// the package being built. Never expose those future entries from this
+	// binary; the package version is the authoritative release boundary.
+	const currentVersion = parseChangelogVersion(VERSION);
+	return currentVersion ? entries.filter(entry => compareChangelogEntries(entry, currentVersion) <= 0) : entries;
 }
 
 function parseChangelogContent(content: string): ChangelogEntry[] {

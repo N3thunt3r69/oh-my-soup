@@ -255,6 +255,17 @@ export function isMethodNotFoundError(err: unknown): boolean {
 	);
 }
 
+/**
+ * Build the params for the generic `workspace/didChangeConfiguration` reload.
+ *
+ * Reload must re-apply the same settings sent after initialization. Sending an
+ * empty object here would clear configured server behavior for the remainder
+ * of the session.
+ */
+export function reloadConfigurationParams(config: ServerConfig): { settings: Record<string, unknown> } {
+	return { settings: config.settings ?? {} };
+}
+
 export async function reloadServer(client: LspClient, serverName: string, signal?: AbortSignal): Promise<string> {
 	throwIfAborted(signal);
 	// rust-analyzer exposes a real reload request. Only rust-analyzer implements
@@ -278,7 +289,12 @@ export async function reloadServer(client: LspClient, serverName: string, signal
 	// as a request hangs until the tool deadline on servers that route it to
 	// the notification handler and never respond.
 	try {
-		await sendNotification(client, "workspace/didChangeConfiguration", { settings: {} }, signal);
+		await sendNotification(
+			client,
+			"workspace/didChangeConfiguration",
+			reloadConfigurationParams(client.config),
+			signal,
+		);
 		return `Reloaded ${serverName}`;
 	} catch {
 		throwIfAborted(signal);

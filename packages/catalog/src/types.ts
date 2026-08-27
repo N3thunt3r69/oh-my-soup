@@ -150,7 +150,14 @@ export interface Usage {
 	};
 }
 
-export type OpenAIReasoningFormat = "openai" | "openrouter" | "zai" | "kimi" | "qwen" | "qwen-chat-template";
+export type OpenAIReasoningFormat =
+	| "openai"
+	| "openrouter"
+	| "zai"
+	| "kimi"
+	| "qwen"
+	| "qwen-chat-template"
+	| "chat-template";
 
 export type OpenAIReasoningDisableMode =
 	| "omit"
@@ -159,7 +166,8 @@ export type OpenAIReasoningDisableMode =
 	| "openrouter-enabled-false"
 	| "zai-thinking-disabled"
 	| "qwen-enable-thinking-false"
-	| "qwen-template-false";
+	| "qwen-template-false"
+	| "chat-template-thinking-false";
 
 export type OpenAIStreamMarkupHealingPattern = "kimi" | "dsml" | "thinking";
 
@@ -259,6 +267,16 @@ export interface OpenAICompat {
 	 * Non-Qwen templates ignore the flag, so the auto-detection is safe.
 	 */
 	qwenPreserveThinking?: boolean;
+	/**
+	 * Route the requested thinking effort onto the Qwen 3.8+ chat template's
+	 * `reasoning_effort` kwarg (`low`/`medium`/`xhigh`; template default
+	 * `xhigh`). Emitted inside `chat_template_kwargs` for both Qwen dialects
+	 * (plus the top-level field on the `qwen` dialect, which newer llama.cpp
+	 * builds map natively). Without it the qwen dialects only toggle
+	 * `enable_thinking` and the template always thinks at its `xhigh` default.
+	 * Default: auto-detected (Qwen 3.8+ id on a local llama.cpp-style backend).
+	 */
+	qwenTemplateReasoningEffort?: boolean;
 	/** Whether assistant tool-call messages must include non-empty content. Default: false. */
 	requiresAssistantContentForToolCalls?: boolean;
 	/** Whether the provider supports the `tool_choice` parameter. Default: true. */
@@ -363,6 +381,13 @@ export interface OpenAICompat {
 	 * model id. Default: true. Issue #5606.
 	 */
 	supportsSamplingParams?: boolean;
+	/**
+	 * Whether presence/frequency penalties and stop sequences may be sent.
+	 * First-party xAI `/v1/responses` rejects penalty fields for every model.
+	 * xAI reasoning models also reject them (and `stop`) on chat completions.
+	 * When unset, auto-detected. Default: true.
+	 */
+	supportsPenaltyAndStopParams?: boolean;
 	/** Always send a max-token field when the caller did not provide one. Default: auto-detected (Kimi-family models derive TPM limits from max_tokens). */
 	alwaysSendMaxTokens?: boolean;
 	/** Whether Responses-API tool-call/result history must be strictly paired. Default: auto-detected (Azure OpenAI, GitHub Copilot). */
@@ -578,6 +603,7 @@ export interface ResolvedOpenAISharedCompat {
 	reasoningEffortMap: Partial<Record<Effort, string>>;
 	supportsReasoningParams: boolean;
 	supportsSamplingParams: boolean;
+	supportsPenaltyAndStopParams: boolean;
 	thinkingFormat: OpenAIReasoningFormat;
 	/** Kimi Code transport selected by live per-model protocol metadata. */
 	kimiApiFormat?: OpenAICompat["kimiApiFormat"];
@@ -596,6 +622,7 @@ export interface ResolvedOpenAISharedCompat {
 	allowsSyntheticReasoningContentForToolCalls: boolean;
 	replayReasoningContent: boolean;
 	qwenPreserveThinking: boolean;
+	qwenTemplateReasoningEffort: boolean;
 	requiresThinkingAsText: boolean;
 	requiresMistralToolIds: boolean;
 	requiresToolResultName: boolean;
@@ -643,6 +670,7 @@ export type ResolvedOpenAICompat = ResolvedOpenAISharedCompat &
 			| "reasoningEffortMap"
 			| "supportsReasoningParams"
 			| "supportsSamplingParams"
+			| "supportsPenaltyAndStopParams"
 			| "thinkingFormat"
 			| "kimiApiFormat"
 			| "reasoningDisableMode"
@@ -660,6 +688,7 @@ export type ResolvedOpenAICompat = ResolvedOpenAISharedCompat &
 			| "allowsSyntheticReasoningContentForToolCalls"
 			| "replayReasoningContent"
 			| "qwenPreserveThinking"
+			| "qwenTemplateReasoningEffort"
 			| "requiresThinkingAsText"
 			| "requiresMistralToolIds"
 			| "requiresToolResultName"
@@ -711,6 +740,12 @@ export interface ResolvedOpenAIResponsesCompat extends ResolvedOpenAISharedCompa
 	strictResponsesPairing: boolean;
 	supportsImageDetailOriginal: boolean;
 	supportsObfuscationOptOut: boolean;
+	/**
+	 * Whether `reasoning.summary` may be sent. First-party xAI `/v1/responses`
+	 * rejects the field; handlers pass `null` so the wire omits it instead of
+	 * filling `"auto"`.
+	 */
+	supportsReasoningSummary: boolean;
 	streamIdleTimeoutMs?: number;
 	vercelGatewayRouting?: OpenAICompat["vercelGatewayRouting"];
 	/** The model sits behind Vercel AI Gateway's Responses endpoint. */
@@ -832,6 +867,24 @@ export interface ModelCost extends TokenCost {
 	longContext?: LongContextTokenCost;
 }
 
+/**
+ * Exact local content tokenizer family for a model.
+ *
+ * Absent means no first-party local tokenizer is known and consumers retain
+ * their estimate/default-tokenizer policy. Values name tokenizer generations:
+ * DeepSeek V3 through V4 share `"deepseek-v3"`; Kimi K2 through K3 share
+ * `"kimi-k2"`.
+ */
+export type ModelTokenizer =
+	| "claude-v3"
+	| "claude-v47"
+	| "claude-v5"
+	| "claude-v5-sonnet"
+	| "qwen3"
+	| "deepseek-v3"
+	| "kimi-k2"
+	| "glm5";
+
 // Model interface for the unified model system
 export interface Model<TApi extends Api = Api> {
 	id: string;
@@ -856,6 +909,11 @@ export interface Model<TApi extends Api = Api> {
 	provider: Provider;
 	baseUrl: string;
 	reasoning: boolean;
+	/**
+	 * Exact local tokenizer family resolved from model identity or supplied
+	 * explicitly by a catalog source. Absent leaves fallback policy to callers.
+	 */
+	tokenizer?: ModelTokenizer;
 	input: ("text" | "image")[];
 	/**
 	 * Decoder family used for image inputs when it has narrower format support
@@ -953,6 +1011,15 @@ export interface Model<TApi extends Api = Api> {
 	 * `options.isOAuth = true` for the underlying provider call.
 	 */
 	isOAuth?: boolean;
+	/**
+	 * Amazon Bedrock Guardrail id or ARN attached to every Converse request for
+	 * this model.
+	 */
+	guardrailIdentifier?: string;
+	/** Bedrock guardrail version. Defaults to `"DRAFT"` at request time when unset. */
+	guardrailVersion?: string;
+	/** Bedrock guardrail trace verbosity. */
+	guardrailTrace?: "enabled" | "disabled" | "enabled_full";
 }
 
 /**

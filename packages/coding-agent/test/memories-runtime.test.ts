@@ -143,7 +143,7 @@ async function createFixture(overrides?: Partial<Record<string, unknown>>): Prom
 	return { agentDir, sessionDir, sessionFile, settings, session, modelRegistry, model, activeStartups };
 }
 
-async function runStartup(fx: SessionFixture, taskDepth = 0): Promise<void> {
+async function runStartup(fx: SessionFixture, taskDepth = 0, expectedStarted = true): Promise<void> {
 	const warnings: unknown[][] = [];
 	const warningSpy = vi.spyOn(logger, "warn").mockImplementation((...args: unknown[]) => {
 		warnings.push(args);
@@ -158,6 +158,8 @@ async function runStartup(fx: SessionFixture, taskDepth = 0): Promise<void> {
 	await completion;
 	warningSpy.mockRestore();
 	expect(warnings).toEqual([]);
+	expect(fx.session.beginLocalMemoryStartup).toHaveBeenCalledTimes(expectedStarted ? 1 : 0);
+	expect(fx.session.endLocalMemoryStartup).toHaveBeenCalledTimes(expectedStarted ? 1 : 0);
 	expect(fx.activeStartups.size).toBe(0);
 }
 
@@ -195,14 +197,14 @@ describe("memories runtime", () => {
 	test("startup gating follows memory.backend and skips subagents", async () => {
 		const disabled = await createFixture({ "memories.enabled": false });
 		const openSpy = vi.spyOn(memoryStorage, "openMemoryDb");
-		await runStartup(disabled);
+		await runStartup(disabled, 0, false);
 		expect(openSpy).not.toHaveBeenCalled();
 		const explicitlyOff = await createFixture({ "memory.backend": "off", "memories.enabled": true });
-		await runStartup(explicitlyOff);
+		await runStartup(explicitlyOff, 0, false);
 		expect(openSpy).not.toHaveBeenCalled();
 
 		const subagent = await createFixture({ "memories.enabled": true });
-		await runStartup(subagent, 1);
+		await runStartup(subagent, 1, false);
 		expect(openSpy).not.toHaveBeenCalled();
 	});
 
@@ -213,7 +215,7 @@ describe("memories runtime", () => {
 		});
 		const stage1Spy = vi.spyOn(ai, "completeSimple");
 
-		await runStartup(fx);
+		await runStartup(fx, 0, false);
 		expect(stage1Spy).not.toHaveBeenCalled();
 	});
 

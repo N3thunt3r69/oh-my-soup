@@ -29,6 +29,8 @@ export interface VisitEntriesFromFileStreamOptions {
 	shouldContinue?: () => boolean;
 	/** Stop after this many valid or malformed JSONL records have been consumed. */
 	maxRecords?: number;
+	/** Read at most this many bytes from the file's current prefix. */
+	maxBytes?: number;
 	/** Yield to the macrotask queue after this many bytes have been consumed. */
 	yieldEveryBytes?: number;
 	/** Yield to the macrotask queue after this many entries have been visited. */
@@ -96,6 +98,7 @@ export async function visitEntriesFromFileStream(
 	let visitorThrew = false;
 	const yieldEveryBytes = Math.max(0, options.yieldEveryBytes ?? STREAM_YIELD_BYTES);
 	const yieldEveryEntries = Math.max(0, options.yieldEveryEntries ?? STREAM_YIELD_ENTRIES);
+	const maxBytes = Math.max(0, options.maxBytes ?? Number.POSITIVE_INFINITY);
 	// Byte buffer (NOT a decoded string): multibyte UTF-8 sequences that straddle
 	// a stream-chunk boundary stay intact, and Bun.JSONL.parseChunk accepts typed
 	// arrays directly. Only the unconsumed remainder is held (≤ one record + a
@@ -181,8 +184,19 @@ export async function visitEntriesFromFileStream(
 	};
 
 	try {
-		for await (const chunk of Bun.file(filePath).stream()) {
-			if (stopped) break;
+		const file = Bun.file(filePath);
+		const source = Number.isFinite(maxBytes) ? file.slice(0, maxBytes) : file;
+		let remainingBytes = maxBytes;
+		for await (const sourceChunk of source.stream()) {
+			if (stopped || remainingBytes <= 0) break;
+			// Enforce the byte snapshot independently of Bun.file.slice(). A file
+			// can grow between slice creation and stream startup, and Bun may expose
+			// those appended bytes through the stream on Windows.
+			const chunk =
+				Number.isFinite(remainingBytes) && sourceChunk.byteLength > remainingBytes
+					? sourceChunk.subarray(0, remainingBytes)
+					: sourceChunk;
+			remainingBytes -= chunk.byteLength;
 			bytesSinceYield += chunk.byteLength;
 			buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
 			// The optional fixed-width title slot is a physical first line that is

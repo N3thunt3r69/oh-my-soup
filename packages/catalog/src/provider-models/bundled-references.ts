@@ -13,11 +13,9 @@ export function toModelSpec<TApi extends Api>(model: Model<TApi>): ModelSpec<TAp
 	return { ...rest, compat: compatConfig } as ModelSpec<TApi>;
 }
 
-export function createBundledReferenceMap<TApi extends Api>(
-	provider: Parameters<typeof getBundledModels>[0],
-): Map<string, ModelSpec<TApi>> {
+export function createBundledReferenceMap<TApi extends Api>(provider: string): Map<string, ModelSpec<TApi>> {
 	const references = new Map<string, ModelSpec<TApi>>();
-	for (const model of getBundledModels(provider)) {
+	for (const model of getBundledModels(provider as Parameters<typeof getBundledModels>[0])) {
 		references.set(model.id, toModelSpec(model as Model<TApi>));
 	}
 	return references;

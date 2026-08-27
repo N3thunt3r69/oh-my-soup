@@ -192,7 +192,12 @@ describe("LspMuxServer", () => {
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "oms-lsp-mux-test-"));
 		socketPath = path.join(tmpDir, "mux.sock");
-		connectParams = { command: process.execPath, args: ["run", fixturePath], cwd: tmpDir };
+		connectParams = {
+			command: process.execPath,
+			args: ["run", fixturePath],
+			cwd: tmpDir,
+			configurationIdentity: "sha256:test-configuration",
+		};
 		server = new LspMuxServer();
 		await server.listen(socketPath);
 	});

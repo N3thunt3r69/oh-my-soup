@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import type { FetchImpl } from "@oh-my-soup/pi-ai";
 import { connectToServer } from "@oh-my-soup/pi-coding-agent/mcp/client";
 import { HttpTransport } from "@oh-my-soup/pi-coding-agent/mcp/transports/http";
 
@@ -37,6 +38,29 @@ function stalledBodyResponse(bodyPrefix: string, init?: ResponseInit): Response 
 		}),
 		init,
 	);
+}
+
+class DeferredJsonResponse extends Response {
+	readonly #readJson: () => Promise<unknown>;
+
+	constructor(readJson: () => Promise<unknown>) {
+		super(null, { headers: { "Content-Type": "application/json" } });
+		this.#readJson = readJson;
+	}
+
+	override readonly json = (): Promise<unknown> => this.#readJson();
+}
+
+function replaceGlobalFetch(fetchImpl: FetchImpl): () => void {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = Object.assign(
+		(input: string | URL | Request, init?: RequestInit | BunFetchRequestInit) =>
+			fetchImpl(input, { signal: init?.signal }),
+		{ preconnect: originalFetch.preconnect },
+	);
+	return () => {
+		globalThis.fetch = originalFetch;
+	};
 }
 
 // Real time is intentional: this exercises Bun fetch aborting a live HTTP body stream,
@@ -117,6 +141,84 @@ describe("MCP Streamable HTTP transport timeouts", () => {
 		await expect(withPendingGuard(transport.request("tools/list"), "request")).rejects.toThrow(
 			`Request timeout after ${REQUEST_TIMEOUT_MS}ms`,
 		);
+	});
+
+	it("keeps the timeout result when caller abort follows the timer before body rejection", async () => {
+		vi.useFakeTimers();
+		const caller = new AbortController();
+		const jsonStarted = Promise.withResolvers<void>();
+		const fetchDouble: FetchImpl = async (_input, init) =>
+			new DeferredJsonResponse(() => {
+				const pendingBody = Promise.withResolvers<unknown>();
+				const rejectBodyRead = (): void => {
+					caller.abort();
+					pendingBody.reject(new SyntaxError("Unexpected end of JSON input"));
+				};
+				if (init?.signal?.aborted) {
+					rejectBodyRead();
+				} else {
+					init?.signal?.addEventListener("abort", rejectBodyRead, { once: true });
+				}
+				jsonStarted.resolve();
+				return pendingBody.promise;
+			});
+		const restoreFetch = replaceGlobalFetch(fetchDouble);
+		try {
+			const transport = new HttpTransport({
+				type: "http",
+				url: "http://mcp.invalid",
+				timeout: REQUEST_TIMEOUT_MS,
+			});
+			await transport.connect();
+			const request = transport.request("tools/list", undefined, { signal: caller.signal });
+			await jsonStarted.promise;
+			vi.advanceTimersByTime(REQUEST_TIMEOUT_MS);
+
+			await expect(request).rejects.toThrow(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`);
+		} finally {
+			restoreFetch();
+			vi.useRealTimers();
+		}
+	});
+
+	it("keeps caller cancellation when its body rejection arrives after the deadline", async () => {
+		vi.useFakeTimers();
+		const caller = new AbortController();
+		const jsonStarted = Promise.withResolvers<void>();
+		const fetchDouble: FetchImpl = async (_input, init) =>
+			new DeferredJsonResponse(() => {
+				const pendingBody = Promise.withResolvers<unknown>();
+				init?.signal?.addEventListener(
+					"abort",
+					() => {
+						setTimeout(
+							() => pendingBody.reject(new SyntaxError("Unexpected end of JSON input")),
+							REQUEST_TIMEOUT_MS + 20,
+						);
+					},
+					{ once: true },
+				);
+				jsonStarted.resolve();
+				return pendingBody.promise;
+			});
+		const restoreFetch = replaceGlobalFetch(fetchDouble);
+		try {
+			const transport = new HttpTransport({
+				type: "http",
+				url: "http://mcp.invalid",
+				timeout: REQUEST_TIMEOUT_MS,
+			});
+			await transport.connect();
+			const request = transport.request("tools/list", undefined, { signal: caller.signal });
+			await jsonStarted.promise;
+			caller.abort();
+			vi.advanceTimersByTime(REQUEST_TIMEOUT_MS + 20);
+
+			await expect(request).rejects.toThrow("Unexpected end of JSON input");
+		} finally {
+			restoreFetch();
+			vi.useRealTimers();
+		}
 	});
 
 	it("keeps the notify timeout active while reading HTTP error bodies", async () => {

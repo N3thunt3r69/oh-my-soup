@@ -87,6 +87,8 @@ export interface SessionHandoffHost {
 /** Generates handoff documents and owns the handoff session transition. */
 export class SessionHandoff {
 	#handoffAbortController: AbortController | undefined;
+	/** Completion of the latest handoff generation, retained after failure for deferred maintenance. */
+	#handoffCompletion: Promise<void> | undefined;
 	readonly #host: SessionHandoffHost;
 
 	constructor(host: SessionHandoffHost) {
@@ -106,6 +108,11 @@ export class SessionHandoff {
 		return this.#handoffAbortController !== undefined;
 	}
 
+	/** Completion of the latest handoff generation attempt. */
+	get handoffCompletion(): Promise<void> | undefined {
+		return this.#handoffCompletion;
+	}
+
 	/**
 	 * Generate a handoff document with a oneshot LLM call, then start a new session with it.
 	 *
@@ -123,6 +130,8 @@ export class SessionHandoff {
 		}
 
 		this.#host.setSkipPostTurnMaintenance(undefined);
+		const completion = Promise.withResolvers<void>();
+		this.#handoffCompletion = completion.promise;
 
 		this.#handoffAbortController = new AbortController();
 		const handoffAbortController = this.#handoffAbortController;
@@ -363,6 +372,7 @@ export class SessionHandoff {
 				else this.#host.reattachAdvisorRecorderFeeds();
 			}
 			sourceSignal?.removeEventListener("abort", onSourceAbort);
+			completion.resolve();
 			this.#handoffAbortController = undefined;
 		}
 	}

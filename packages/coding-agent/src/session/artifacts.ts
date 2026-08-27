@@ -6,6 +6,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { replaceFileAtomically } from "../utils/atomic-file";
 
 /**
  * Sanitize a tool name for safe use as the middle segment of the artifact
@@ -23,6 +24,33 @@ function sanitizeToolType(toolType: string): string {
 		.slice(0, 64)
 		.replace(/^_+|_+$/g, "");
 	return sanitized.length > 0 ? sanitized : "tool";
+}
+/**
+ * Stage, verify, and atomically publish an artifact.
+ *
+ * The destination remains absent (or retains its prior complete contents) when
+ * staging or publication fails, so protocol readers never observe partial bytes.
+ * Returns the verified UTF-8 byte count.
+ */
+export async function writeArtifact(path: string, content: string): Promise<number> {
+	const expectedBytes = Buffer.byteLength(content);
+	const tempPath = `${path}.tmp-${crypto.randomUUID()}`;
+	try {
+		const writtenBytes = await Bun.write(tempPath, content);
+		if (writtenBytes !== expectedBytes) {
+			throw new Error(`Artifact write incomplete: wrote ${writtenBytes} of ${expectedBytes} bytes`);
+		}
+		const file = Bun.file(tempPath);
+		if (file.size !== expectedBytes) {
+			throw new Error(`Artifact size mismatch: found ${file.size} of ${expectedBytes} bytes`);
+		}
+		await file.slice(0, Math.min(expectedBytes, 1)).arrayBuffer();
+		await replaceFileAtomically(tempPath, path);
+	} catch (error) {
+		await fs.rm(tempPath, { force: true });
+		throw error;
+	}
+	return expectedBytes;
 }
 
 /**
@@ -115,7 +143,7 @@ export class ArtifactManager {
 	 */
 	async save(content: string, toolType: string): Promise<string> {
 		const { id, path } = await this.allocatePath(toolType);
-		await Bun.write(path, content);
+		await writeArtifact(path, content);
 		return id;
 	}
 

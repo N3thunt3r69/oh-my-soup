@@ -292,9 +292,12 @@ setInterval(() => {}, 1000);
 			expect(logs.text).not.toContain("\x1b");
 			expect(logs.text).not.toContain("BOOT:0");
 			expect(logs.text).toContain('INPUT:"run\\r"');
+			// ConPTY canonicalizes bold ANSI green (1;32) to the equivalent
+			// bright-green palette entry while POSIX PTYs retain palette index 2.
+			const readyPalette = process.platform === "win32" ? 10 : 2;
 			const expectedTerminalRows = [
 				...Array.from({ length: 18 }, (_, index) => `\x1b[0mBOOT:${index + 7}`),
-				"\x1b[0m\x1b[1;38;5;2mREADY",
+				`\x1b[0m\x1b[1;38;5;${readyPalette}mREADY`,
 				'\x1b[0mINPUT:"run\\r"',
 			];
 			expect(logs.terminalRows).toEqual(expectedTerminalRows);

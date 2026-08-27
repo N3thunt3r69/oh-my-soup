@@ -532,7 +532,6 @@ describe("ACP builtin slash commands", () => {
 			"/btw hi",
 			"/new",
 			"/drop",
-			"/handoff",
 			"/fork",
 		];
 		for (const cmd of removedCommands) {
@@ -1142,15 +1141,22 @@ describe("wave 5 — adapters and polish", () => {
 	// /context breakdown
 	it("/context: lists more than one breakdown line for session with messages", async () => {
 		const { output, session, runtime } = createRuntime();
-		// computeContextBreakdown needs model.contextWindow; fake session falls back gracefully
 		(session as unknown as Record<string, unknown>).model = {
 			provider: "anthropic",
 			id: "claude-test",
 			contextWindow: 200_000,
 		};
-		(session as unknown as Record<string, unknown>).skills = [];
-		(session as unknown as Record<string, unknown>).agent = { state: { tools: [] } };
-		(session as unknown as Record<string, unknown>).systemPrompt = ["You are a helpful assistant."];
+		(session as unknown as Record<string, unknown>).agent = { tokenizer: {}, state: { tools: [] } };
+		(session as unknown as Record<string, unknown>).getContextBreakdown = () => ({
+			contextWindow: 200_000,
+			anchored: false,
+			usedTokens: 27,
+			systemPromptTokens: 5,
+			systemToolsTokens: 0,
+			systemContextTokens: 0,
+			skillsTokens: 0,
+			messagesTokens: 22,
+		});
 		session.messages = [
 			{ role: "user", content: "Hello, how are you?" },
 			{ role: "assistant", content: "I am doing well." },

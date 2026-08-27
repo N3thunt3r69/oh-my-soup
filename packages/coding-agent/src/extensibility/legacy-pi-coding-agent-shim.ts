@@ -15,7 +15,13 @@
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-soup/pi-agent-core";
+import {
+	type AgentMessage,
+	type AgentToolResult,
+	type AgentToolUpdateCallback,
+	type MessageCountOptions,
+	Tokenizer,
+} from "@oh-my-soup/pi-agent-core";
 import { type AuthCredential, SqliteAuthCredentialStore, type TSchema } from "@oh-my-soup/pi-ai";
 import { piEscapeRegexLiteral, piJoinPath } from "@oh-my-soup/pi-ai/providers/cursor-pi-args";
 import { getKeybindings, type Keybinding, Text } from "@oh-my-soup/pi-tui";
@@ -65,6 +71,7 @@ import type {
 	ReadToolResultEvent,
 	ToolDefinition,
 	ToolResultEvent,
+	ToolShellEnvironmentContext,
 	WriteToolResultEvent,
 } from "./extensions/types";
 import { Type } from "./legacy-typebox";
@@ -88,11 +95,7 @@ interface LegacyThemeLike {
 	bold(text: string): string;
 }
 
-export interface BashSpawnContext {
-	command: string;
-	cwd: string;
-	env: NodeJS.ProcessEnv;
-}
+export type BashSpawnContext = ToolShellEnvironmentContext;
 
 export type BashSpawnHook = (context: BashSpawnContext) => BashSpawnContext;
 
@@ -482,12 +485,30 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): ToolDefi
 /** Create the legacy bash tool definition. */
 export function createBashToolDefinition(cwd: string, options?: BashToolOptions): ToolDefinition {
 	const tool = createRegistryTool(cwd, "bash");
+	const spawnHook = options?.spawnHook;
+	const shellEnv = spawnHook
+		? (spawn: ToolShellEnvironmentContext): Record<string, string> => {
+				const result = spawnHook(spawn);
+				// Legacy hooks conventionally return `{ ...context.env, EXTRA }`.
+				// The consumer applies this as per-command overrides on an already
+				// filtered base env, so forwarding the whole object would reintroduce
+				// everything filterChildShellEnv removed. Forward only entries the
+				// hook added or changed relative to the env it was handed.
+				const baseline = spawn.env;
+				return Object.fromEntries(
+					Object.entries(result.env).filter(
+						(entry): entry is [string, string] => typeof entry[1] === "string" && baseline[entry[0]] !== entry[1],
+					),
+				);
+			}
+		: undefined;
 	return markToolDefinition({
 		name: "bash",
 		label: "Bash",
 		description: tool.description,
 		parameters: legacyBashSchema,
 		approval: "exec",
+		...(shellEnv ? { shellEnv } : {}),
 		renderCall: (params, optionsArg, themeArg) => {
 			const theme = renderTheme(optionsArg, themeArg);
 			const command = stringField(params, "command") ?? "";
@@ -1447,13 +1468,15 @@ export function getPackageDir(): string {
 	return getOmsPackageDir() ?? (isCompiledBinary() ? path.dirname(process.execPath) : process.cwd());
 }
 
-// Legacy pi's `@earendil-works/pi-coding-agent` re-exported `estimateTokens`,
-// `compact`, and `serializeConversation` from its package root (via
-// `./core/compaction/index.ts`). In oms they live in
-// `@oh-my-soup/pi-agent-core/compaction`, and the coding-agent barrel below does
-// not forward them, so legacy extensions importing them fail Bun's static
-// export check during validation (issues #6583, #7174, #7403).
-export { compact, estimateTokens, serializeConversation } from "@oh-my-soup/pi-agent-core/compaction";
+// Legacy pi's `@earendil-works/pi-coding-agent` re-exported
+// `estimateTokens`, `compact`, and `serializeConversation` from its package
+// root. Keep the historical model-agnostic estimator at this compatibility
+// boundary while the core package uses model-scoped `Tokenizer` instances.
+const legacyTokenizer = new Tokenizer();
+export function estimateTokens(message: AgentMessage, options?: MessageCountOptions): number {
+	return legacyTokenizer.countMessage(message, options);
+}
+export { compact, serializeConversation } from "@oh-my-soup/pi-agent-core/compaction";
 
 // Same barrel gap for two more legacy package-root exports: pi re-exported the
 // `CONFIG_DIR_NAME` constant and the CLI parser `parseArgs`. In oms

@@ -20,6 +20,7 @@ import {
 	fetchLmStudioNativeModelMetadata,
 	OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW,
 	OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS,
+	resolveLiteLLMApi,
 } from "@oh-my-soup/pi-catalog/provider-models/openai-compat";
 import type { ModelSpec, OpenAICompat } from "@oh-my-soup/pi-catalog/types";
 import { isRecord } from "@oh-my-soup/pi-utils";
@@ -813,6 +814,10 @@ export async function discoverOpenAIModelsList(
 		// headers/baseUrl/cost stay local.
 		const reference = resolveModelReference(id, references) as ModelSpec<Api> | undefined;
 		const referenceCompat = reference?.compat as OpenAICompat | undefined;
+		const api =
+			providerConfig.discovery.type === "litellm"
+				? resolveLiteLLMApi(undefined, id, providerConfig.api)
+				: providerConfig.api;
 		const contextWindow =
 			toPositiveNumberOrUndefined(item.max_model_len) ??
 			toPositiveNumberOrUndefined(item.context_length) ??
@@ -823,7 +828,7 @@ export async function discoverOpenAIModelsList(
 			buildModel({
 				id,
 				name: reference?.name ?? id,
-				api: providerConfig.api,
+				api,
 				provider: providerConfig.provider,
 				baseUrl,
 				reasoning: reference?.reasoning ?? false,
@@ -840,7 +845,7 @@ export async function discoverOpenAIModelsList(
 				// Cap the reference's output limit at the discovered context
 				// window so an ID collision with a larger bundled model can
 				// never request more tokens than the local runtime advertises.
-				maxTokens: Math.min(reference?.maxTokens ?? discoveryDefaultMaxTokens(providerConfig.api), contextWindow),
+				maxTokens: Math.min(reference?.maxTokens ?? discoveryDefaultMaxTokens(api), contextWindow),
 				headers,
 				compat: {
 					supportsStore: false,
@@ -881,13 +886,14 @@ export async function discoverLiteLLMModels(
 			return response;
 		};
 		const models = await withTimeoutSignal(timeoutMs, signal =>
-			fetchLiteLLMRichModels({
+			fetchLiteLLMRichModels<Api>({
 				api: providerConfig.api,
 				provider: providerConfig.provider,
 				baseUrl,
 				headers: h,
 				fetch: authAwareFetch,
 				referenceResolver: resolveReference,
+				resolveApi: (entry, id) => resolveLiteLLMApi(entry, id, providerConfig.api),
 				signal,
 			}),
 		);

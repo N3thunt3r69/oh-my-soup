@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import path from "node:path";
-import { logger } from "@oh-my-soup/pi-utils";
+import { logger, untilAborted } from "@oh-my-soup/pi-utils";
 import { formatPathRelativeToCwd } from "../tools/path-utils";
 import { throwIfAborted } from "../tools/tool-errors";
 import { getOrCreateClient, sendRequest, supportsDocumentDiagnostics, waitForProjectLoaded } from "./client";
@@ -48,6 +48,11 @@ export const INLINE_DIAGNOSTICS_WAIT_TIMEOUT_MS = 500;
  * delivers late instead of giving up before it ever publishes.
  */
 export const DEFERRED_DIAGNOSTICS_WAIT_TIMEOUT_MS = 12_000;
+/**
+ * Extra wall-clock headroom for client initialization, project loading, and
+ * linter execution beyond the configured diagnostics wait.
+ */
+export const DIAGNOSTICS_PIPELINE_GRACE_MS = 10_000;
 export const MAX_GLOB_DIAGNOSTIC_TARGETS = 20;
 export const WORKSPACE_SYMBOL_LIMIT = 200;
 export const PROJECT_INDEXED_ACTIONS: ReadonlySet<string> = new Set([
@@ -296,6 +301,8 @@ interface GetDiagnosticsForFileOptions {
 	expectedDocumentVersions?: ServerVersionMap;
 	/** Per-server wait budget (ms). Defaults to {@link SINGLE_DIAGNOSTICS_WAIT_TIMEOUT_MS}. */
 	timeoutMs?: number;
+	/** Hard wall-clock bound for each server's complete diagnostics pipeline. */
+	pipelineBudgetMs?: number;
 }
 
 /**
@@ -358,40 +365,51 @@ export async function getDiagnosticsForFile(
 	if (servers.length === 0) {
 		return undefined;
 	}
+	const waitBudgetMs = timeoutMs ?? SINGLE_DIAGNOSTICS_WAIT_TIMEOUT_MS;
+	const pipelineBudgetMs = options.pipelineBudgetMs ?? waitBudgetMs + DIAGNOSTICS_PIPELINE_GRACE_MS;
 
 	const uri = fileToUri(absolutePath);
 	const relPath = formatPathRelativeToCwd(absolutePath, cwd);
 	const allDiagnostics: Diagnostic[] = [];
 	const serverNames: string[] = [];
 
-	// Wait for diagnostics from all servers in parallel
+	// Bound each server's full pipeline, not only its final diagnostics wait.
 	const results = await Promise.allSettled(
 		servers.map(async ([serverName, serverConfig]) => {
-			throwIfAborted(signal);
-			// Use custom linter client if configured
-			if (serverConfig.createClient) {
-				const linterClient = getLinterClient(serverName, serverConfig, cwd);
-				const diagnostics = await linterClient.lint(absolutePath);
-				return { serverName, serverConfig, diagnostics };
-			}
+			const budgetController = new AbortController();
+			const budgetTimer = setTimeout(
+				() => budgetController.abort(new DOMException("Diagnostics pipeline timed out", "TimeoutError")),
+				pipelineBudgetMs,
+			);
+			const boundSignal = signal ? AbortSignal.any([signal, budgetController.signal]) : budgetController.signal;
+			try {
+				return await untilAborted(boundSignal, async () => {
+					throwIfAborted(boundSignal);
+					if (serverConfig.createClient) {
+						const linterClient = getLinterClient(serverName, serverConfig, cwd);
+						const diagnostics = await linterClient.lint(absolutePath, boundSignal);
+						return { serverName, serverConfig, diagnostics };
+					}
 
-			// Default: use LSP
-			const client = await getOrCreateClient(serverConfig, cwd, undefined, signal);
-			throwIfAborted(signal);
-			if (isProjectAwareLspServer(serverConfig)) {
-				await waitForProjectLoaded(client, signal);
-				throwIfAborted(signal);
+					const client = await getOrCreateClient(serverConfig, cwd, undefined, boundSignal);
+					throwIfAborted(boundSignal);
+					if (isProjectAwareLspServer(serverConfig)) {
+						await waitForProjectLoaded(client, boundSignal);
+						throwIfAborted(boundSignal);
+					}
+					const minVersion = minVersions?.get(serverName);
+					const expectedDocumentVersion = expectedDocumentVersions?.get(serverName);
+					const diagnostics = await waitForDiagnostics(client, uri, {
+						timeoutMs: waitBudgetMs,
+						signal: boundSignal,
+						minVersion,
+						expectedDocumentVersion,
+					});
+					return { serverName, serverConfig, diagnostics };
+				});
+			} finally {
+				clearTimeout(budgetTimer);
 			}
-			// Content already synced + didSave sent, wait for fresh diagnostics
-			const minVersion = minVersions?.get(serverName);
-			const expectedDocumentVersion = expectedDocumentVersions?.get(serverName);
-			const diagnostics = await waitForDiagnostics(client, uri, {
-				timeoutMs: timeoutMs ?? SINGLE_DIAGNOSTICS_WAIT_TIMEOUT_MS,
-				signal,
-				minVersion,
-				expectedDocumentVersion,
-			});
-			return { serverName, serverConfig, diagnostics };
 		}),
 	);
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added zstd-embedded exact content tokenizers for Qwen 3.5+/3.6+/3.8, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5 alongside rebuilt OpenAI o200k/cl100k and Claude reconstructions. `countTokens` accepts JavaScript strings directly as UTF-16, avoiding a UTF-8 temporary.
+
 ## [17.3.0] - 2026-08-13
 
 ### Fixed

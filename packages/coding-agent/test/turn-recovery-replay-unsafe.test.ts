@@ -45,12 +45,24 @@ function createHost(
 		fallbackChains?: Record<string, string[]>;
 		textOutputCommitted?: boolean;
 		messages?: readonly AgentMessage[];
+		lastModelChangeRole?: string;
+		modelRoles?: Record<string, string>;
 	} = {},
 ): TurnRecoveryHost {
-	const settings = Settings.isolated(options.fallbackChains ? { "retry.fallbackChains": options.fallbackChains } : {});
+	const settings = Settings.isolated({
+		...(options.fallbackChains ? { "retry.fallbackChains": options.fallbackChains } : {}),
+		...(options.modelRoles ? { modelRoles: options.modelRoles } : {}),
+	});
+	if (options.modelRoles) {
+		for (const [role, selector] of Object.entries(options.modelRoles)) {
+			settings.setModelRole(role, selector);
+		}
+	}
 	return {
 		agent: (options.messages ? { state: { messages: options.messages } } : undefined) as never,
-		sessionManager: undefined as never,
+		sessionManager: {
+			getLastModelChangeRole: () => options.lastModelChangeRole,
+		} as never,
 		persistedAssistantEntryId: () => undefined,
 		settings,
 		modelRegistry,
@@ -94,6 +106,9 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 	beforeAll(async () => {
 		tempDir = TempDir.createSync("@pi-turn-recovery-replay-");
 		authStorage = await AuthStorage.create(tempDir.join("testauth.db"));
+		// Live-role resolution filters the registry by provider auth. Pin the
+		// active provider so this fixture tests role identity, not host credentials.
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 	});
 
@@ -264,6 +279,28 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		const visible = makeMessage([{ type: "text", text: "Already shown" }], model);
 		expect(recovery.isHardErrorFallbackEligible(visible)).toBe(false);
 		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
+	});
+
+	it("allows dual-classified media payloads onto a configured fallback chain without token excess", () => {
+		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
+		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
+		const message = makeMessage([], model);
+		message.errorMessage = "request_too_large: image count exceeds the limit of 20";
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isPayloadRejection(message)).toBe(true);
+		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
+	});
+
+	it("keeps usage-backed media overflows off configured fallback chains", () => {
+		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
+		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
+		const message = makeMessage([], model);
+		message.errorMessage = "request_too_large: image count exceeds the limit of 20";
+		message.usage.input = (model.contextWindow ?? 200_000) + 1;
+		message.usage.totalTokens = message.usage.input;
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isUsageBackedContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
+		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
 	});
 
 	it("retries partial text while its buffered output remains uncommitted", () => {
@@ -533,5 +570,184 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			const message = makeMessage([toolCall("call-1")], model);
 			expect(recoveryFor(message, [syntheticResult("call-1")]).isRetryableError(message)).toBe(false);
 		});
+	});
+
+	it("does not use an ephemeral model-change role as a fallback-chain hint", () => {
+		const fallback = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallback) throw new Error("Expected bundled model gpt-4o-mini");
+		const selector = `${model.provider}/${model.id}`;
+		const recovery = new TurnRecovery(
+			createHost(model, modelRegistry, {
+				lastModelChangeRole: "fallback",
+				modelRoles: {
+					default: selector,
+					vision: selector,
+				},
+				fallbackChains: {
+					vision: [`${fallback.provider}/${fallback.id}`],
+					default: [`${fallback.provider}/${fallback.id}`],
+				},
+			}),
+		);
+		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("default");
+	});
+
+	describe("premature stream close after resolved tool calls", () => {
+		const completionsClose = "OpenAI completions stream closed before a finish_reason was received";
+		const responsesClose = "OpenAI responses stream closed before a terminal response event was received";
+
+		function gatewayMessage(content: AssistantMessage["content"], errorMessage: string): AssistantMessage {
+			const message = makeMessage(content, model);
+			message.provider = "opencode-go";
+			message.errorMessage = errorMessage;
+			message.errorId = AIError.create(AIError.Flag.Transient);
+			return message;
+		}
+
+		function recoveryForClose(
+			message: AssistantMessage,
+			tail: readonly AgentMessage[],
+			textOutputCommitted = true,
+		): TurnRecovery {
+			return new TurnRecovery(
+				createHost(model, modelRegistry, {
+					messages: [message as AgentMessage, ...tail],
+					textOutputCommitted,
+				}),
+			);
+		}
+
+		function syntheticResult(toolCallId: string): ToolResultMessage<SyntheticToolResultDetails> {
+			return {
+				role: "toolResult",
+				toolCallId,
+				toolName: "bash",
+				content: [{ type: "text", text: "Tool call was not executed." }],
+				isError: true,
+				details: { __synthetic: true, source: "assistant_stop_error", executed: false },
+				timestamp: Date.now(),
+			};
+		}
+
+		it("continues a premature completions close after a resolved tool call", () => {
+			const message = gatewayMessage(
+				[{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "pwd" } }],
+				completionsClose,
+			);
+			expect(
+				recoveryForClose(message, [syntheticResult("call-1")]).classifyResolvedInterruptedToolTurn(message),
+			).toBe("stream-stall");
+		});
+
+		it("continues a premature responses close after a resolved tool call", () => {
+			const message = gatewayMessage(
+				[{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "pwd" } }],
+				responsesClose,
+			);
+			expect(
+				recoveryForClose(message, [syntheticResult("call-1")]).classifyResolvedInterruptedToolTurn(message),
+			).toBe("stream-stall");
+		});
+
+		it("does not continue when the tool call has no result", () => {
+			const message = gatewayMessage(
+				[{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "pwd" } }],
+				completionsClose,
+			);
+			expect(recoveryForClose(message, []).classifyResolvedInterruptedToolTurn(message)).toBeUndefined();
+		});
+
+		it("does not continue after visible text was already committed", () => {
+			const message = gatewayMessage(
+				[
+					{ type: "text", text: "partial visible answer" },
+					{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "pwd" } },
+				],
+				completionsClose,
+			);
+			expect(
+				recoveryForClose(message, [syntheticResult("call-1")], true).classifyResolvedInterruptedToolTurn(message),
+			).toBeUndefined();
+		});
+
+		it("continues when buffered text never reached the output sink", () => {
+			const message = gatewayMessage(
+				[
+					{ type: "text", text: "buffered partial answer" },
+					{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "pwd" } },
+				],
+				completionsClose,
+			);
+			expect(
+				recoveryForClose(message, [syntheticResult("call-1")], false).classifyResolvedInterruptedToolTurn(message),
+			).toBe("stream-stall");
+		});
+
+		it("does not continue an unrelated provider error", () => {
+			const message = gatewayMessage(
+				[{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "pwd" } }],
+				"Provider returned 500 boom",
+			);
+			expect(
+				recoveryForClose(message, [syntheticResult("call-1")]).classifyResolvedInterruptedToolTurn(message),
+			).toBeUndefined();
+		});
+	});
+
+	it("uses a matching live role when roles share the active model", () => {
+		const fallback = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallback) throw new Error("Expected bundled model gpt-4o-mini");
+		const selector = `${model.provider}/${model.id}`;
+		const recovery = new TurnRecovery(
+			createHost(model, modelRegistry, {
+				lastModelChangeRole: "vision",
+				modelRoles: {
+					default: selector,
+					vision: selector,
+				},
+				fallbackChains: {
+					vision: [`${fallback.provider}/${fallback.id}`],
+					default: [`${fallback.provider}/${fallback.id}`],
+				},
+			}),
+		);
+		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("vision");
+	});
+
+	it("ignores a recorded role whose assignment no longer matches the active model", () => {
+		const fallback = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallback) throw new Error("Expected bundled model gpt-4o-mini");
+		const selector = `${model.provider}/${model.id}`;
+		const recovery = new TurnRecovery(
+			createHost(model, modelRegistry, {
+				lastModelChangeRole: "vision",
+				modelRoles: {
+					default: selector,
+					vision: `${fallback.provider}/${fallback.id}`,
+				},
+				fallbackChains: {
+					vision: [`${fallback.provider}/${fallback.id}`],
+					default: [`${fallback.provider}/${fallback.id}`],
+				},
+			}),
+		);
+		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("default");
+	});
+
+	it("does not attach default to a model that is not default's primary", () => {
+		const other = getBundledModel("openai", "gpt-4o-mini");
+		if (!other) throw new Error("Expected bundled model gpt-4o-mini");
+		const recovery = new TurnRecovery(
+			createHost(other, modelRegistry, {
+				lastModelChangeRole: "fallback",
+				modelRoles: {
+					default: `${model.provider}/${model.id}`,
+				},
+				fallbackChains: {
+					default: [`${model.provider}/${model.id}`],
+				},
+			}),
+		);
+		expect(recovery.resolveRetryFallbackRole(`${other.provider}/${other.id}`, other)).toBeUndefined();
 	});
 });

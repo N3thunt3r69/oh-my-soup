@@ -24,10 +24,11 @@
  * Env: `LLM_ASSEMBLY_N` overrides the history length (default 5000);
  *      `PI_TOKENIZER_ACCURATE=1` uses the native cl100k tokenizer.
  */
-import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
-import { estimateTokens } from "@oh-my-soup/pi-agent-core/compaction";
+import { type AgentMessage, Tokenizer } from "@oh-my-soup/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@oh-my-soup/pi-ai";
 import { convertToLlm } from "../src/session/messages";
+
+const tokenizer = new Tokenizer();
 
 const N = Number(Bun.env.LLM_ASSEMBLY_N ?? 5000);
 const WARMUP = 5;
@@ -134,12 +135,6 @@ function sample<T>(makeWorkload: () => T, run: (workload: T) => void, batch = 1)
 	return stats(samples);
 }
 
-function estimateAll(messages: AgentMessage[]): number {
-	let total = 0;
-	for (const m of messages) total += estimateTokens(m);
-	return total;
-}
-
 console.log(`\nBenchmark: llm-assembly (N=${N}, warmup=${WARMUP}, samples=${SAMPLES})\n`);
 
 // ─── convertToLlm ─────────────────────────────────────────────────────────────
@@ -192,16 +187,16 @@ const convertGrow = sample(
 const estimateFirst = sample(
 	() => buildHistory(N),
 	history => {
-		estimateAll(history);
+		tokenizer.countMessages(history);
 	},
 );
 // Warm: one history, primed once, re-counted every sample from the cache.
 const warmEstimate = buildHistory(N);
-estimateAll(warmEstimate);
+tokenizer.countMessages(warmEstimate);
 const estimateSecond = sample(
 	() => warmEstimate,
 	history => {
-		estimateAll(history);
+		tokenizer.countMessages(history);
 	},
 );
 

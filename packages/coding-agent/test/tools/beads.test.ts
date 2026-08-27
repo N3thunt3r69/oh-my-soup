@@ -230,15 +230,20 @@ describe("native beads availability and initialization", () => {
 		const tempDir = TempDir.createSync("@oms-native-beads-gate-");
 		const priorPath = Bun.env.PATH;
 		try {
-			const emptyPath = path.join(tempDir.path(), "empty-path");
+			const container = tempDir.path();
+			fs.mkdirSync(path.join(container, ".beads"));
+			const project = path.join(container, "project");
+			const emptyPath = path.join(container, "empty-path");
+			fs.mkdirSync(project);
 			fs.mkdirSync(emptyPath);
 			Bun.env.PATH = emptyPath;
-			const session = createSession(tempDir.path());
+			const session = createSession(project);
 			expect(await BUILTIN_TOOLS.beads(session)).toBeInstanceOf(BeadsTool);
 			const tool = createTool(session);
-			await init(tool);
+			const initialized = await tool.execute("init", { op: "init" });
+			expect(initialized.details?.root).toBe(project);
 			expect((await createIssue(tool, "No external runtime")).title).toBe("No external runtime");
-			expect(BeadsTool.createIf(createSession(tempDir.path(), { "beads.enabled": false }))).toBeNull();
+			expect(BeadsTool.createIf(createSession(project, { "beads.enabled": false }))).toBeNull();
 		} finally {
 			if (priorPath === undefined) delete Bun.env.PATH;
 			else Bun.env.PATH = priorPath;
@@ -249,8 +254,10 @@ describe("native beads availability and initialization", () => {
 	it("initializes at the repository root and persists an OMS-owned SQLite store", async () => {
 		const tempDir = TempDir.createSync("@oms-native-beads-init-");
 		try {
-			const root = tempDir.path();
-			fs.mkdirSync(path.join(root, ".git"));
+			const container = tempDir.path();
+			fs.mkdirSync(path.join(container, ".beads"));
+			const root = path.join(container, "repo");
+			fs.mkdirSync(path.join(root, ".git"), { recursive: true });
 			const nested = path.join(root, "packages", "app");
 			fs.mkdirSync(nested, { recursive: true });
 			const result = await createTool(createSession(nested)).execute("init", { op: "init", prefix: "work" });

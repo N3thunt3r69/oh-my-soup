@@ -2638,6 +2638,9 @@ const streamAnthropicOnce = (
 						} else if (event.type === "message_stop") {
 							sawTerminalEnvelope = true;
 							sawMessageStop = true;
+							// message_stop completes the protocol even when a broken
+							// keep-alive leaves the HTTP response body open.
+							break;
 						}
 					}
 

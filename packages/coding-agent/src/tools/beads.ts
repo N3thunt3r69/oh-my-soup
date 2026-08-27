@@ -414,9 +414,8 @@ export class BeadsTool implements AgentTool<typeof beadsSchema, BeadsToolDetails
 	}
 
 	#executeInit(params: BeadsInput): AgentToolResult<BeadsToolDetails> {
-		const existingRoot = findBeadsWorkspaceRoot(this.session.cwd);
-		const root = existingRoot ?? findBeadsInitRoot(this.session.cwd);
-		if (!existingRoot && samePath(root, os.homedir())) {
+		const root = findBeadsInitRoot(this.session.cwd);
+		if (samePath(root, os.homedir())) {
 			throw new ToolError(
 				"Native Beads cannot initialize in the home directory; run init from a project subdirectory.",
 			);

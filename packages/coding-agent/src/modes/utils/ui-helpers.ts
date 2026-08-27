@@ -2,6 +2,7 @@ import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Usage } from "@oh-my-soup/pi-ai";
 import { getStreamingPartialJson } from "@oh-my-soup/pi-ai/utils/block-symbols";
 import { type Component, Spacer, Text, TruncatedText } from "@oh-my-soup/pi-tui";
+import { logger } from "@oh-my-soup/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "../../collab/protocol";
 import { settings } from "../../config/settings";
@@ -72,6 +73,12 @@ interface RenderInitialMessagesOptions {
 
 const TRANSCRIPT_RENDER_CHUNK_MESSAGES = 32;
 const TRANSCRIPT_RENDER_CHUNK_MS = 8;
+/**
+ * Upper bound on full-transcript replay attempts. Each retry discards the
+ * staged tree and replays every message from scratch; accepting the fifth pass
+ * prevents a continuously growing resumed session from livelocking the TUI.
+ */
+const TRANSCRIPT_REPLAY_MAX_ATTEMPTS = 5;
 
 function waitForImmediate(): Promise<void> {
 	const { promise, resolve } = Promise.withResolvers<void>();
@@ -770,6 +777,7 @@ export class UiHelpers {
 			// every attempt.
 			populateHistory: false,
 		};
+		let replayAttempts = 0;
 		this.ctx.initialChatRendered = false;
 		try {
 			while (true) {
@@ -783,6 +791,15 @@ export class UiHelpers {
 					await this.ctx.renderSessionContextIncrementally(context, renderOptions);
 				}
 				if (this.ctx.viewSession.sessionManager.getEntries().length === replayEntryCount) {
+					break;
+				}
+				replayAttempts++;
+				if (replayAttempts >= TRANSCRIPT_REPLAY_MAX_ATTEMPTS) {
+					logger.warn("renderInitialMessages: transcript replay did not converge; accepting current replay", {
+						attempts: replayAttempts,
+						replayEntryCount,
+						currentEntryCount: this.ctx.viewSession.sessionManager.getEntries().length,
+					});
 					break;
 				}
 

@@ -16,6 +16,9 @@ rust_shared_library(
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     compile_data = glob([
+        "data/*.bin.zst",
+        "fixtures/*.json",
+        "src/utok/claude/testdata/*.json",
         "src/syntaxes/*.sublime-syntax",
         "src/fonts/*",
     ]),

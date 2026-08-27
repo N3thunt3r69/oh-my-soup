@@ -1313,3 +1313,190 @@ describe("new shape variants", () => {
 		expect(snapcompact.isShape({ ...base, font: "9x9" })).toBe(false);
 	});
 });
+
+describe("data URL elision", () => {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><desc>${"A".repeat(6000)}</desc></svg>`;
+	const b64 = Buffer.from(svg, "utf8").toString("base64");
+	const dataUrl = `data:image/svg+xml;base64,${b64}`;
+	const placeholder = `[data URL omitted: image/svg+xml, ${b64.length} base64 chars]`;
+	const leakedPayload = /;base64,[A-Za-z0-9+/=]{40}/;
+	const markerInPayload = /;base64,[A-Za-z0-9+/=]*\s*\[(?:…|\.{3})\d+ch elided/;
+	const recognizableDataUrl = /data:[A-Za-z][\w.+-]*\/[\w.+-]+(?:;[\w!#$%&'*+.^|~-]+=[\w!#$%&'*+.^|~-]+)*;base64,/i;
+
+	it("prevents archived Markdown tool-result images from reaching providers as sliced undecodable data URLs", () => {
+		const out = snapcompact.serializeConversation([
+			createToolResultMessage(`Reader output:\n\n![inline SVG](${dataUrl})\ntrailing text`),
+		]);
+		expect(out).toContain(placeholder);
+		expect(out).not.toMatch(leakedPayload);
+		expect(out).toContain("trailing text");
+	});
+
+	it("prevents archived bare tool-result data URLs from reaching providers as sliced undecodable payloads", () => {
+		const out = snapcompact.serializeConversation([createToolResultMessage(`see ${dataUrl} end`)]);
+		expect(out).toContain(placeholder);
+		expect(out).not.toMatch(leakedPayload);
+	});
+
+	it("prevents character-cap head/tail cuts from leaving a recognizable data URL in archived tool results", () => {
+		for (const pad of [0, 600, 1150, 1199, 4000, 6500, 7400]) {
+			const text = `${"p".repeat(pad)} ![img](${dataUrl}) ${"s".repeat(7600 - pad)}`;
+			const out = snapcompact.normalize(snapcompact.serializeConversation([createToolResultMessage(text)]));
+			expect(out).not.toMatch(leakedPayload);
+			expect(out).not.toMatch(markerInPayload);
+		}
+	});
+
+	it("prevents archived tool-call arguments from reaching providers as sliced undecodable data URLs", () => {
+		const out = snapcompact.serializeConversation([
+			createAssistantMessage([
+				{
+					type: "toolCall",
+					id: "c1",
+					name: "write",
+					arguments: { path: "a.html", content: `<img src="${dataUrl}">` },
+				},
+			]),
+		]);
+		expect(out).not.toMatch(leakedPayload);
+		expect(out).toContain("data URL omitted: image/svg+xml");
+	});
+
+	it("prevents a canonical 1x1 GIF data URL from surviving in archived tool results as image input", () => {
+		const payload = "R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+		const out = snapcompact.serializeConversation([
+			createToolResultMessage(`const BLANK = "data:image/gif;base64,${payload}";`),
+		]);
+		expect(out).toContain(`[data URL omitted: image/gif, ${payload.length} base64 chars]`);
+		expect(out).not.toMatch(/data:image\/gif;base64,/i);
+	});
+
+	it("leaves prose mentions like data:image/png;base64,abc untouched", () => {
+		const prose = "e.g. 'data:image/png;base64,abc' is the expected shape";
+		const out = snapcompact.serializeConversation([createToolResultMessage(prose)]);
+		expect(out).toContain(prose);
+		expect(out).not.toContain("data URL omitted");
+	});
+
+	it("elides parameterized data URLs in archived tool results", () => {
+		const url = `data:image/svg+xml;charset=utf-8;base64,${b64}`;
+		const out = snapcompact.serializeConversation([createToolResultMessage(`see ${url} end`)]);
+		expect(out).toContain(`[data URL omitted: image/svg+xml;charset=utf-8, ${b64.length} base64 chars]`);
+		expect(out).not.toMatch(recognizableDataUrl);
+	});
+
+	it("elides case-insensitive DATA:/BASE64 data URLs", () => {
+		const url = `DATA:IMAGE/PNG;BASE64,${b64}`;
+		const out = snapcompact.serializeConversation([createToolResultMessage(`see ${url} end`)]);
+		expect(out).toContain(`[data URL omitted: IMAGE/PNG, ${b64.length} base64 chars]`);
+		expect(out).not.toMatch(recognizableDataUrl);
+	});
+
+	it("prevents user-message data URLs from surviving in the compacted archive", async () => {
+		const result = await snapcompact.compact(
+			makePreparation({
+				messagesToSummarize: [
+					createUserMessage(`${"context ".repeat(400)}![img](${dataUrl})${" more".repeat(400)}`),
+				],
+			}),
+			{ frameSize: TEST_FRAME_SIZE, maxFrames: 3 },
+		);
+		const archive = snapcompact.getPreservedArchive(result.preserveData);
+		const all = `${archive?.text ?? ""}\n${archive?.textHead ?? ""}\n${archive?.textTail ?? ""}`;
+		expect(all).not.toMatch(leakedPayload);
+		expect(all).not.toMatch(markerInPayload);
+	});
+
+	it("heals pre-guard archives during re-compaction", async () => {
+		const legacyHead =
+			`earlier work ![a](${dataUrl}) then ` +
+			`data:image/png;base64,${"QUFB".repeat(50)} [...900ch elided...] ${"QUFB".repeat(10)} and ` +
+			`data:image/webp;base64, [...123ch elided...] QUFB plus a bare cut data:image/jpeg;base64,`;
+		const result = await snapcompact.compact(
+			makePreparation({
+				messagesToSummarize: [createUserMessage("Next turn after legacy archive.")],
+				previousPreserveData: {
+					snapcompact: {
+						frames: [],
+						totalChars: legacyHead.length,
+						truncatedChars: 0,
+						textHead: legacyHead,
+						textTail: "recent tail",
+					},
+				},
+			}),
+			{ frameSize: TEST_FRAME_SIZE, maxFrames: 3 },
+		);
+		const archive = snapcompact.getPreservedArchive(result.preserveData);
+		const all = `${archive?.text ?? ""}\n${archive?.textHead ?? ""}\n${archive?.textTail ?? ""}`;
+		expect(all).not.toMatch(/data:[A-Za-z][\w.+-]*\/[\w.+-]+;base64,/);
+		expect(all).not.toMatch(markerInPayload);
+		expect(all).toContain("data URL omitted: image/svg+xml");
+		expect(all).toContain("data URL omitted: image/webp");
+	});
+
+	it("heals poisoned archive prefixes in historyBlocks", () => {
+		const rows: Array<{ head: string; placeholder: string; retain?: string }> = [
+			{
+				head: "history ![x](data:image/svg+xml;base64,",
+				placeholder: "data URL omitted: image/svg+xml",
+			},
+			{
+				head: "history ![x](data:image/svg+xml;base64,Q",
+				placeholder: "data URL omitted: image/svg+xml",
+			},
+			{
+				head: `history ![x](data:image/svg+xml;base64,${"QUFB".repeat(9)}QUL`,
+				placeholder: "data URL omitted: image/svg+xml",
+			},
+			{
+				head: "data:image/webp;base64, [...900ch elided...] QUFB rest",
+				placeholder: "data URL omitted: image/webp",
+				retain: " rest",
+			},
+			{
+				head: "data:image/svg+xml;charset=utf-8;base64,Q",
+				placeholder: "data URL omitted: image/svg+xml;charset=utf-8",
+			},
+		];
+		for (const row of rows) {
+			const blocks = snapcompact.historyBlocks({
+				frames: [],
+				totalChars: row.head.length,
+				truncatedChars: 5,
+				textHead: row.head,
+				textTail: "tail",
+			});
+			const text = blocks.map(block => (block.type === "text" ? block.text : "")).join("\n");
+			expect(text).not.toMatch(recognizableDataUrl);
+			expect(text).toContain(row.placeholder);
+			if (row.retain !== undefined) {
+				expect(text).toContain(row.retain);
+				expect(text).not.toContain(";base64,");
+				expect(text).not.toContain("ch elided");
+			}
+		}
+	});
+
+	it("heals data URLs while extracting archive migration text", () => {
+		const poisoned = "data:image/png;base64,QUFB [...900ch elided...] QUFB";
+		const text = snapcompact.archiveSourceText({
+			frames: [],
+			totalChars: poisoned.length,
+			truncatedChars: 0,
+			textHead: poisoned,
+		});
+		expect(text).toContain("[data URL omitted: image/png, 908 base64 chars]");
+		expect(text).not.toMatch(recognizableDataUrl);
+	});
+
+	it("scans unmatched Markdown brackets without quadratic stalls", () => {
+		const text = `${"[".repeat(80_000)};base64,`;
+		const out = snapcompact.serializeConversation([createToolResultMessage(text)]);
+		const marker = "[…78008ch elided…]";
+		expect(out).toContain(marker);
+		expect(out).toContain(
+			`${snapcompact.DIM_ON}${"[".repeat(1200)} ${marker} ${"[".repeat(792)};base64,${snapcompact.DIM_OFF}`,
+		);
+	}, 2_000);
+});

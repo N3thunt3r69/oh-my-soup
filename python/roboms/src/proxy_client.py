@@ -334,18 +334,18 @@ class GitHubProxyClient:
         body: str,
         event: str,
         comments: list[Mapping[str, Any]],
+        commit_id: str | None = None,
     ) -> PullRequestReviewInfo:
-        data = await self._request(
-            "POST",
-            "/gh/v1/submit_pr_review",
-            json_body={
-                "repo": repo,
-                "pr_number": pr_number,
-                "body": body,
-                "event": event,
-                "comments": comments,
-            },
-        )
+        json_body: dict[str, Any] = {
+            "repo": repo,
+            "pr_number": pr_number,
+            "body": body,
+            "event": event,
+            "comments": comments,
+        }
+        if commit_id:
+            json_body["commit_id"] = commit_id
+        data = await self._request("POST", "/gh/v1/submit_pr_review", json_body=json_body)
         return _pr_review_from(data)
 
     async def add_assignees(self, repo: str, number: int, assignees: list[str]) -> None:
@@ -602,6 +602,7 @@ def _pr_file_from(data: Any) -> PullRequestFileInfo:
         status=str(data.get("status") or ""),
         additions=int(data.get("additions") or 0),
         deletions=int(data.get("deletions") or 0),
+        patch=str(data.get("patch") or ""),
     )
 
 
@@ -619,6 +620,7 @@ def _pr_from(data: Any) -> PullRequestInfo:
         head_repo=str(data.get("head_repo") or ""),
         title=str(data.get("title") or ""),
         body=str(data.get("body") or ""),
+        head_sha=str(data.get("head_sha") or ""),
     )
 
 

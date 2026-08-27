@@ -140,6 +140,7 @@ function rpcError(id: LspJsonRpcId, code: number, message: string): LspJsonRpcRe
 function parseConnectParams(params: unknown): MuxConnectParams | undefined {
 	if (!isRecord(params) || typeof params.command !== "string" || typeof params.cwd !== "string") return undefined;
 	if (!Array.isArray(params.args) || !params.args.every(arg => typeof arg === "string")) return undefined;
+	if (typeof params.configurationIdentity !== "string") return undefined;
 	if (params.env !== undefined) {
 		if (!isRecord(params.env)) return undefined;
 		for (const key in params.env) if (typeof params.env[key] !== "string") return undefined;
@@ -319,7 +320,7 @@ export class LspMuxServer {
 				this.#sendSession(session, rpcError(message.id, -32602, "invalid mux connect params"));
 				return;
 			}
-			const key = muxServerKey(params.command, params.cwd);
+			const key = muxServerKey(params);
 			let server = [...this.#servers].find(candidate => candidate.key === key && candidate.sessions.size === 0);
 			if (server && server.proc.exitCode !== null) {
 				this.#serverExited(server);

@@ -81,6 +81,44 @@ describe("github copilot model limits mapping", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
+	it("does not reuse another credential's authoritative model cache", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-copilot-credential-cache-"));
+		const cacheDbPath = path.join(tempDir, "models.db");
+		try {
+			const personalKey = JSON.stringify({
+				token: "ghu_personal_token",
+				apiEndpoint: "https://api.githubcopilot.com",
+			});
+			const personalFetch = vi.fn(async () =>
+				Response.json({ data: [{ id: "gpt-5.2-codex", name: "GPT-5.2 Codex" }] }),
+			);
+			const personalManager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: personalKey, fetch: personalFetch }),
+				cacheDbPath,
+			});
+			await personalManager.refresh("online");
+
+			const businessKey = JSON.stringify({
+				token: "ghu_business_token",
+				apiEndpoint: "https://api.business.githubcopilot.com",
+			});
+			const businessFetch = vi.fn(async () =>
+				Response.json({ data: [{ id: "gpt-5.2-codex", name: "GPT-5.2 Codex" }] }),
+			);
+			const businessManager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: businessKey, fetch: businessFetch }),
+				cacheDbPath,
+			});
+			const result = await businessManager.refresh("online-if-uncached");
+
+			expect(personalFetch).toHaveBeenCalledTimes(1);
+			expect(businessFetch).toHaveBeenCalledTimes(1);
+			expect(result.models.some(model => model.baseUrl === "https://api.business.githubcopilot.com")).toBe(true);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("unwraps structured OAuth keys for discovery and routes enterprise discovery to the enterprise host", async () => {
 		const structuredApiKey = JSON.stringify({
 			token: "ghu_test_copilot_token",

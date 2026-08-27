@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
+import { Tokenizer } from "@oh-my-soup/pi-agent-core";
 import {
 	type CompactionPreparation,
 	compact,
@@ -31,6 +32,9 @@ import type {
 	ProviderSessionState,
 	ToolResultMessage,
 } from "@oh-my-soup/pi-ai/types";
+
+const tokenizer = new Tokenizer();
+
 import { buildModel } from "@oh-my-soup/pi-catalog/build";
 import type { ModelSpec } from "@oh-my-soup/pi-catalog/types";
 import * as piUtils from "@oh-my-soup/pi-utils";
@@ -107,6 +111,7 @@ interface CodexCompactionTestSocket {
 
 function installCodexCompactionWebSocket(options?: {
 	respond?: (socket: CodexCompactionTestSocket, request: Record<string, unknown>) => void;
+	handshakeHeaders?: Record<string, string>;
 }): {
 	sockets: CodexCompactionTestSocket[];
 	restore(): void;
@@ -127,7 +132,9 @@ function installCodexCompactionWebSocket(options?: {
 		onerror: ((event: Event) => void) | null = null;
 		onclose: ((event: Event) => void) | null = null;
 		readonly sent: Array<Record<string, unknown>> = [];
-		readonly handshakeHeaders = { "x-codex-turn-state": `compaction-state-${sockets.length}` };
+		readonly handshakeHeaders = options?.handshakeHeaders ?? {
+			"x-codex-turn-state": `compaction-state-${sockets.length}`,
+		};
 
 		constructor(
 			readonly url: string,
@@ -630,7 +637,7 @@ describe("remote compaction input forwarding", () => {
 			{ fetch: fetchMock },
 		);
 
-		const trimmed = trimRemoteCompactionInputToContextWindow(nativeInput, 1_000, "compact");
+		const trimmed = trimRemoteCompactionInputToContextWindow(nativeInput, tokenizer, 1_000, "compact");
 		expect(trimmed.estimatedTokensAfter).toBeLessThanOrEqual(1_000);
 		expect(requestInput?.some(item => item.type === "custom_tool_call")).toBe(true);
 		expect(requestInput?.find(item => item.type === "custom_tool_call_output")?.output).toBe(
@@ -646,7 +653,7 @@ describe("remote compaction input forwarding", () => {
 			{ type: "function_call_output", call_id: "call_2", output: "b".repeat(8_000) },
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, tokenizer, 1_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(2);
 		expect(result.input.slice(0, 2)).toEqual(input.slice(0, 2));
@@ -666,7 +673,7 @@ describe("remote compaction input forwarding", () => {
 			{ type: "function_call_output", call_id: "call_2", output: "useful latest result" },
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, tokenizer, 1_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(0);
 		expect(result.input).toEqual(input);
@@ -686,7 +693,7 @@ describe("remote compaction input forwarding", () => {
 			{ type: "function_call_output", call_id: "call_1", output: "useful result" },
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, tokenizer, 15_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(0);
 		expect(result.input).toEqual(input);
@@ -698,7 +705,7 @@ describe("remote compaction input forwarding", () => {
 		const output = Array.from({ length: 1_000 }, (_, index) => index.toString(16).padStart(8, "0")).join("");
 		const input = [{ type: "function_call_output", call_id: "call_1", output }];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 3_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, tokenizer, 3_000, "compact");
 
 		expect(result.estimatedTokensBefore).toBeGreaterThan(3_000);
 		expect(result.rewrittenOutputs).toBe(1);
@@ -720,7 +727,7 @@ describe("remote compaction input forwarding", () => {
 			attachment,
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, tokenizer, 15_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(1);
 		expect(result.input[0].output).toBe(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE);
@@ -740,7 +747,7 @@ describe("remote compaction input forwarding", () => {
 			{ type: "function_call_output", call_id: "call_1", output: "useful result".repeat(2_000) },
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, tokenizer, 15_000, "compact");
 
 		expect(result.estimatedTokensBefore).toBeGreaterThan(15_000);
 		expect(result.rewrittenOutputs).toBe(1);
@@ -750,7 +757,7 @@ describe("remote compaction input forwarding", () => {
 	test("returns semantically unchanged input when it already fits", () => {
 		const input = [{ type: "function_call_output", call_id: "call_1", output: "small" }];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, tokenizer, 1_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(0);
 		expect(result.input).toEqual(input);
@@ -1225,6 +1232,7 @@ describe("Responses Lite remote compaction", () => {
 		const providerSessionState = new Map<string, ProviderSessionState>();
 		let responseCount = 0;
 		const webSocket = installCodexCompactionWebSocket({
+			handshakeHeaders: {},
 			respond: socket => {
 				responseCount += 1;
 				socket.emit({ type: "response.metadata", headers: { "x-codex-turn-state": "refreshed-turn-state" } });

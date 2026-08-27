@@ -513,6 +513,11 @@ export async function loadFilesFromDir<T>(
 			gitignore: true,
 			hidden: false,
 			fileType: FileType.File,
+			// The native glob defaults to recursive scanning and rewrites a
+			// top-level pattern such as `*.{ts,js}` to `**/*.{ts,js}`. Preserve
+			// the caller's non-recursive default so nested dependency/venv assets
+			// are not discovered as tools.
+			recursive,
 		});
 		matches = result.matches;
 	} catch {
@@ -898,6 +903,35 @@ async function canonicalClaudeProjectPath(projectPath: string): Promise<string |
 	}
 }
 
+/**
+ * Read Claude Code's explicit plugin switches from user and project settings.
+ * Later project layers win, and settings.local.json wins within each directory.
+ */
+async function readClaudeEnabledPlugins(
+	claudeConfigDir: string,
+	projectDirs: string[],
+): Promise<{ enabled: Map<string, boolean>; sources: string[] }> {
+	const enabled = new Map<string, boolean>();
+	const sources: string[] = [];
+	const candidates = [path.join(claudeConfigDir, "settings.json")];
+	for (const dir of projectDirs) {
+		candidates.push(path.join(dir, ".claude", "settings.json"), path.join(dir, ".claude", "settings.local.json"));
+	}
+	for (const file of candidates) {
+		const content = await readFile(file);
+		if (!content) continue;
+		const parsed = tryParseJson<{ enabledPlugins?: unknown }>(content);
+		if (!parsed || typeof parsed !== "object") continue;
+		const overrides = parsed.enabledPlugins;
+		if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) continue;
+		sources.push(file);
+		for (const [pluginId, value] of Object.entries(overrides as Record<string, unknown>)) {
+			if (typeof value === "boolean") enabled.set(pluginId, value);
+		}
+	}
+	return { enabled, sources };
+}
+
 const pluginRootsCache = new Map<string, { roots: ClaudePluginRoot[]; warnings: string[] }>();
 
 const pluginCacheInvalidators = new Set<() => void>();
@@ -921,7 +955,10 @@ export async function listClaudePluginRoots(
 	const resolvedProjectPath = cwd ? await resolveActiveProjectRegistryPath(cwd) : null;
 	const projectRoot = resolvedProjectPath ? path.dirname(path.dirname(path.dirname(resolvedProjectPath))) : cwd;
 	const activeClaudeProjectPath = projectRoot ? await canonicalClaudeProjectPath(projectRoot) : null;
-	const cacheKey = `${home}:${resolvedProjectPath ?? ""}:${activeClaudeProjectPath ?? ""}`;
+	const canonicalCwd = cwd ? await canonicalClaudeProjectPath(cwd) : null;
+	const settingsDirs = [...new Set([activeClaudeProjectPath, canonicalCwd].filter((dir): dir is string => !!dir))];
+	const enabledOverrides = await readClaudeEnabledPlugins(path.join(home, ".claude"), settingsDirs);
+	const cacheKey = `${home}:${resolvedProjectPath ?? ""}:${activeClaudeProjectPath ?? ""}:${canonicalCwd ?? ""}:${enabledOverrides.sources.join("|")}`;
 	const cached = pluginRootsCache.get(cacheKey);
 	if (cached) return cached;
 
@@ -960,7 +997,9 @@ export async function listClaudePluginRoots(
 						continue;
 					}
 					if (entry.enabled === false) continue;
-					if (entry.scope === "local") {
+					const override = enabledOverrides.enabled.get(pluginId);
+					if (override === false) continue;
+					if (entry.scope === "local" && override !== true) {
 						if (!entry.projectPath || !activeClaudeProjectPath) continue;
 						let entryProjectPath = canonicalClaudeProjectPaths.get(entry.projectPath);
 						if (entryProjectPath === undefined) {

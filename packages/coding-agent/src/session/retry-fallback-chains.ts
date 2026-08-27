@@ -313,10 +313,24 @@ export function resolveRetryFallbackChainKey(
 	}
 	if (wildcardMatch) return wildcardMatch;
 
-	// 3. The hinted role, then role keys matched by their assigned model.
+	// 3. The hinted role, then the default role, then other role keys matched by
+	//    their assigned model. Prefer `default` when several roles share a model;
+	//    otherwise object insertion order would select an unrelated role.
 	if (roleHint && Array.isArray(context.chains[roleHint])) return roleHint;
+	if (
+		Array.isArray(context.chains.default) &&
+		selectorMatchesCurrent(
+			getRetryFallbackPrimarySelector(context, "default"),
+			currentSelector,
+			currentBaseSelector,
+			currentPlainSelector,
+			currentPlainBaseSelector,
+		)
+	) {
+		return "default";
+	}
 	for (const key in context.chains) {
-		if (isRetryFallbackModelKey(key)) continue;
+		if (key === "default" || isRetryFallbackModelKey(key)) continue;
 		if (
 			selectorMatchesCurrent(
 				getRetryFallbackPrimarySelector(context, key),

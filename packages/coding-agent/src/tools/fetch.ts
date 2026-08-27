@@ -6,7 +6,7 @@ import type { AgentToolResult } from "@oh-my-soup/pi-agent-core";
 import type { FetchImpl, ImageContent, TextContent } from "@oh-my-soup/pi-ai";
 import { htmlToMarkdown } from "@oh-my-soup/pi-natives";
 import { type Component, Text } from "@oh-my-soup/pi-tui";
-import { $which, ptree, truncate } from "@oh-my-soup/pi-utils";
+import { $which, ptree, removeWithRetries, truncate } from "@oh-my-soup/pi-utils";
 import type { Settings } from "../config/settings";
 import { readEditableNotebookText } from "../edit/notebook";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
@@ -628,9 +628,24 @@ export async function renderHtmlToText(
 		signal: overallSignal,
 	};
 	const remoteBudgetMs = Math.min(timeout * 1000, REMOTE_READER_MAX_MS);
-	// Per-attempt budget for remote endpoints so one stall cannot consume the
-	// whole reader-mode budget and starve the local fallbacks.
-	const remoteSignal = () => ptree.combineSignals(userSignal, remoteBudgetMs);
+	// AbortSignal.timeout() uses an unref'd timer in Bun. Keep a real timer
+	// referenced while a remote attempt is pending so its deadline can wake a
+	// caller even when the mocked or underlying fetch has no active handles.
+	const runRemote = async <T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+		const budgetController = new AbortController();
+		const budgetTimer = setTimeout(
+			() => budgetController.abort(new DOMException("Remote reader timed out", "TimeoutError")),
+			remoteBudgetMs,
+		);
+		const attemptSignal = userSignal
+			? AbortSignal.any([userSignal, budgetController.signal])
+			: budgetController.signal;
+		try {
+			return await operation(attemptSignal);
+		} finally {
+			clearTimeout(budgetTimer);
+		}
+	};
 	const fetchImpl = fetchOverride ?? fetch;
 
 	const runners: Record<FetchProvider, () => Promise<string | null>> = {
@@ -650,33 +665,36 @@ export async function renderHtmlToText(
 		},
 		parallel: async () => {
 			if (!findParallelApiKey(storage)) return null;
-			const parallelResult = await extractWithParallel(
-				[url],
-				{
-					objective: "Extract the main content",
-					excerpts: true,
-					fullContent: false,
-					signal: remoteSignal(),
-					fetch: fetchImpl,
-				},
-				storage,
-			);
-			const firstDocument = parallelResult.results[0];
-			return firstDocument ? getParallelExtractContent(firstDocument) : null;
-		},
-		jina: async () => {
-			const response = await fetchImpl(`https://r.jina.ai/${url}`, {
-				headers: {
-					Accept: "text/markdown",
-					"X-No-Cache": "true",
-				},
-				signal: remoteSignal(),
+			return await runRemote(async signal => {
+				const parallelResult = await extractWithParallel(
+					[url],
+					{
+						objective: "Extract the main content",
+						excerpts: true,
+						fullContent: false,
+						signal,
+						fetch: fetchImpl,
+					},
+					storage,
+				);
+				const firstDocument = parallelResult.results[0];
+				return firstDocument ? getParallelExtractContent(firstDocument) : null;
 			});
-			if (!response.ok) return null;
-			const contentLength = Number(response.headers.get("content-length"));
-			if (Number.isFinite(contentLength) && contentLength > JINA_READER_MAX_BYTES) return null;
-			return parseJinaReaderContent(await response.text());
 		},
+		jina: () =>
+			runRemote(async signal => {
+				const response = await fetchImpl(`https://r.jina.ai/${url}`, {
+					headers: {
+						Accept: "text/markdown",
+						"X-No-Cache": "true",
+					},
+					signal,
+				});
+				if (!response.ok) return null;
+				const contentLength = Number(response.headers.get("content-length"));
+				if (Number.isFinite(contentLength) && contentLength > JINA_READER_MAX_BYTES) return null;
+				return parseJinaReaderContent(await response.text());
+			}),
 	};
 
 	const preference = settings.get("providers.fetch");
@@ -872,7 +890,7 @@ async function withTempBinaryFile<T>(
 		await Bun.write(tempPath, bytes);
 		return await readTempFile(tempPath);
 	} finally {
-		await fs.rm(tempDir, { recursive: true, force: true });
+		await removeWithRetries(tempDir);
 	}
 }
 
