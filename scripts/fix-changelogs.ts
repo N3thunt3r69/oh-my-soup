@@ -819,7 +819,8 @@ export async function changelogPaths(repoRoot: string): Promise<string[]> {
 	const glob = new Glob(CHANGELOG_GLOB);
 	const paths: string[] = [];
 	for await (const changelogPath of glob.scan(repoRoot)) {
-		paths.push(path.isAbsolute(changelogPath) ? path.relative(repoRoot, changelogPath) : changelogPath);
+		const relativePath = path.isAbsolute(changelogPath) ? path.relative(repoRoot, changelogPath) : changelogPath;
+		paths.push(relativePath.replaceAll(path.sep, "/"));
 	}
 	paths.sort();
 	return paths;
