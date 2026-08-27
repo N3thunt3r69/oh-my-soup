@@ -20,6 +20,15 @@ export interface BoundedProbeResult {
 export interface BoundedProbeSpawnOptions extends BackendProbeOptions {
 	cwd: string;
 	env: Record<string, string | undefined>;
+	/**
+	 * Raises the clamp ceiling above {@link DEFAULT_PROBE_TIMEOUT_MS}. The
+	 * default ceiling is the issue #9466 anti-wedge bound, so production
+	 * probes must not pass this; it exists for test infrastructure that
+	 * deliberately pays a longer one-off cost (e.g. a cold-interpreter
+	 * prewarm) while reusing this helper's stdio detachment and
+	 * process-tree kill.
+	 */
+	timeoutCeilingMs?: number;
 }
 
 function resolveProbeBound(timeoutMs: number | undefined): number {
@@ -50,10 +59,11 @@ function forceKillProbe(pid: number, directKill: () => void): void {
 /** Spawn a probe without inherited stdio and reap it after timeout or cancellation. */
 export async function runBoundedProbe(
 	command: string[],
-	{ cwd, env, signal, timeoutMs }: BoundedProbeSpawnOptions,
+	{ cwd, env, signal, timeoutMs, timeoutCeilingMs }: BoundedProbeSpawnOptions,
 ): Promise<BoundedProbeResult> {
 	if (signal?.aborted) return { exitCode: null, timedOut: false, aborted: true };
-
+	const ceiling = Math.max(timeoutCeilingMs ?? 0, DEFAULT_PROBE_TIMEOUT_MS);
+	const bound = Math.min(timeoutMs && timeoutMs > 0 ? timeoutMs : ceiling, ceiling);
 	const proc = Bun.spawn(command, {
 		cwd,
 		env,
@@ -76,7 +86,7 @@ export async function runBoundedProbe(
 		termination = reason;
 		forceKillProbe(proc.pid, directKill);
 	};
-	const timer = setTimeout(() => terminate("timeout"), resolveProbeBound(timeoutMs));
+	const timer = setTimeout(() => terminate("timeout"), bound);
 	const onAbort = (): void => terminate("abort");
 	signal?.addEventListener("abort", onAbort, { once: true });
 	// Close the check-to-listener race: abort may have happened during spawn.
