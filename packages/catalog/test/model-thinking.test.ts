@@ -796,6 +796,22 @@ describe("model thinking derivation", () => {
 		expect(getSupportedEfforts(model)).toEqual([Effort.Low, Effort.High, Effort.Max]);
 		expect(model.thinking?.effortMap).toBeUndefined();
 	});
+	it("models Z.ai GLM-5.3-Flash as mandatory low/high/max budget effort", () => {
+		const model = createModel({
+			id: "glm-5.3-flash",
+			api: "anthropic-messages",
+			provider: "zai",
+			baseUrl: "https://api.z.ai/api/anthropic",
+		});
+
+		expect(model.thinking).toEqual({
+			mode: "anthropic-budget-effort",
+			efforts: [Effort.Low, Effort.High, Effort.Max],
+			defaultLevel: Effort.Max,
+			requiresEffort: true,
+		});
+		expect(minimumSupportedEffort(model)).toBe(Effort.Low);
+	});
 });
 
 describe("model thinking runtime helpers", () => {

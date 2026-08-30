@@ -66,6 +66,7 @@ import xiaomi from "./xiaomi.json.txt";
 import xiaomiTokenPlanAms from "./xiaomi-token-plan-ams.json.txt";
 import xiaomiTokenPlanCn from "./xiaomi-token-plan-cn.json.txt";
 import xiaomiTokenPlanSgp from "./xiaomi-token-plan-sgp.json.txt";
+import yoloAuto from "./yolo-auto.json.txt";
 import zai from "./zai.json.txt";
 import zenmux from "./zenmux.json.txt";
 import zhipuCodingPlan from "./zhipu-coding-plan.json.txt";
@@ -132,6 +133,7 @@ export const MODEL_CHUNKS: Record<string, string> = {
 	"xiaomi-token-plan-ams": xiaomiTokenPlanAms,
 	"xiaomi-token-plan-cn": xiaomiTokenPlanCn,
 	"xiaomi-token-plan-sgp": xiaomiTokenPlanSgp,
+	"yolo-auto": yoloAuto,
 	zai,
 	zenmux,
 	"zhipu-coding-plan": zhipuCodingPlan,

@@ -226,7 +226,7 @@ describe("generated model policies", () => {
 		]);
 	});
 
-	it("pins released zai GLM 5.2+ base ids to 1M context", () => {
+	it("pins released zai GLM 5.2+ coding ids to 1M context", () => {
 		const models = [
 			createSpec({
 				id: "glm-5.2",
@@ -242,11 +242,19 @@ describe("generated model policies", () => {
 				contextWindow: 200_000,
 				maxTokens: 8192,
 			}),
+			createSpec({
+				id: "glm-5.3-flash",
+				api: "anthropic-messages",
+				provider: "zai",
+				contextWindow: 200_000,
+				maxTokens: 8192,
+			}),
 		];
 
 		applyGeneratedModelPolicies(models);
 
 		expect(models.map(model => [model.contextWindow, model.maxTokens])).toEqual([
+			[1_000_000, 131_072],
 			[1_000_000, 131_072],
 			[1_000_000, 131_072],
 		]);

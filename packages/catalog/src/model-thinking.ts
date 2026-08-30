@@ -27,6 +27,7 @@ import {
 	isDeepseekModelIdOrName,
 	isDeepseekV4FlashModelId,
 	isGlm52ReasoningEffortModelId,
+	isGlm53PlusFlashModelId,
 	isGrokXHighEffortCapable,
 	isKimiK3ModelId,
 	isMimoModelIdOrName,
@@ -65,7 +66,7 @@ const GEMINI_3_FLASH_EFFORTS: readonly Effort[] = [Effort.Minimal, Effort.Low, E
 const GPT_5_2_PLUS_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh];
 const GPT_5_1_CODEX_MINI_EFFORTS: readonly Effort[] = [Effort.Medium, Effort.High];
 const LOW_MEDIUM_HIGH_REASONING_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High];
-/** Wire-exact `low`/`high`/`max` scale used by Kimi K3 and DeepSeek V4 (Flash and Pro, direct API and aggregators). */
+/** Wire-exact mandatory `low`/`high`/`max` scale used by GLM-5.3+ Flash, Kimi K3, and DeepSeek V4. */
 const LOW_HIGH_MAX_REASONING_EFFORTS: readonly Effort[] = [Effort.Low, Effort.High, Effort.Max];
 /** Wire-exact two-tier scale (`high`/`max`): GLM-5.2 on Z.ai/Umans/Ollama Cloud/Baseten, Sakana Fugu, older DeepSeek reasoners (V3.x/R1). */
 const HIGH_MAX_REASONING_EFFORTS: readonly Effort[] = [Effort.High, Effort.Max];
@@ -187,7 +188,8 @@ function fillThinkingWireDefaults<TApi extends Api>(
 	const needsRequiresEffort =
 		thinking.requiresEffort === undefined &&
 		(impliesMandatoryReasoning(parsed, spec.id) || isQwenTemplateReasoningEffortCompat(compat));
-	const needsDefaultLevel = thinking.defaultLevel === undefined && isKimiK3ModelId(spec.id);
+	const needsDefaultLevel =
+		thinking.defaultLevel === undefined && (isKimiK3ModelId(spec.id) || isGlm53PlusFlashModelId(spec.id));
 	if (!effortsChanged && !shouldReplaceEffortMap && !needsDisplay && !needsRequiresEffort && !needsDefaultLevel) {
 		return thinking;
 	}
@@ -225,7 +227,7 @@ export function deriveThinking<TApi extends Api>(spec: ModelSpec<TApi>, compat: 
 		mode: inferThinkingControlMode(spec, parsed),
 		efforts,
 	};
-	if (isKimiK3ModelId(spec.id)) {
+	if (isKimiK3ModelId(spec.id) || isGlm53PlusFlashModelId(spec.id)) {
 		config.defaultLevel = Effort.Max;
 	}
 	const effortMap = inferEffortMap(spec, compat, config.mode, config.efforts);
@@ -331,8 +333,8 @@ function getModelDefinedEfforts<TApi extends Api>(
 	}
 	if (isGlm52ReasoningEffortModelId(spec.id)) {
 		if (isZaiGlm53PlusReasoningEffortModel(spec)) {
-			// GLM-5.3 is always reasoning-enabled and adds a native `low` tier
-			// below the existing `high`/`max` Z.AI effort surface.
+			// Z.AI GLM-5.3+ coding models expose a native `low` tier below the
+			// existing `high`/`max` effort surface.
 			return LOW_HIGH_MAX_REASONING_EFFORTS;
 		}
 		// GLM-5.2's reasoning_effort dialect is host-specific (verified against
@@ -624,6 +626,7 @@ function impliesMandatoryReasoning(parsed: ParsedModel, modelId: string): boolea
 		if (parsed.kind === "pro" && semverGte(parsed.version, "2.5")) return true;
 	}
 	if (isKimiK3ModelId(modelId)) return true;
+	if (isGlm53PlusFlashModelId(modelId)) return true;
 	if (isMinimaxM2FamilyModelId(modelId)) return true;
 	if (OPENAI_O_SERIES_RE.test(bareModelId(modelId))) return true;
 	return findThinkingVariantToken(modelId) !== undefined;

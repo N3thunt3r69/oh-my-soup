@@ -10,7 +10,7 @@ interface BundledModel {
 	reasoning: boolean;
 	input: string[];
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
-	thinking: { mode: string; efforts: string[] };
+	thinking: { mode: string; efforts: string[]; defaultLevel?: string; requiresEffort?: boolean };
 }
 
 describe("zai bundled catalog", () => {
@@ -46,5 +46,29 @@ describe("zai bundled catalog", () => {
 				efforts: ["low", "high", "max"],
 			},
 		});
+	});
+
+	it("bundles GLM-5.3-Flash with its documented Z.AI contract", () => {
+		const zaiModels = modelsJson.zai as Record<string, BundledModel>;
+		const model = zaiModels["glm-5.3-flash"];
+
+		expect(model).toBeDefined();
+		expect(model).toMatchObject({
+			provider: "zai",
+			api: "anthropic-messages",
+			baseUrl: "https://api.z.ai/api/anthropic",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0.075, output: 0.25, cacheRead: 0.015, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 131_072,
+			thinking: {
+				mode: "anthropic-budget-effort",
+				efforts: ["low", "high", "max"],
+				defaultLevel: "max",
+				requiresEffort: true,
+			},
+		});
+		expect(Object.keys(zaiModels)).not.toContain("glm-5.3-flash[1m]");
 	});
 });

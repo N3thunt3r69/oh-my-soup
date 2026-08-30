@@ -420,11 +420,11 @@ function applyGeneratedModelPolicy(model: ModelSpec<Api>): void {
 		model.omitMaxOutputTokens = true;
 	}
 
-	// GLM Coding Plan: GLM-5.2+ base ids are the selectable 1M served ids; pin
-	// released SKUs so endpoint discovery or older fallbacks cannot regress them.
+	// GLM Coding Plan: released GLM-5.2+ coding ids use 1M context; pin them so
+	// endpoint discovery or older fallbacks cannot regress the documented limits.
 	if (
 		(model.provider === "zai" || model.provider === "zhipu-coding-plan") &&
-		(model.id === "glm-5.2" || model.id === "glm-5.3")
+		(model.id === "glm-5.2" || model.id === "glm-5.3" || model.id === "glm-5.3-flash")
 	) {
 		model.contextWindow = 1_000_000;
 		model.maxTokens = 131_072;
