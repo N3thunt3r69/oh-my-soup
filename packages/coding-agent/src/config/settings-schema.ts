@@ -2501,13 +2501,13 @@ export const SETTINGS_SCHEMA = {
 			"gemma",
 			"minimax",
 		] as const,
-		default: "emoji",
+		default: "auto",
 		ui: {
 			tab: "context",
 			group: "Experimental",
 			label: "Tool Calling Mode",
 			description:
-				"Controls how tools are exposed to the model. Emoji is the default compact owned dialect. Auto uses provider-native tool calls unless the selected model is marked as not supporting them, then falls back to GLM. Native forces provider-native tools; the other values force the named owned dialect. Applies on session start.",
+				"Controls how tools are exposed to the model. Auto is the default and uses provider-native tool calls unless the selected model is marked as not supporting them, then falls back to GLM. Native forces provider-native tools; the other values force the named experimental owned dialect. Applies on session start.",
 			options: [
 				{
 					value: "auto",

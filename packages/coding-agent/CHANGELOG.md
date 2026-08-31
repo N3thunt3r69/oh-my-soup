@@ -8,7 +8,7 @@
 
 ### Changed
 
-- Made the compact `emoji` tool-calling mode the default for new and unconfigured sessions; `auto` and `native` remain explicit options.
+- Restored `tools.format=auto` as the default so models use their provider-native tool channel when available; the compact `emoji` dialect remains available as an explicit experimental option.
 
 ## [17.3.3] - 2026-08-27
 
