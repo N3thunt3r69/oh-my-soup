@@ -9,11 +9,12 @@ import {
 	clearStreamingPartialJson,
 	copyCursorExecResolved,
 	getStreamingPartialJson,
+	isCursorExecResolved,
 	type StreamingPartialJsonCarrier,
 	setStreamingPartialJson,
 } from "../utils/block-symbols";
 import { AssistantMessageEventStream } from "../utils/event-stream";
-import { buildStringArgsResolver } from "./coercion";
+import { buildStringArgsResolver, mintToolCallId } from "./coercion";
 import { createInbandScanner } from "./factory";
 import type { Dialect, InbandScanEvent, InbandScanner, InbandTool } from "./types";
 
@@ -25,6 +26,7 @@ const RESPONSE_OPEN_TOKENS: Record<Dialect, readonly string[]> = {
 	anthropic: ["<function_results>", "<tool_response>"],
 	minimax: ["<function_results>", "<tool_response>"],
 	deepseek: ["<｜tool▁outputs▁begin｜>", "<｜tool▁output▁begin｜>"],
+	emoji: [],
 	harmony: ["<|start|>functions."],
 	qwen3: ["<tool_response>"],
 	gemini: ["```tool_outputs"],
@@ -45,10 +47,10 @@ type OpenThinking = { index: number; text: string } | undefined;
 
 type StreamingToolCall = ToolCall & StreamingPartialJsonCarrier;
 
-function cloneToolCall(source: StreamingToolCall): StreamingToolCall {
+function cloneToolCall(source: StreamingToolCall, id = source.id): StreamingToolCall {
 	const block: StreamingToolCall = {
 		type: "toolCall",
-		id: source.id,
+		id,
 		name: source.name,
 		arguments: source.arguments,
 		...(source.rawBlock !== undefined ? { rawBlock: source.rawBlock } : {}),
@@ -60,8 +62,6 @@ function cloneToolCall(source: StreamingToolCall): StreamingToolCall {
 }
 
 function syncToolCall(target: StreamingToolCall, source: StreamingToolCall): void {
-	target.id = source.id;
-	target.name = source.name;
 	target.arguments = source.arguments;
 	target.rawBlock = source.rawBlock;
 	const partialJson = getStreamingPartialJson(source);
@@ -186,6 +186,8 @@ class InbandStreamProjector {
 	// first real call so the other is dropped — no double-dispatch, and no
 	// guessing from emptiness. Nameless "ghost" parts never lock a channel.
 	#nativeBlocks = new Map<number, { index: number; block: StreamingToolCall }>();
+	#nativeCallIds = new Set<string>();
+	readonly #toolNames: ReadonlySet<string>;
 	#toolChannel: "native" | "inband" | undefined;
 
 	constructor(
@@ -197,6 +199,7 @@ class InbandStreamProjector {
 	) {
 		this.#out = out;
 		this.#emitEvents = emitEvents;
+		this.#toolNames = new Set(tools.map(tool => tool.name));
 		this.#scanner = createInbandScanner(dialect, {
 			tools,
 			stringArgs: buildStringArgsResolver(tools),
@@ -206,6 +209,17 @@ class InbandStreamProjector {
 		this.#responseOverlapLength = Math.max(0, ...this.#responseOpenTokens.map(token => token.length - 1));
 		this.#partial = { ...seed, content: [] };
 		if (emitEvents) this.#out.push({ type: "start", partial: this.#partial });
+	}
+
+	#claimNativeCallId(rawId: string): string {
+		let id = rawId.trim();
+		while (id.length === 0 || this.#nativeCallIds.has(id)) id = mintToolCallId();
+		this.#nativeCallIds.add(id);
+		return id;
+	}
+
+	#isAllowedNativeToolCall(source: StreamingToolCall | undefined): source is StreamingToolCall {
+		return hasNamedNativeToolCall(source) && (this.#toolNames.has(source.name) || isCursorExecResolved(source));
 	}
 
 	keep(block: AssistantMessage["content"][number]): void {
@@ -229,11 +243,11 @@ class InbandStreamProjector {
 	// {} }` placeholders — otherwise the UI loses streaming args, can mis-key the
 	// call until `toolcall_end`.
 	nativeToolStart(srcIndex: number, source: StreamingToolCall | undefined): void {
-		if (this.#stopped || !hasNamedNativeToolCall(source) || this.#toolChannel === "inband") return;
+		if (this.#stopped || !this.#isAllowedNativeToolCall(source) || this.#toolChannel === "inband") return;
 		this.#toolChannel = "native";
 		this.#closeText();
 		this.#closeThinking();
-		const block = cloneToolCall(source);
+		const block = cloneToolCall(source, this.#claimNativeCallId(source.id));
 		this.#partial.content.push(block);
 		const index = this.#partial.content.length - 1;
 		this.#nativeBlocks.set(srcIndex, { index, block });
@@ -243,7 +257,7 @@ class InbandStreamProjector {
 	nativeToolDelta(srcIndex: number, delta: string, source: StreamingToolCall | undefined): void {
 		if (this.#stopped) return;
 		let entry = this.#nativeBlocks.get(srcIndex);
-		if (!entry && hasNamedNativeToolCall(source) && this.#toolChannel !== "inband") {
+		if (!entry && this.#isAllowedNativeToolCall(source) && this.#toolChannel !== "inband") {
 			this.nativeToolStart(srcIndex, source);
 			entry = this.#nativeBlocks.get(srcIndex);
 		}
@@ -271,11 +285,11 @@ class InbandStreamProjector {
 		// Never streamed (name was empty at start). Salvage a real call whose name
 		// only arrived now; drop nameless ghosts and anything the in-band channel
 		// already claimed.
-		if (!hasNamedNativeToolCall(toolCall) || this.#toolChannel === "inband") return;
+		if (!this.#isAllowedNativeToolCall(toolCall) || this.#toolChannel === "inband") return;
 		this.#toolChannel = "native";
 		this.#closeText();
 		this.#closeThinking();
-		const block = cloneToolCall(toolCall);
+		const block = cloneToolCall(toolCall, this.#claimNativeCallId(toolCall.id));
 		this.#partial.content.push(block);
 		const index = this.#partial.content.length - 1;
 		if (this.#emitEvents) {
@@ -303,7 +317,10 @@ class InbandStreamProjector {
 
 		const emitLength = combined.length - this.#responseOverlapLength;
 		this.#responsePending = combined.slice(emitLength);
-		this.#apply(this.#scanner.feed(combined.slice(0, emitLength)));
+		if (this.#apply(this.#scanner.feed(combined.slice(0, emitLength)))) {
+			this.#responsePending = "";
+			return true;
+		}
 		return false;
 	}
 
@@ -339,7 +356,7 @@ class InbandStreamProjector {
 		for (const block of message.content) if (block.type === "text") fullText += block.text;
 		if (!this.#stopped && fullText.length > this.#fedLen) this.text(fullText.slice(this.#fedLen));
 		if (!this.#stopped && this.#responsePending.length > 0) {
-			this.#apply(this.#scanner.feed(this.#responsePending));
+			if (this.#apply(this.#scanner.feed(this.#responsePending))) this.#stopped = true;
 			this.#responsePending = "";
 		}
 		this.#apply(this.#scanner.flush());
@@ -353,9 +370,12 @@ class InbandStreamProjector {
 		return finalMessage;
 	}
 
-	#apply(events: InbandScanEvent[]): void {
+	#apply(events: InbandScanEvent[]): boolean {
 		for (const event of events) {
 			switch (event.type) {
+				case "fabricatedResult":
+					this.#stopped = true;
+					return true;
 				case "text":
 					this.#emitText(event.text);
 					break;
@@ -379,6 +399,7 @@ class InbandStreamProjector {
 					break;
 			}
 		}
+		return false;
 	}
 
 	#emitText(text: string): void {

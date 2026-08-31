@@ -179,6 +179,7 @@ export function resolveOwnedDialectFromEnv(value: string | undefined): Dialect |
 		case "xml":
 		case "anthropic":
 		case "deepseek":
+		case "emoji":
 		case "harmony":
 		case "qwen3":
 		case "gemini":

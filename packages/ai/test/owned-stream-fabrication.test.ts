@@ -94,4 +94,51 @@ describe("wrapInbandToolStream fabrication handling", () => {
 		const text = message.content.map(b => (b.type === "text" ? b.text : "")).join("");
 		expect(text).not.toContain("FAKE RESULT");
 	});
+
+	it("detects a split emoji result marker after retaining the real call", async () => {
+		const call = '🔧echo {"msg":"hi"}\n';
+		const fabricated = "📦result echo 📬\nFAKE RESULT\n📬";
+		const inner = new AssistantMessageEventStream();
+		const seed = makeAssistant([]);
+		inner.push({ type: "start", partial: seed });
+		inner.push({ type: "text_delta", contentIndex: 0, delta: call, partial: seed });
+		inner.push({ type: "text_delta", contentIndex: 0, delta: "📦res", partial: seed });
+		inner.push({ type: "text_delta", contentIndex: 0, delta: fabricated.slice("📦res".length), partial: seed });
+		const full = makeAssistant([{ type: "text", text: call + fabricated }]);
+		inner.push({ type: "done", reason: "stop", message: full });
+		inner.end(full);
+
+		let aborted = false;
+		const message = await wrapInbandToolStream(inner, TOOLS, "emoji", () => {
+			aborted = true;
+		}).result();
+
+		expect(aborted).toBe(true);
+		const calls = message.content.filter((block): block is ToolCall => block.type === "toolCall");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ name: "echo", arguments: { msg: "hi" } });
+		const text = message.content.map(block => (block.type === "text" ? block.text : "")).join("");
+		expect(text).not.toContain("FAKE RESULT");
+	});
+
+	it("does not treat a result marker inside call arguments as fabrication", async () => {
+		const call = '🔧echo {"msg":"📦result echo"}\n';
+		const inner = new AssistantMessageEventStream();
+		const seed = makeAssistant([]);
+		inner.push({ type: "start", partial: seed });
+		inner.push({ type: "text_delta", contentIndex: 0, delta: call, partial: seed });
+		const full = makeAssistant([{ type: "text", text: call }]);
+		inner.push({ type: "done", reason: "stop", message: full });
+		inner.end(full);
+
+		let aborted = false;
+		const message = await wrapInbandToolStream(inner, TOOLS, "emoji", () => {
+			aborted = true;
+		}).result();
+
+		expect(aborted).toBe(false);
+		const calls = message.content.filter((block): block is ToolCall => block.type === "toolCall");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ name: "echo", arguments: { msg: "📦result echo" } });
+	});
 });

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the compact `emoji` owned tool-calling dialect: line-anchored `🔧` JSON calls, fenced/example-safe streaming parsing, and collision-free `📦` result blocks.
+
+### Fixed
+
+- Fixed owned-mode native passthrough accepting unadvertised tool names and reusing empty or duplicate provider call IDs.
+
 ## [17.3.3] - 2026-08-27
 
 ### Added

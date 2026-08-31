@@ -5,6 +5,7 @@
 ### Added
 
 - Added Z.AI `glm-5.3-flash` with native image input, a 1M-token context window, 128K output, promotional pay-as-you-go pricing, and its mandatory `low`/`high`/`max` reasoning-effort ladder.
+- Added the explicit `emoji` owned tool-calling dialect identity.
 
 ## [17.3.3] - 2026-08-27
 

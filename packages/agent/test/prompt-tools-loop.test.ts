@@ -219,6 +219,50 @@ describe("agentLoop with owned in-band tool calls", () => {
 		expect(resultsText).toContain("echoed:hi");
 	});
 
+	it("executes emoji call lines once and replays emoji results", async () => {
+		const echoArgs: Array<{ msg: string }> = [];
+		const toolSchema = type({ msg: "string" });
+		const echoTool: AgentTool<typeof toolSchema, { msg: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo a message back",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				echoArgs.push(params);
+				return { content: [{ type: "text", text: `echoed:${params.msg}` }], details: params };
+			},
+		};
+		const captured: Context[] = [];
+		const mock = createMockModel({
+			responses: [
+				context => {
+					captured.push(context);
+					return { content: ['checking\n🔧echo {"msg":"hello"}'] };
+				},
+				context => {
+					captured.push(context);
+					return { content: ["done"] };
+				},
+			],
+		});
+		const context: AgentContext = { systemPrompt: ["BASE PROMPT"], messages: [], tools: [echoTool] };
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter, dialect: "emoji" };
+
+		await agentLoop([createUserMessage("say hi")], context, config, undefined, mock.stream).result();
+
+		expect(echoArgs).toEqual([{ msg: "hello" }]);
+		expect(captured).toHaveLength(2);
+		expect(captured[0].tools).toBeUndefined();
+		expect((captured[0].systemPrompt ?? []).join("\n")).toContain('🔧function_name {"arg":"value"}');
+		const replayedAssistant = captured[1].messages.find(message => message.role === "assistant");
+		expect(replayedAssistant && wireText(replayedAssistant)).toContain('🔧echo {"msg":"hello"}');
+		const replayedResults = captured[1].messages
+			.filter(message => message.role === "user")
+			.map(wireText)
+			.join("\n");
+		expect(replayedResults).toContain("📦result echo 📬\nechoed:hello\n📬");
+	});
+
 	it("uses PI_DIALECT=minimax when config.dialect is unset", async () => {
 		const before = Bun.env.PI_DIALECT;
 		Bun.env.PI_DIALECT = "minimax";

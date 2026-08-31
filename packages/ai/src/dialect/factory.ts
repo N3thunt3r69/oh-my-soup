@@ -1,5 +1,6 @@
 import anthropicDefinition from "./anthropic";
 import deepseekDefinition from "./deepseek";
+import emojiDefinition from "./emoji";
 import geminiDefinition from "./gemini";
 import gemmaDefinition from "./gemma";
 import glmDefinition from "./glm";
@@ -18,6 +19,7 @@ const DIALECT_DEFINITIONS: Record<Dialect, DialectDefinition> = {
 	xml: xmlDefinition,
 	anthropic: anthropicDefinition,
 	deepseek: deepseekDefinition,
+	emoji: emojiDefinition,
 	minimax: minimaxDefinition,
 	harmony: harmonyDefinition,
 	qwen3: qwen3Definition,

@@ -200,6 +200,7 @@ describe("every dialect round-trips thinking (no missing thinking element)", () 
 	const dialects: Dialect[] = [
 		"anthropic",
 		"deepseek",
+		"emoji",
 		"gemini",
 		"gemma",
 		"glm",

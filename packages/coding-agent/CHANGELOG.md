@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `tools.format=emoji` as a compact line-based tool-calling mode.
+
+### Changed
+
+- Made the compact `emoji` tool-calling mode the default for new and unconfigured sessions; `auto` and `native` remain explicit options.
+
 ## [17.3.3] - 2026-08-27
 
 ### Added

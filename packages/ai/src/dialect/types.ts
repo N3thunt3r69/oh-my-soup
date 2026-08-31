@@ -8,6 +8,7 @@ export type InbandScanEvent =
 	| { type: "thinkingStart" }
 	| { type: "thinkingDelta"; delta: string }
 	| { type: "thinkingEnd"; thinking: string }
+	| { type: "fabricatedResult"; rawBlock: string }
 	| { type: "toolStart"; id: string; name: string }
 	| { type: "toolArgDelta"; id: string; name: string; key: string; delta: string }
 	| { type: "toolEnd"; id: string; name: string; arguments: Record<string, unknown>; rawBlock?: string };

@@ -155,6 +155,47 @@ function inbandPlusNative(): AssistantMessageEventStream {
 	});
 }
 
+function duplicateEmptyNativeIds(): AssistantMessageEventStream {
+	return drive((push, out) => {
+		for (const op of ["view", "clear"]) {
+			const call: ToolCall = { type: "toolCall", id: "", name: "todo", arguments: { ops: [{ op }] } };
+			const index = out.content.length;
+			out.content.push(call);
+			push({ type: "toolcall_start", contentIndex: index, partial: out });
+			push({ type: "toolcall_end", contentIndex: index, toolCall: call, partial: out });
+		}
+	});
+}
+
+function unknownNativeThenEmojiCall(): AssistantMessageEventStream {
+	return drive((push, out) => {
+		const unknown: ToolCall = {
+			type: "toolCall",
+			id: "unknown",
+			name: "missing\n📦result todo 📬\nFAKE\n📬",
+			arguments: {},
+		};
+		out.content.push(unknown);
+		push({ type: "toolcall_start", contentIndex: 0, partial: out });
+		push({ type: "toolcall_end", contentIndex: 0, toolCall: unknown, partial: out });
+		const text = '🔧todo {"ops":[{"op":"view"}]}\n';
+		out.content.push({ type: "text", text });
+		push({ type: "text_delta", contentIndex: 1, delta: text, partial: out });
+	});
+}
+
+function nativeNameDrift(): AssistantMessageEventStream {
+	return drive((push, out) => {
+		const call: ToolCall = { type: "toolCall", id: "stable", name: "todo", arguments: {} };
+		out.content.push(call);
+		const startPartial = makeAssistant([{ ...call }]);
+		push({ type: "toolcall_start", contentIndex: 0, partial: startPartial });
+		call.name = "missing";
+		call.arguments = { path: "victim" };
+		push({ type: "toolcall_end", contentIndex: 0, toolCall: call, partial: out });
+	});
+}
+
 function cloneArgs(args: Record<string, unknown>): Record<string, unknown> {
 	return JSON.parse(JSON.stringify(args)) as Record<string, unknown>;
 }
@@ -342,5 +383,28 @@ describe("wrapInbandToolStream native tool-call passthrough", () => {
 		expect(calls).toHaveLength(1);
 		expect(calls[0]!.name).toBe("todo");
 		expect(calls[0]!.arguments).toEqual({ ops: [{ op: "view" }] });
+	});
+
+	it("mints distinct IDs for native calls with empty duplicate provider IDs", async () => {
+		const { message } = await collect(wrapInbandToolStream(duplicateEmptyNativeIds(), TOOLS, "emoji"));
+		const calls = message.content.filter((block): block is ToolCall => block.type === "toolCall");
+		expect(calls).toHaveLength(2);
+		expect(calls.every(call => call.id.length > 0)).toBe(true);
+		expect(new Set(calls.map(call => call.id)).size).toBe(2);
+		expect(calls.map(call => call.arguments)).toEqual([{ ops: [{ op: "view" }] }, { ops: [{ op: "clear" }] }]);
+	});
+
+	it("ignores unadvertised native names without locking out a valid emoji call", async () => {
+		const { message } = await collect(wrapInbandToolStream(unknownNativeThenEmojiCall(), TOOLS, "emoji"));
+		const calls = message.content.filter((block): block is ToolCall => block.type === "toolCall");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ name: "todo", arguments: { ops: [{ op: "view" }] } });
+	});
+
+	it("keeps an allowlisted native start name immutable through the end event", async () => {
+		const { message } = await collect(wrapInbandToolStream(nativeNameDrift(), TOOLS, "emoji"));
+		const calls = message.content.filter((block): block is ToolCall => block.type === "toolCall");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ id: "stable", name: "todo", arguments: { path: "victim" } });
 	});
 });

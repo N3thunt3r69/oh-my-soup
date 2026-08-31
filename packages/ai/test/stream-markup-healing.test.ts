@@ -477,6 +477,7 @@ describe("StreamMarkupHealing thinking pattern", () => {
 	const DIALECT_CASES: { [K in Dialect]: K } = {
 		anthropic: "anthropic",
 		deepseek: "deepseek",
+		emoji: "emoji",
 		gemini: "gemini",
 		gemma: "gemma",
 		glm: "glm",

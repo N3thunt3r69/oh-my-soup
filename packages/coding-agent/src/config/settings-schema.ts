@@ -2494,19 +2494,20 @@ export const SETTINGS_SCHEMA = {
 			"xml",
 			"anthropic",
 			"deepseek",
+			"emoji",
 			"harmony",
 			"qwen3",
 			"gemini",
 			"gemma",
 			"minimax",
 		] as const,
-		default: "auto",
+		default: "emoji",
 		ui: {
 			tab: "context",
 			group: "Experimental",
 			label: "Tool Calling Mode",
 			description:
-				"Controls how tools are exposed to the model. Auto uses provider-native tool calls unless the selected model is marked as not supporting them, then falls back to the GLM owned dialect. Native forces provider-native tools; the other values force the named owned dialect. Applies on session start.",
+				"Controls how tools are exposed to the model. Emoji is the default compact owned dialect. Auto uses provider-native tool calls unless the selected model is marked as not supporting them, then falls back to GLM. Native forces provider-native tools; the other values force the named owned dialect. Applies on session start.",
 			options: [
 				{
 					value: "auto",
@@ -2520,6 +2521,7 @@ export const SETTINGS_SCHEMA = {
 				{ value: "xml", label: "XML", description: "Use generic XML in-band tool calls." },
 				{ value: "anthropic", label: "Anthropic", description: "Use Anthropic-style in-band tool calls." },
 				{ value: "deepseek", label: "DeepSeek", description: "Use DeepSeek-style in-band tool calls." },
+				{ value: "emoji", label: "Emoji", description: "Use compact line-based emoji tool calls." },
 				{ value: "harmony", label: "Harmony", description: "Use Harmony-style in-band tool calls." },
 				{ value: "qwen3", label: "Qwen3", description: "Use the Qwen3 owned dialect." },
 				{ value: "gemini", label: "Gemini", description: "Use the Gemini owned dialect." },

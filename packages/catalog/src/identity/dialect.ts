@@ -11,6 +11,7 @@ export type Dialect =
 	| "qwen3"
 	| "gemini"
 	| "gemma"
+	| "emoji"
 	| "minimax";
 
 export const FALLBACK_DIALECT: Dialect = "xml";

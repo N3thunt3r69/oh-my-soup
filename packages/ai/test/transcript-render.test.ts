@@ -86,6 +86,13 @@ describe("dialect transcript rendering", () => {
 		expect(out).not.toContain("[Assistant tool calls]:");
 	});
 
+	it("renders emoji calls and collision-safe result blocks on physical lines", () => {
+		const out = getDialectDefinition("emoji").renderTranscript(messages);
+
+		expect(out).toContain('Assistant: <think>\nI should search.\n</think>\nSearching.\n🔧search {"query":"pi"}');
+		expect(out).toContain("Human: 📦result search 📬\nresult\n📬");
+	});
+
 	it("renders distinct native text for each sampled dialect", () => {
 		const outputs = (["harmony", "qwen3", "glm", "anthropic"] satisfies readonly Dialect[]).map(dialect =>
 			getDialectDefinition(dialect).renderTranscript(messages),

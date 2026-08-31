@@ -40,6 +40,7 @@ const DIALECTS: readonly Dialect[] = [
 	"anthropic",
 	"minimax",
 	"deepseek",
+	"emoji",
 	"harmony",
 	"qwen3",
 	"gemini",
