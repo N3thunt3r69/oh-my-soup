@@ -294,6 +294,18 @@ export const ANTHROPIC_CURATED_FALLBACK_MODELS: readonly ModelSpec<"anthropic-me
 		maxTokens: 128_000,
 	},
 	{
+		id: "claude-fable-5-1",
+		name: "Claude Fable 5.1",
+		api: "anthropic-messages",
+		provider: "anthropic",
+		baseUrl: "https://api.anthropic.com",
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+	},
+	{
 		id: "claude-mythos-5",
 		name: "Claude Mythos 5",
 		api: "anthropic-messages",

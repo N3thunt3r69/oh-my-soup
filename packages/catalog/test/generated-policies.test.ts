@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effort } from "@oh-my-soup/pi-catalog/effort";
+import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
+import { ANTHROPIC_CURATED_FALLBACK_MODELS } from "@oh-my-soup/pi-catalog/provider-models/openai-compat";
 import type { Api, ModelSpec, Provider } from "@oh-my-soup/pi-catalog/types";
 import {
 	applyAntigravityPricingFallback,
@@ -180,6 +182,34 @@ describe("generated model policies", () => {
 		expect(models[0]?.maxTokens).toBe(128_000);
 		expect(models[0]?.cost).toEqual({ input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 });
 		expect(models[0]?.thinking).toEqual({
+			mode: "anthropic-adaptive",
+			efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+			supportsDisplay: true,
+		});
+	});
+
+	it("curates Claude Fable 5.1 first-party Anthropic metadata", () => {
+		const fallback = ANTHROPIC_CURATED_FALLBACK_MODELS.find(model => model.id === "claude-fable-5-1");
+		expect(fallback).toBeDefined();
+		if (!fallback) throw new Error("Missing Claude Fable 5.1 fallback");
+		const model: ModelSpec<Api> = { ...fallback, cost: { ...fallback.cost } };
+
+		applyGeneratedModelPolicies([model]);
+
+		expect(model).toMatchObject({
+			name: "Claude Fable 5.1",
+			provider: "anthropic",
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+			cost: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+		});
+		expect(getBundledModel<"anthropic-messages">("anthropic", "claude-fable-5-1")).toMatchObject({
+			name: "Claude Fable 5.1",
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+			cost: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+		});
+		expect(model.thinking).toEqual({
 			mode: "anthropic-adaptive",
 			efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
 			supportsDisplay: true,

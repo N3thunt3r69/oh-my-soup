@@ -523,16 +523,16 @@ function applyAnthropicCatalogPolicy(model: ModelSpec<Api>, parsedModel: Anthrop
 		model.maxTokens = 128000;
 	}
 
-	// Claude Fable/Mythos 5: Anthropic's /v1/models omits token limits and
+	// Claude Fable/Mythos 5+: Anthropic's /v1/models omits token limits and
 	// pricing, and stencil.so lags new releases. Pin authoritative values from
 	// the model card (1M context / 128k output) and pricing docs ($10 in / $50
-	// out per MTok).
+	// out per MTok). Fable 5.1's discounted cache reads are $0.25 per MTok.
 	if (model.provider === "anthropic" && isFableOrMythos(parsedModel.kind)) {
 		model.contextWindow = 1_000_000;
 		model.maxTokens = 128_000;
 		model.cost.input = 10;
 		model.cost.output = 50;
-		model.cost.cacheRead = 1;
+		model.cost.cacheRead = parsedModel.kind === "fable" && semverEqual(parsedModel.version, "5.1") ? 0.25 : 1;
 		model.cost.cacheWrite = 12.5;
 	}
 }

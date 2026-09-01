@@ -6,6 +6,7 @@
 
 - Added Z.AI `glm-5.3-flash` with native image input, a 1M-token context window, 128K output, promotional pay-as-you-go pricing, and its mandatory `low`/`high`/`max` reasoning-effort ladder.
 - Added the explicit `emoji` owned tool-calling dialect identity.
+- Added Claude Fable 5.1 to the bundled first-party Anthropic catalog with its 1M context window, 128K output limit, adaptive five-tier reasoning, and cache pricing.
 
 ## [17.3.3] - 2026-08-27
 
