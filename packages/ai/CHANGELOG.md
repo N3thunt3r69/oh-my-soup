@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed owned-mode native passthrough accepting unadvertised tool names and reusing empty or duplicate provider call IDs.
+- Fixed Claude Fable 5.1 OAuth requests being rejected as an outdated Claude Code client by aligning the Anthropic fingerprint with the 2.1.257 CLI signature.
 
 ## [17.3.3] - 2026-08-27
 
