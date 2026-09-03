@@ -18,6 +18,22 @@
 - Added `retryTransientCompletion` for bounded, replay-safe oneshot LLM retries. It handles resolved `stopReason: "error"` messages and thrown transient failures, honors provider retry hints, preserves final failures unchanged, and never changes side-effecting streaming-turn recovery.
 
 ## [17.3.1] - 2026-08-14
+### Changed
+
+- OpenAI Codex requests now send the `x-codex-routing-hint` header (model and service tier) on Responses, WebSocket, and remote-compaction calls, matching codex-rs.
+
+## [18.1.7] - 2026-09-03
+
+### Fixed
+
+- Fixed DeepSeek-family Responses replay (e.g. opencode-go) rejecting a resumed thinking-mode turn with `400 The reasoning_text in the thinking mode must be passed back to the API` when compaction dropped the turn's reasoning; a non-empty placeholder is now synthesized instead of an empty `reasoning_text` ([#10690](https://github.com/can1357/oh-my-pi/issues/10690)).
+
+## [18.1.6] - 2026-09-03
+
+### Breaking Changes
+
+- Renamed `claudeCodeSessionId` to `sessionId` in `AnthropicClientOptionsArgs`.
+- Renamed `openAISessionId` to `sessionId` in `OpenAIRequestSetupOptions`.
 
 ### Added
 

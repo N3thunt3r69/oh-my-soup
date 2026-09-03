@@ -26,6 +26,7 @@ import {
 import { captureOpenAIHttpError } from "@oh-my-soup/pi-ai/utils/openai-http";
 import {
 	CODEX_BASE_URL,
+	codexRoutingHint,
 	getCodexAccountId,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
@@ -423,6 +424,7 @@ function buildCompactionV2Headers(
 		}
 		headers[OPENAI_HEADERS.BETA] = OPENAI_HEADER_VALUES.BETA_RESPONSES;
 		headers[OPENAI_HEADERS.ORIGINATOR] = OPENAI_HEADER_VALUES.ORIGINATOR_CODEX;
+		headers[OPENAI_HEADERS.ROUTING_HINT] = codexRoutingHint(request.model, undefined);
 		if (model.useResponsesLite) {
 			headers[OPENAI_HEADERS.RESPONSES_LITE] = "true";
 		}

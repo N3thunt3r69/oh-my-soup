@@ -16,6 +16,19 @@
 - Added Z.AI `glm-5.3` with its documented 1M context window, 128K output limit, pay-as-you-go pricing, and forced `low`/`high`/`max` reasoning effort surface.
 
 ## [17.3.2] - 2026-08-16
+### Changed
+
+- Bumped the pinned Codex client version to 0.153.0 so version-gated OpenAI Codex models (e.g. `gpt-6-astra`) appear in discovery and accept requests.
+
+### Fixed
+
+- Fixed `omp models refresh` silently keeping a stale OpenAI Codex catalog when one stored ChatGPT account's token had been revoked; the rejected account is now skipped and the remaining accounts' models are unioned.
+
+## [18.1.6] - 2026-09-03
+
+### Added
+
+- Added catalog-delivered model intelligence scores and estimated output throughput to help compare model capabilities and performance.
 
 ### Changed
 
