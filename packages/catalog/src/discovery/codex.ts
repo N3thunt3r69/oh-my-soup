@@ -27,6 +27,25 @@ const CODEX_REMOTE_COMPACTION = {
 	v2StreamingEnabled: true,
 } as const;
 
+/** Curated fallback for fresh/offline Codex installs. */
+export const CODEX_ASTRA_FALLBACK_MODEL: ModelSpec<"openai-codex-responses"> = {
+	id: "gpt-6-astra",
+	name: "GPT-6 Astra",
+	api: "openai-codex-responses",
+	provider: "openai-codex",
+	baseUrl: CODEX_BASE_URL,
+	reasoning: true,
+	input: ["text", "image"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	remoteCompaction: CODEX_REMOTE_COMPACTION,
+	contextWindow: DEFAULT_CONTEXT_WINDOW,
+	maxTokens: DEFAULT_MAX_TOKENS,
+	preferWebsockets: true,
+	useResponsesLite: true,
+	toolMode: "code_mode_only",
+	priority: 1,
+};
+
 const codexReasoningPresetSchema = type({
 	"effort?": "unknown",
 });

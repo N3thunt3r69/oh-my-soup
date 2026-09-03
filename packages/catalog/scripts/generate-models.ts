@@ -18,6 +18,7 @@ import { getGitLabDuoModels } from "@oh-my-soup/pi-ai/providers/gitlab-duo";
 import { getProviderDefinition } from "@oh-my-soup/pi-ai/registry";
 import { $env } from "@oh-my-soup/pi-utils";
 import { ANTIGRAVITY_PRIMARY_ENDPOINT, fetchAntigravityDiscoveryModels } from "../src/discovery/antigravity";
+import { CODEX_ASTRA_FALLBACK_MODEL } from "../src/discovery/codex";
 import { buildGitLabDuoWorkflowFallbackModel } from "../src/discovery/gitlab-duo-workflow";
 import { createModelManager } from "../src/model-manager";
 import prevModelsJson from "../src/models.json" with { type: "json" };
@@ -284,6 +285,7 @@ function applyCodexPricingFallback(models: readonly ModelSpec[]): ModelSpec[] {
 		if (model.provider !== "openai-codex" || model.api !== "openai-codex-responses") {
 			return model;
 		}
+		if (model.id === CODEX_ASTRA_FALLBACK_MODEL.id) return model;
 		if (hasBillableCost(model.cost)) {
 			return model;
 		}
@@ -626,6 +628,9 @@ async function generateModels() {
 				authoritativeSpecialDiscoveryProviders.add(discovery.providerId);
 			}
 		}
+	}
+	if (!allModels.some(model => model.provider === "openai-codex" && model.id === CODEX_ASTRA_FALLBACK_MODEL.id)) {
+		allModels.push(CODEX_ASTRA_FALLBACK_MODEL);
 	}
 
 	const modelsDevSnapshotExcludedProviders = new Set<string>();
