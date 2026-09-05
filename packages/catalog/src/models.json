@@ -73645,8 +73645,6 @@
 			"preferWebsockets": true,
 			"useResponsesLite": true,
 			"toolMode": "code_mode_only",
-			"toolMode": "code_mode_only",
-			"toolMode": "code_mode_only",
 			"priority": 3,
 			"applyPatchToolType": "freeform",
 			"thinking": {
@@ -73726,6 +73724,46 @@
 			"preferWebsockets": true,
 			"useResponsesLite": true,
 			"priority": 2,
+			"applyPatchToolType": "freeform",
+			"thinking": {
+				"mode": "effort",
+				"efforts": [
+					"low",
+					"medium",
+					"high",
+					"xhigh",
+					"max"
+				]
+			}
+		},
+		"gpt-6-astra": {
+			"id": "gpt-6-astra",
+			"name": "GPT-6 Astra",
+			"api": "openai-codex-responses",
+			"provider": "openai-codex",
+			"baseUrl": "https://chatgpt.com/backend-api",
+			"reasoning": true,
+			"input": [
+				"text",
+				"image"
+			],
+			"cost": {
+				"input": 0,
+				"output": 0,
+				"cacheRead": 0,
+				"cacheWrite": 0
+			},
+			"remoteCompaction": {
+				"enabled": true,
+				"api": "openai-codex-responses",
+				"v2StreamingEnabled": true
+			},
+			"contextWindow": 272000,
+			"maxTokens": 128000,
+			"preferWebsockets": true,
+			"useResponsesLite": true,
+			"toolMode": "code_mode_only",
+			"priority": 1,
 			"applyPatchToolType": "freeform",
 			"thinking": {
 				"mode": "effort",
@@ -104415,7 +104453,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.5-air": {
 			"id": "glm-4.5-air",
@@ -104444,7 +104483,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.5-flash": {
 			"id": "glm-4.5-flash",
@@ -104473,7 +104513,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.5v": {
 			"id": "glm-4.5v",
@@ -104503,7 +104544,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.6": {
 			"id": "glm-4.6",
@@ -104532,7 +104574,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.6v": {
 			"id": "glm-4.6v",
@@ -104562,7 +104605,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.7": {
 			"id": "glm-4.7",
@@ -104591,7 +104635,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.7-flash": {
 			"id": "glm-4.7-flash",
@@ -104620,7 +104665,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-4.7-flashx": {
 			"id": "glm-4.7-flashx",
@@ -104649,7 +104695,8 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"supportsComputerUse": false
 		},
 		"glm-5": {
 			"id": "glm-5",
@@ -104678,7 +104725,9 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"tokenizer": "glm5",
+			"supportsComputerUse": false
 		},
 		"glm-5-turbo": {
 			"id": "glm-5-turbo",
@@ -104707,7 +104756,9 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"tokenizer": "glm5",
+			"supportsComputerUse": false
 		},
 		"glm-5.1": {
 			"id": "glm-5.1",
@@ -104736,7 +104787,9 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"tokenizer": "glm5",
+			"supportsComputerUse": false
 		},
 		"glm-5.2": {
 			"id": "glm-5.2",
@@ -104762,7 +104815,9 @@
 					"high",
 					"max"
 				]
-			}
+			},
+			"tokenizer": "glm5",
+			"supportsComputerUse": false
 		},
 		"glm-5.3": {
 			"id": "glm-5.3",
@@ -104789,7 +104844,9 @@
 					"high",
 					"max"
 				]
-			}
+			},
+			"tokenizer": "glm5",
+			"supportsComputerUse": false
 		},
 		"glm-5.3-flash": {
 			"id": "glm-5.3-flash",
@@ -104819,7 +104876,9 @@
 				],
 				"defaultLevel": "max",
 				"requiresEffort": true
-			}
+			},
+			"tokenizer": "glm5",
+			"supportsComputerUse": false
 		},
 		"glm-5v-turbo": {
 			"id": "glm-5v-turbo",
@@ -104849,7 +104908,9 @@
 					"high",
 					"xhigh"
 				]
-			}
+			},
+			"tokenizer": "glm5",
+			"supportsComputerUse": false
 		}
 	},
 	"zenmux": {

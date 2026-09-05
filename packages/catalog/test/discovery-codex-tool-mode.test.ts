@@ -43,9 +43,9 @@ describe("codex discovery tool_mode", () => {
 		}
 	});
 
-	test("bundles Code Mode flags for offline GPT-5.6 fallbacks", () => {
-		for (const id of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]) {
-			expect(getBundledModel("openai-codex", id)?.toolMode).toBe("code_mode_only");
-		}
+	test("bundles Code Mode metadata for the offline GPT-6 Astra fallback", () => {
+		const astra = getBundledModel("openai-codex", "gpt-6-astra");
+		expect(astra?.toolMode).toBe("code_mode_only");
+		expect(astra?.applyPatchToolType).toBe("freeform");
 	});
 });
