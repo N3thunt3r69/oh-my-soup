@@ -1,4 +1,4 @@
-import { logger, once } from "@oh-my-pi/pi-utils";
+import { logger, once } from "@oh-my-soup/pi-utils";
 import { type CodexModelDiscoveryResult, fetchCodexModels } from "../discovery/codex";
 import type { DevinModelDiscoveryOptions } from "../discovery/devin";
 import { buildGitLabDuoWorkflowFallbackModel, fetchGitLabDuoWorkflowModels } from "../discovery/gitlab-duo-workflow";

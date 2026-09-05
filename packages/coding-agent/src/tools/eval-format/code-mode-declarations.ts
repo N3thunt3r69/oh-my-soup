@@ -2,7 +2,7 @@
  * Generate the TypeScript declaration block advertising eval-bridged tools
  * under Codex Code Mode, mirroring codex-rs augment_tool_spec_for_code_mode.
  */
-import { arkToWireSchema, isArkSchema } from "@oh-my-pi/pi-ai/utils/schema/wire";
+import { arkToWireSchema, isArkSchema } from "@oh-my-soup/pi-ai/utils/schema/wire";
 
 interface JsonSchema {
 	type?: string;
