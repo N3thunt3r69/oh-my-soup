@@ -49,6 +49,7 @@ import { openaiProvider } from "./openai";
 import { openaiCodexProvider } from "./openai-codex";
 import { openaiCodexDeviceProvider } from "./openai-codex-device";
 import { opencodeGoProvider } from "./opencode-go";
+import { openaiPrismProvider } from "./openai-prism";
 import { opencodeZenProvider } from "./opencode-zen";
 import { openrouterProvider } from "./openrouter";
 import { parallelProvider } from "./parallel";
@@ -87,8 +88,9 @@ import { zhipuCodingPlanProvider } from "./zhipu-coding-plan";
  */
 const ALL = [
 	azureProvider,
-	openaiCodexProvider,
 	anthropicProvider,
+	openaiCodexProvider,
+	openaiPrismProvider,
 	zaiProvider,
 	zaiCodingPlanProvider,
 	kimiCodeProvider,

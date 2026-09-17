@@ -150,7 +150,6 @@ import type { AuthStorage } from "./session/auth-storage";
 import { createInterruptedTurnAbortMessage } from "./session/exit-diagnostics";
 import {
 	assertImportantNotesFit,
-	countImportantNotesReferenceTokens,
 	ImportantNotesContext,
 	type ImportantNotesProjection,
 } from "./session/important-notes-context";
@@ -3224,13 +3223,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					: undefined,
 				obfuscator,
 			});
-			const referenceTokens = countImportantNotesReferenceTokens(branch, agent.tokenizer, obfuscator);
-			assertImportantNotesFit(
-				nonMessageTokens + agent.tokenizer.countMessages(projection.messages, { excludeEncryptedReasoning: true }),
-				referenceTokens,
-				activeModel,
-				compaction,
-			);
+			const referenceTokens = projection.referenceTokens;
+			// Refuse dispatch only when the irreducible floor — prompt overhead plus
+			// the notes reference — could not fit even an empty history. A request
+			// that is merely over budget is left to pre-prompt / mid-run maintenance
+			// (which prunes tool results and compacts while preserving notes) and to
+			// provider overflow recovery; failing it here would strand the session
+			// behind a manual /compact.
+			assertImportantNotesFit(nonMessageTokens + referenceTokens, referenceTokens, activeModel, compaction);
 			if (primary) {
 				session.recordImportantNotesReferenceTokens(referenceTokens);
 				pendingNotesProjection = projection;

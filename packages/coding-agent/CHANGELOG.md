@@ -2,10 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an optional `think` scratchpad tool for models, including native-reasoning models such as Astra; native provider reasoning remains enabled and preferred. Streamed `<thinking>`, `<think>`, and `<scratchpad>` sections use the same thinking presentation without creating a second tool call or leaking raw tags into the final answer.
+- Added OpenAI Prism (`prism.openai.com`) as a built-in provider with `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-terra`. `/login` collects a signed-in browser `Cookie` header plus a dedicated Prism project, and `PRISM_COOKIE` configures it from the environment. Server-registered conversations preserve native history across turns and session reloads; local tools use the in-band XML dialect. Existing histories without a Prism conversation pointer require a new session.
+
 ### Fixed
 
 - Fixed transient HUD/status panels leaking into scrollback and duplicating transcript lines when rapid updates grow or collapse panels beyond the viewport.
 - Stopped terminal-title spinner traffic over SSH while preserving immediate working, idle, attention, and session-title updates.
+- Changed Prism's default model to GPT-5.6 Sol and preserved validated upstream HTTP status codes in model-specific failure messages without exposing backend credentials or diagnostics.
+- Stopped over-budget requests with saved important notes from failing with "Important notes cannot fit the safe context budget" and demanding manual `/compact`. Pre-prompt maintenance now recovers automatically — pruning stale tool outputs, eliding heavy tool results to an artifact, dropping images, and finally compacting — always preserving the saved notes; the hard error remains only when the notes reference plus prompt overhead cannot fit even an empty history, and its message now distinguishes exhausted recovery (with notes-preserving remedies) from that irreducible case.
+- Memoized the rendered important-notes reference per saved snapshot so context estimates, budget checks, and request projections stop re-encoding and re-counting the full reference on every call; projections receive isolated per-request copies, and handoff-carried snapshots reuse the same render.
 
 ## [17.5.1] - 2026-09-12
 

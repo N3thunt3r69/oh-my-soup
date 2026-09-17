@@ -234,6 +234,7 @@ describe("Code Mode session startup", () => {
 
 		const active = session.getActiveToolNames();
 		expect(active).toContain("eval");
+		expect(active).toContain("think");
 		expect(active).not.toContain("read");
 		expect(active).not.toContain("bash");
 		// Demoted tools stay enabled and bridge-reachable instead of vanishing.
@@ -244,6 +245,13 @@ describe("Code Mode session startup", () => {
 		const info = session.codeModeNamespacesInfo as ToolNamespacesInfo;
 		expect(info.functions.functions.eval.direct).toBe(true);
 		expect(info.functions.functions.read.direct).toBe(false);
+		expect(info.functions.functions.think).toEqual({
+			name: "think",
+			direct: true,
+			code_mode_name: "think",
+			deferred: false,
+			source: { kind: "harness" },
+		});
 	});
 
 	test("fresh session with code mode off keeps the direct surface and no namespaces info", async () => {

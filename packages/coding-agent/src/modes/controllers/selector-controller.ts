@@ -483,9 +483,10 @@ export class SelectorController {
 					this.ctx.showError(`Failed to apply vision mode: ${err}`);
 				});
 				break;
+			case "thinkingTool.enabled":
 			case "externalThinking":
-				void this.ctx.session.setThinkToolEnabled(value as boolean).catch(err => {
-					this.ctx.showError(`Failed to apply external thinking: ${err}`);
+				void this.ctx.session.setThinkToolEnabled(this.ctx.settings.get("thinkingTool.enabled")).catch(err => {
+					this.ctx.showError(`Failed to apply thinking tool setting: ${err}`);
 				});
 				break;
 

@@ -1166,14 +1166,27 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"thinkingTool.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "model",
+			group: "Thinking",
+			label: "Thinking Tool",
+			description:
+				"Offer an optional scratchpad tool alongside the selected model; native provider reasoning remains preferred",
+		},
+	},
+
 	externalThinking: {
 		type: "boolean",
 		default: false,
 		ui: {
 			tab: "model",
 			group: "Thinking",
-			label: "External Thinking",
-			description: "Private scratchpad; not shown to user. Disables supported GPT, Claude, and Gemini reasoning",
+			label: "Replace Native Thinking",
+			description:
+				"Force the scratchpad tool and disable native reasoning on supported GPT, Claude, and Gemini transports",
 		},
 	},
 

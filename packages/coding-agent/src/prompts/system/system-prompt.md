@@ -96,7 +96,9 @@ Write JSON args as `content` to `xd://<tool>` via `{{toolRefs.write}}`. Invalid 
 
 {{#has tools "think"}}
 § Scratchpad
-`{{toolRefs.think}}`: private scratchpad; not shown to user.
+`{{toolRefs.think}}`: optional scratch work before continuing; visible as thinking activity, never part of the final answer.
+- Prefer native provider reasoning when available. Use this tool only when an explicit scratchpad helps.
+- In-band `<thinking>`, `<think>`, and `<scratchpad>` sections enter the same thinking channel automatically. NEVER repeat them through this tool.
 {{/has}}
 
 § Tool Policy

@@ -4719,7 +4719,7 @@ export class AgentSession {
 		return this.#tools.setComputerToolEnabled(enabled);
 	}
 
-	/** Applies the external-thinking setting to the private scratchpad tool immediately. */
+	/** Applies scratchpad-tool and external-thinking settings to the active model contract. */
 	setThinkToolEnabled(enabled: boolean): Promise<boolean> {
 		return this.#tools.setThinkToolEnabled(enabled);
 	}
@@ -7403,11 +7403,6 @@ export class AgentSession {
 			await this.#tools.reconcileInspectImageAfterModelChange();
 		} catch (error) {
 			logger.warn("inspect_image reconcile after model change failed", { error: String(error) });
-		}
-		try {
-			await this.#tools.reconcileThinkTool();
-		} catch (error) {
-			logger.warn("think tool reconcile after model change failed", { error: String(error) });
 		}
 	}
 

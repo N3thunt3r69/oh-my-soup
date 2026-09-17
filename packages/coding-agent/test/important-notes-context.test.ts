@@ -92,6 +92,29 @@ describe("important notes request projection", () => {
 		expect(reminders(deliver(context, [], options(manager, { nonMessageTokens: 9000 })))).toHaveLength(0);
 	});
 
+	it("projects isolated reference copies from one snapshot and re-renders only on change", () => {
+		const manager = SessionManager.inMemory();
+		save(manager, [{ key: "server", text: "bun run dev --port 8123" }]);
+		const context = new ImportantNotesContext();
+		const quiet = () => options(manager, { branch: manager.getBranch() });
+		const first = context.transform([], quiet());
+		const firstReference = first.messages.at(-1);
+		if (firstReference?.role !== "user") throw new Error("Expected the reference tail");
+		expect(firstReference.attribution).toBe("user");
+		expect(first.referenceTokens).toBeGreaterThan(0);
+		// Request-local copies: corrupting one projection must not leak into the
+		// next render (or the memoized count) of the same saved snapshot.
+		firstReference.content = "tampered";
+		const second = context.transform([], quiet());
+		expect(second.referenceTokens).toBe(first.referenceTokens);
+		expect(referenceNotes(second.messages)).toEqual([{ key: "server", text: "bun run dev --port 8123" }]);
+		// A new snapshot invalidates the memo and renders the updated notes.
+		save(manager, [{ key: "server", text: "bun run dev --port 8124" }]);
+		expect(referenceNotes(context.transform([], quiet()).messages)).toEqual([
+			{ key: "server", text: "bun run dev --port 8124" },
+		]);
+	});
+
 	it("preserves normalized request initiators across user references and developer reminders", () => {
 		const manager = SessionManager.inMemory();
 		save(manager, [{ key: "command", text: "bun run dev" }]);

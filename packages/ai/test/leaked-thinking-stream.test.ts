@@ -120,6 +120,24 @@ describe("wrapLeakedThinkingStream", () => {
 		});
 	}
 
+	for (const [open, close] of [
+		["<thinking>", "</thinking>"],
+		["<think>", "</think>"],
+		["<scratchpad>", "</scratchpad>"],
+	] as const) {
+		it(`projects streamed ${open} into thinking without synthesizing a tool call`, async () => {
+			const input = `Visible before. ${open}scratch work${close} Visible after.`;
+			const { result } = await runLeakedText([...input]);
+
+			expect(result.content.map(block => block.type)).toEqual(["text", "thinking", "text"]);
+			expect(texts(result)).toEqual(["Visible before. ", " Visible after."]);
+			expect(thinks(result).map(block => block.thinking)).toEqual(["scratch work"]);
+			expect(result.content.some(block => block.type === "toolCall")).toBe(false);
+			expect(texts(result).join("")).not.toContain(open);
+			expect(texts(result).join("")).not.toContain(close);
+		});
+	}
+
 	it("splits a leaked fence into structured blocks live during streaming", async () => {
 		const leaked = "Visible before.```thinking\nplan\n```Visible after.";
 		const { events, result } = await runWrapper(inner => {

@@ -1,5 +1,9 @@
 import type { AgentMessage } from "@oh-my-soup/pi-agent-core";
-import { coerceServiceTierByFamily, type ProviderPayload, type ServiceTierByFamily } from "@oh-my-soup/pi-ai";
+import {
+	coerceServiceTierByFamily,
+	type OpenAIResponsesHistoryPayload,
+	type ServiceTierByFamily,
+} from "@oh-my-soup/pi-ai";
 import * as snapcompact from "@oh-my-soup/snapcompact";
 import {
 	createBranchSummaryMessage,
@@ -158,7 +162,7 @@ function snapcompactHistoryBlocksForContext(
 
 export function getOpenAiRemoteCompactionPayload(
 	compaction: CompactionEntry | null | undefined,
-): ProviderPayload | undefined {
+): OpenAIResponsesHistoryPayload | undefined {
 	const candidate = compaction?.preserveData?.openaiRemoteCompaction;
 	if (!candidate || typeof candidate !== "object") return undefined;
 	const remote = candidate as { provider?: unknown; replacementHistory?: unknown };

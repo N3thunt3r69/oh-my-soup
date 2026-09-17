@@ -62,6 +62,7 @@ import {
 	streamOllama,
 	streamOpenAICodexResponses,
 	streamOpenAICompletions,
+	streamOpenAIPrism,
 	streamOpenAIResponses,
 } from "./providers/register-builtins";
 import { isSyntheticModel, streamSynthetic } from "./providers/synthetic";
@@ -1009,6 +1010,13 @@ function streamDispatch<TApi extends Api>(
 
 		case "ollama-chat":
 			return streamOllama(providerModel as Model<"ollama-chat">, context, providerOptions as OllamaChatOptions);
+
+		case "openai-prism":
+			return streamOpenAIPrism(
+				providerModel as Model<"openai-prism">,
+				context,
+				providerOptions as OptionsForApi<"openai-prism">,
+			);
 
 		case "cursor-agent":
 			return streamCursor(providerModel as Model<"cursor-agent">, context, providerOptions as CursorOptions);
@@ -2306,6 +2314,17 @@ function mapOptionsForApi<TApi extends Api>(
 				reasoning: resolveOpenAiReasoningEffort(model, options),
 				disableReasoning: options?.disableReasoning,
 				toolChoice: options?.toolChoice,
+			});
+
+		case "openai-prism":
+			return castApi<"openai-prism">({
+				...base,
+				reasoning:
+					options?.reasoning && model.reasoning && !options.disableReasoning && !options.forceReasoningOff
+						? options.reasoning
+						: undefined,
+				toolChoice: options?.toolChoice,
+				hideThinkingSummary: options?.hideThinkingSummary,
 			});
 
 		case "cursor-agent": {

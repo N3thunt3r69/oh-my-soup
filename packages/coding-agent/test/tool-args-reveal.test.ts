@@ -280,6 +280,21 @@ describe("tool args reveal", () => {
 		expect(partialOf(second)).toBe(grown);
 	});
 
+	it("keeps streamed think scratchpads fresh below the JSON parse throttle", () => {
+		const { controller } = makeController({ smooth: false });
+		const initialThoughts = "x".repeat(STREAMING_JSON_PARSE_MIN_GROWTH + 24);
+		const seed = `{"thoughts":"${initialThoughts}`;
+		const grown = `${seed} reconsider`;
+		const keys = streamingStringKeysForTool("think", false);
+
+		const first = controller.setTarget("call-think", seed, jsonTarget({ streamingStringKeys: keys }));
+		expect(first.thoughts).toBe(initialThoughts);
+
+		const second = controller.setTarget("call-think", grown, jsonTarget({ streamingStringKeys: keys }));
+		expect(second.thoughts).toBe(`${initialThoughts} reconsider`);
+		expect(partialOf(second)).toBe(grown);
+	});
+
 	it("finish drops the reveal so no further frames are pushed", () => {
 		vi.useFakeTimers();
 		const { component, controller } = makeController();

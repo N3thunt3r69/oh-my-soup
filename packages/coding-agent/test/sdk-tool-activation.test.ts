@@ -157,12 +157,13 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
-	it("activates the private think tool when external thinking is enabled at runtime", async () => {
+	it("activates the optional think tool at runtime for a model without native reasoning", async () => {
 		const tempDir = makeTempDir();
-		const settings = Settings.isolated();
+		const settings = Settings.isolated({ "thinkingTool.enabled": false });
+		const model = { ...requireBundledModel("openai", "gpt-5"), reasoning: false };
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
-			model: requireBundledModel("openai", "gpt-5"),
+			model,
 			settings,
 		});
 
@@ -170,14 +171,14 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getToolByName("think")).toBeUndefined();
 			expect(session.getActiveToolNames()).not.toContain("think");
 
-			settings.set("externalThinking", true);
+			settings.set("thinkingTool.enabled", true);
 			await session.setThinkToolEnabled(true);
 
 			expect(session.getToolByName("think")).toBeDefined();
 			expect(session.getActiveToolNames()).toContain("think");
 			expect(session.getXdevToolEntries().map(entry => entry.name)).not.toContain("think");
 
-			settings.set("externalThinking", false);
+			settings.set("thinkingTool.enabled", false);
 			await session.setThinkToolEnabled(false);
 			expect(session.getActiveToolNames()).not.toContain("think");
 		} finally {
@@ -185,7 +186,79 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
-	it("exposes the private think tool only on transports that can disable native reasoning", async () => {
+	it("keeps the optional think tool available across native reasoning model switches", async () => {
+		const tempDir = makeTempDir();
+		const nativeModel = getBundledModel("openai-codex", "gpt-6-astra");
+		if (!nativeModel) throw new Error("Expected bundled Astra model");
+		const settings = Settings.isolated();
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			model: nativeModel,
+			settings,
+		});
+		session.modelRegistry.authStorage.setRuntimeApiKey("openai-codex", "test-key");
+		const mock = createMockModel({ responses: [{ content: ["Done."] }] });
+		vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
+
+		try {
+			expect(session.getActiveToolNames()).toContain("think");
+			expect(session.systemPrompt.join("\n")).toContain("Prefer native provider reasoning when available");
+			await session.prompt("Check the Astra tool contract.");
+			expect(mock.calls).toHaveLength(1);
+			expect(mock.calls[0]?.context.tools?.map(tool => tool.name)).toContain("think");
+			expect(mock.calls[0]?.options?.toolChoice).toBeUndefined();
+
+			await session.setModel({ ...nativeModel, reasoning: false });
+			expect(session.getActiveToolNames()).toContain("think");
+
+			await session.setModel(nativeModel);
+			expect(session.getActiveToolNames()).toContain("think");
+		} finally {
+			await session.dispose();
+		}
+	});
+	it("lets a non-reasoning model use think without forcing the tool choice", async () => {
+		const tempDir = makeTempDir();
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{
+							type: "toolCall",
+							id: "optional-think-1",
+							name: "think",
+							arguments: { thoughts: "Compare the two state transitions." },
+						},
+					],
+				},
+				{ content: ["Done."] },
+			],
+		});
+		registryAuthStorage.setRuntimeApiKey("openai", "test-key");
+		const { session } = await createAgentSession(baseOptions(tempDir));
+		vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
+
+		try {
+			await session.prompt("Check the transition before answering.");
+			expect(mock.calls).toHaveLength(2);
+			expect(mock.calls[0]?.context.tools?.map(tool => tool.name)).toContain("think");
+			expect(mock.calls[0]?.options?.toolChoice).toBeUndefined();
+			const result = session.messages.find(
+				(message): message is ToolResultMessage =>
+					message.role === "toolResult" && message.toolCallId === "optional-think-1",
+			);
+			expect(result?.content).toEqual([{ type: "text", text: "Continue." }]);
+			expect(session.messages.at(-1)).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "Done." }],
+			});
+		} finally {
+			await session.dispose();
+			registryAuthStorage.removeRuntimeApiKey("openai");
+		}
+	});
+
+	it("keeps the optional think tool available when external replacement is unsupported", async () => {
 		const tempDir = makeTempDir();
 		const settings = Settings.isolated({ externalThinking: true });
 		const unsupported = requireBundledModel("xai", "grok-4");
@@ -203,25 +276,29 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		authStorage.setRuntimeApiKey("openai", "test-key");
 		authStorage.setRuntimeApiKey("google", "test-key");
 		authStorage.setRuntimeApiKey("xai", "test-key");
+		const mock = createMockModel({ responses: [{ content: ["Done."] }] });
+		vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
 
 		try {
-			expect(session.getActiveToolNames()).not.toContain("think");
+			expect(session.getActiveToolNames()).toContain("think");
+			expect(session.systemPrompt.join("\n")).toContain("visible as thinking activity");
+			await session.prompt("Keep native reasoning when replacement is unsupported.");
+			expect(mock.calls).toHaveLength(1);
+			expect(mock.calls[0]?.context.tools?.map(tool => tool.name)).toContain("think");
+			expect(mock.calls[0]?.options?.toolChoice).toBeUndefined();
 
 			await session.setModel(fable);
 			expect(session.getToolByName("think")).toBeDefined();
 			expect(session.getActiveToolNames()).toContain("think");
-			expect(session.systemPrompt.join("\n")).toContain("private scratchpad; not shown to user");
-
 			await session.setModel(responses);
 			expect(session.getActiveToolNames()).toContain("think");
 			await session.setModel(gemini);
 			expect(session.getActiveToolNames()).toContain("think");
 			await session.setModel(mandatoryGemini);
-			expect(session.getActiveToolNames()).not.toContain("think");
+			expect(session.getActiveToolNames()).toContain("think");
 
 			await session.setModel(unsupported);
-			expect(session.getActiveToolNames()).not.toContain("think");
-			expect(session.systemPrompt.join("\n")).not.toContain("private scratchpad; not shown to user");
+			expect(session.getActiveToolNames()).toContain("think");
 		} finally {
 			await session.dispose();
 		}

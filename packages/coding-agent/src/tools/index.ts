@@ -516,8 +516,10 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 			: undefined;
 	const goalEnabled = session.settings.get("goal.enabled");
 	const goalModeActive = !restrictToolNames && goalEnabled && session.getGoalModeState?.()?.enabled === true;
-	const externalThinkingActive =
-		session.settings.get("externalThinking") && supportsExternalThinking(session.getActiveModel?.());
+	const activeModel = session.getActiveModel?.();
+	const externalThinking = session.settings.get("externalThinking");
+	const thinkToolEnabled = session.settings.get("thinkingTool.enabled");
+	const externalThinkingActive = externalThinking && supportsExternalThinking(activeModel);
 	if (goalModeActive && requestedTools && !requestedTools.includes("goal")) {
 		requestedTools.push("goal");
 	}
@@ -664,7 +666,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "inspect_image") return isInspectImageToolActive(session);
 		if (name === "web_search") return session.settings.get("web_search.enabled");
 		if (name === "security_scan") return session.settings.get("security.enabled");
-		if (name === "think") return externalThinkingActive;
+		if (name === "think") return thinkToolEnabled;
 		if (name === "ask") return session.settings.get("ask.enabled");
 		if (name === "browser") return session.settings.get("browser.enabled");
 		if (name === "computer") return session.settings.get("computer.enabled");
@@ -711,7 +713,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 					...Object.entries(BUILTIN_TOOLS)
 						.filter(([name]) => isToolAllowed(name))
 						.map(([name, factory]) => [name, factory] as const),
-					...(externalThinkingActive ? ([["think", HIDDEN_TOOLS.think]] as const) : []),
+					...(thinkToolEnabled ? ([["think", HIDDEN_TOOLS.think]] as const) : []),
 					...(includeYield ? ([["yield", HIDDEN_TOOLS.yield]] as const) : []),
 					...(goalModeActive ? ([["goal", HIDDEN_TOOLS.goal]] as const) : []),
 				];

@@ -67,7 +67,7 @@ import type { ConfiguredThinkingLevel } from "../thinking";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ContextUsageBreakdown, HandoffResult, SessionHandoffOptions } from "./agent-session-types";
 import { findCompactMode } from "./compact-modes";
-import { assertImportantNotesFit } from "./important-notes-context";
+import { assertImportantNotesFit, importantNotesFit } from "./important-notes-context";
 import { convertToLlm, stripImagesFromMessage } from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
 import {
@@ -1096,7 +1096,7 @@ export class SessionMaintenance {
 		);
 	}
 
-	#assertImportantNotesFit(contextTokens: number): void {
+	#assertImportantNotesFit(contextTokens: number, attemptedRecovery = false): void {
 		const model = this.#model;
 		if (!model) return;
 		assertImportantNotesFit(
@@ -1104,7 +1104,84 @@ export class SessionMaintenance {
 			this.#host.importantNotesReferenceTokens(),
 			model,
 			this.#host.settings.getGroup("compaction"),
+			{ attemptedRecovery },
 		);
+	}
+
+	/**
+	 * Saved notes are never the thing sacrificed to context pressure. When the
+	 * projected request (history + pending prompt + the notes reference) exceeds
+	 * the safe budget, reclaim room from tool results before surfacing an error:
+	 * the per-turn prune passes first, then the tiered dead-end rescue (elide
+	 * heavy tool results/blocks to an artifact, drop images), then — when the
+	 * caller allows it and a cut point exists — a summary compaction. Only when
+	 * every tier leaves the request over budget does the hard assert fire.
+	 *
+	 * Fit re-tests use the LOCAL stored estimate exclusively: it measures the
+	 * request that will actually be rebuilt from the rewritten branch. The
+	 * provider-anchored breakdown cannot shrink after a prune/elide rewrite until
+	 * the next billed turn, so it would falsely fail every re-test and escalate
+	 * (or throw) on history the rewrite already reclaimed.
+	 */
+	async #recoverImportantNotesFit(pendingMessages: AgentMessage[], allowCompaction: boolean): Promise<void> {
+		const model = this.#model;
+		if (!model) return;
+		const compactionSettings = this.#host.settings.getGroup("compaction");
+		const fits = () =>
+			importantNotesFit(
+				this.#estimateStoredContextTokens(pendingMessages),
+				this.#host.importantNotesReferenceTokens(),
+				model,
+				compactionSettings,
+			);
+		if (fits()) return;
+		logger.debug("Important-notes fit recovery started", {
+			contextTokens: this.#estimateStoredContextTokens(pendingMessages),
+			referenceTokens: this.#host.importantNotesReferenceTokens(),
+			contextWindow: model.contextWindow,
+			model: `${model.provider}/${model.id}`,
+			allowCompaction,
+		});
+		await this.#pruneStaleToolResults();
+		await this.#pruneToolOutputs();
+		if (fits()) {
+			logger.debug("Important-notes fit recovered by per-turn pruning");
+			return;
+		}
+		// Same controller discipline as runAutoCompaction: user aborts reach the
+		// rescue, and isCompacting holds while history may be rewritten.
+		this.#autoCompactionAbortController?.abort();
+		const controller = new AbortController();
+		this.#autoCompactionAbortController = controller;
+		let rescued = false;
+		try {
+			rescued = await this.#rescueCompactionDeadEnd(controller.signal, {
+				skipElide: false,
+				hasProgress: fits,
+			});
+		} finally {
+			if (this.#autoCompactionAbortController === controller) {
+				this.#autoCompactionAbortController = undefined;
+			}
+		}
+		if (rescued || fits() || controller.signal.aborted) return;
+		if (
+			allowCompaction &&
+			compactionSettings.enabled &&
+			compactionSettings.strategy !== "off" &&
+			prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model, this.#tokenizer) !==
+				undefined
+		) {
+			// The elide tier above may have created the very cut point this
+			// summary needs (it shrinks the kept tail findCutPoint cannot split).
+			await this.runAutoCompaction("threshold", false, false, false, {
+				autoContinue: false,
+				triggerContextTokens: this.#estimateStoredContextTokens(pendingMessages),
+				phase: "pre_turn",
+			});
+			if (fits()) return;
+		}
+		this.#assertImportantNotesFit(this.#estimateStoredContextTokens(pendingMessages), true);
 	}
 
 	/**
@@ -1150,7 +1227,7 @@ export class SessionMaintenance {
 		const pendingMidTurnDeadEnd = this.#midTurnDeadEndPendingPrePrompt;
 		this.#midTurnDeadEndPendingPrePrompt = false;
 		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) {
-			this.#assertImportantNotesFit(contextTokens);
+			await this.#recoverImportantNotesFit(messages, true);
 			return;
 		}
 		if (
@@ -1158,10 +1235,12 @@ export class SessionMaintenance {
 			prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model, this.#tokenizer) ===
 				undefined
 		) {
-			// The prior tool loop already attempted the rescue and warned for this
-			// persisted oversized turn. Only a later persisted cut point makes a
-			// pre-prompt retry useful; the new agent loop may warn for its own turn.
-			this.#assertImportantNotesFit(contextTokens);
+			// The prior tool loop already attempted the compaction rescue for this
+			// persisted oversized turn; a summary pass has no cut point until a
+			// later persisted turn provides one. Saved notes must still fit the
+			// next request, so reclaim room from tool results (an elide can itself
+			// create the missing cut point) instead of failing the prompt.
+			await this.#recoverImportantNotesFit(messages, true);
 			return;
 		}
 
@@ -1175,7 +1254,7 @@ export class SessionMaintenance {
 				contextWindow,
 				model: `${model.provider}/${model.id}`,
 			});
-			this.#assertImportantNotesFit(this.#estimatePrePromptContextTokens(messages, this.#model?.contextWindow ?? 0));
+			await this.#recoverImportantNotesFit(messages, true);
 			return;
 		}
 
@@ -1193,7 +1272,7 @@ export class SessionMaintenance {
 			triggerContextTokens: contextTokens,
 			phase: "pre_turn",
 		});
-		this.#assertImportantNotesFit(this.#estimatePrePromptContextTokens(messages, this.#model?.contextWindow ?? 0));
+		await this.#recoverImportantNotesFit(messages, false);
 	}
 
 	/**

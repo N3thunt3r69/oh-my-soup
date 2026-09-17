@@ -47,6 +47,7 @@ import nvidia from "./nvidia.json.txt";
 import ollamaCloud from "./ollama-cloud.json.txt";
 import openai from "./openai.json.txt";
 import openaiCodex from "./openai-codex.json.txt";
+import openaiPrism from "./openai-prism.json.txt";
 import opencode from "./opencode.json.txt";
 import opencodeGo from "./opencode-go.json.txt";
 import opencodeZen from "./opencode-zen.json.txt";
@@ -114,6 +115,7 @@ export const MODEL_CHUNKS: Record<string, string> = {
 	"ollama-cloud": ollamaCloud,
 	openai,
 	"openai-codex": openaiCodex,
+	"openai-prism": openaiPrism,
 	opencode,
 	"opencode-go": opencodeGo,
 	"opencode-zen": opencodeZen,

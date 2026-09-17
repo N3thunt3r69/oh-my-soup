@@ -21,7 +21,6 @@ import { usesCodexTaskPrompt } from "../task/prompt-policy";
 import { isMCPToolName, normalizeToolNames } from "../tools/builtin-names";
 import { computerExposureMode } from "../tools/computer/exposure";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
-import { supportsExternalThinking } from "../tools/think";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
 import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
@@ -72,7 +71,7 @@ interface SessionToolsOptions {
 	toolRegistry?: Map<string, AgentTool>;
 	createVibeTools?: () => AgentTool[];
 	createComputerTool?: () => Promise<AgentTool | null>;
-	/** Creates the private `think` scratchpad tool for runtime setting changes. */
+	/** Creates the optional `think` scratchpad tool for runtime setting changes. */
 	createThinkTool?: () => Promise<AgentTool | null>;
 	/** Creates the built-in `inspect_image` tool for session-scoped runtime enablement (see {@link SessionTools.setInspectImageMode}). */
 	createInspectImageTool?: () => Promise<AgentTool | null>;
@@ -1275,22 +1274,17 @@ export class SessionTools {
 	}
 
 	/**
-	 * Session-scoped enable/disable for the private `think` scratchpad tool.
+	 * Session-scoped enable/disable for the optional `think` scratchpad tool.
 	 *
-	 * Enabling constructs the tool once and refreshes the model's tool contract;
-	 * disabling removes it from the active set while preserving its registry entry.
+	 * Enabling constructs the tool once and refreshes the model contract;
+	 * disabling keeps the registry entry for later reuse. Native reasoning is a
+	 * separate provider channel and remains enabled unless the user explicitly
+	 * selects external-thinking replacement.
 	 *
 	 * @returns false when enabling was requested but this session cannot build the tool.
 	 */
 	setThinkToolEnabled(enabled: boolean): Promise<boolean> {
-		return this.#setThinkToolActive(enabled && supportsExternalThinking(this.#host.model()));
-	}
-
-	/** Reconciles the external scratchpad after the active model changes. */
-	reconcileThinkTool(): Promise<boolean> {
-		return this.#setThinkToolActive(
-			this.#host.settings.get("externalThinking") && supportsExternalThinking(this.#host.model()),
-		);
+		return this.#setThinkToolActive(enabled);
 	}
 
 	#setThinkToolActive(enabled: boolean): Promise<boolean> {

@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import { getBundledModel } from "@oh-my-soup/pi-catalog/models";
 import { type SettingPath, Settings } from "@oh-my-soup/pi-coding-agent/config/settings";
-import { createTools, HIDDEN_TOOLS, type ToolSession } from "@oh-my-soup/pi-coding-agent/tools";
+import {
+	createTools,
+	HIDDEN_TOOLS,
+	supportsExternalThinking,
+	type ToolSession,
+} from "@oh-my-soup/pi-coding-agent/tools";
 
 Bun.env.PI_PYTHON_SKIP_CHECK = "1";
 
@@ -65,8 +71,36 @@ describe("createTools", () => {
 		expect(names).toContain("todo");
 		expect(names).toContain("notes");
 		expect(names).toContain("web_search");
+		expect(names).toContain("think");
 		expect(names).not.toContain("fetch");
 		expect(names).not.toContain("vim");
+	});
+
+	it("omits the optional think tool when it is disabled", async () => {
+		const session = createTestSession({
+			settings: createSettingsWithOverrides({ "thinkingTool.enabled": false, "tools.xdev": false }),
+		});
+		const names = (await createTools(session)).map(tool => tool.name);
+
+		expect(names).not.toContain("think");
+	});
+
+	it("offers the optional think tool to Astra without external replacement", async () => {
+		const astra = getBundledModel("openai-codex", "gpt-6-astra");
+		if (!astra) throw new Error("Expected bundled Astra model");
+		const settings = createSettingsWithOverrides({ externalThinking: false, "tools.xdev": false });
+		const tools = await createTools(
+			createTestSession({
+				settings,
+				getActiveModel: () => astra,
+			}),
+		);
+		const names = tools.map(tool => tool.name);
+
+		expect(astra.reasoning).toBe(true);
+		expect(supportsExternalThinking(astra)).toBe(false);
+		expect(names).toContain("think");
+		expect(tools.find(tool => tool.name === "think")?.loadMode).toBe("essential");
 	});
 
 	it("normalizes legacy explicit tool names", async () => {

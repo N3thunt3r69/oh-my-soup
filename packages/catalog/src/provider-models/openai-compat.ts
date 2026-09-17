@@ -4095,6 +4095,59 @@ export const META_MUSE_STATIC_MODELS: readonly ModelSpec<"openai-responses">[] =
 ];
 
 // ---------------------------------------------------------------------------
+// OpenAI Prism
+// ---------------------------------------------------------------------------
+
+const OPENAI_PRISM_THINKING: ThinkingConfig = {
+	mode: "effort",
+	efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+};
+
+// Prism is subscription-backed, with no per-token billing metadata. These
+// conservative limits match the Codex fallback; the HTTP adapter is text-only.
+export const OPENAI_PRISM_STATIC_MODELS: readonly ModelSpec<"openai-prism">[] = [
+	{
+		id: "gpt-6-astra",
+		name: "GPT-6 Astra",
+		api: "openai-prism",
+		provider: "openai-prism",
+		baseUrl: "https://prism.openai.com",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: OPENAI_PRISM_THINKING,
+	},
+	{
+		id: "gpt-5.6-sol",
+		name: "GPT-5.6 Sol",
+		api: "openai-prism",
+		provider: "openai-prism",
+		baseUrl: "https://prism.openai.com",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: OPENAI_PRISM_THINKING,
+	},
+	{
+		id: "gpt-5.6-terra",
+		name: "GPT-5.6 Terra",
+		api: "openai-prism",
+		provider: "openai-prism",
+		baseUrl: "https://prism.openai.com",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: OPENAI_PRISM_THINKING,
+	},
+];
+
+// ---------------------------------------------------------------------------
 // 15.76 Amazon Bedrock Mantle
 // ---------------------------------------------------------------------------
 

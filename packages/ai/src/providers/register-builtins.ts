@@ -43,6 +43,7 @@ import type { OllamaChatOptions } from "./ollama";
 import type { OpenAICodexResponsesOptions } from "./openai-codex-responses";
 import type { OpenAICompletionsOptions } from "./openai-completions";
 import type { OpenAIResponsesOptions } from "./openai-responses";
+import type { OpenAIPrismOptions } from "./openai-prism";
 
 // ---------------------------------------------------------------------------
 // Lazy provider module shape
@@ -100,6 +101,14 @@ interface OpenAICodexResponsesProviderModule {
 	) => AssistantMessageEventStream;
 }
 
+interface OpenAIPrismProviderModule {
+	streamOpenAIPrism: (
+		model: Model<"openai-prism">,
+		context: Context,
+		options: OpenAIPrismOptions,
+	) => AssistantMessageEventStream;
+}
+
 interface OpenAICompletionsProviderModule {
 	streamOpenAICompletions: (
 		model: Model<"openai-completions">,
@@ -154,6 +163,7 @@ let googleProviderModulePromise: Promise<LazyProviderModule<"google-generative-a
 let googleGeminiCliProviderModulePromise: Promise<LazyProviderModule<"google-gemini-cli">> | undefined;
 let googleVertexProviderModulePromise: Promise<LazyProviderModule<"google-vertex">> | undefined;
 let openAICodexResponsesProviderModulePromise: Promise<LazyProviderModule<"openai-codex-responses">> | undefined;
+let openAIPrismProviderModulePromise: Promise<LazyProviderModule<"openai-prism">> | undefined;
 let openAICompletionsProviderModulePromise: Promise<LazyProviderModule<"openai-completions">> | undefined;
 let openAIResponsesProviderModulePromise: Promise<LazyProviderModule<"openai-responses">> | undefined;
 let ollamaProviderModulePromise: Promise<LazyProviderModule<"ollama-chat">> | undefined;
@@ -407,6 +417,14 @@ function loadGoogleVertexProviderModule(): Promise<LazyProviderModule<"google-ve
 	return googleVertexProviderModulePromise;
 }
 
+function loadOpenAIPrismProviderModule(): Promise<LazyProviderModule<"openai-prism">> {
+	openAIPrismProviderModulePromise ||= import("./openai-prism").then(module => {
+		const provider = module as OpenAIPrismProviderModule;
+		return { stream: provider.streamOpenAIPrism };
+	});
+	return openAIPrismProviderModulePromise;
+}
+
 function loadOpenAICodexResponsesProviderModule(): Promise<LazyProviderModule<"openai-codex-responses">> {
 	openAICodexResponsesProviderModulePromise ||= import("./openai-codex-responses").then(module => {
 		const provider = module as OpenAICodexResponsesProviderModule;
@@ -488,6 +506,10 @@ export const streamGoogleGeminiCli = createLazyStream(
 	GOOGLE_GEMINI_CLI_LAZY_STREAM_LIMITS,
 );
 export const streamGoogleVertex = createLazyStream(loadGoogleVertexProviderModule);
+export const streamOpenAIPrism = createLazyStream(
+	loadOpenAIPrismProviderModule,
+	PROVIDER_HANDLED_STREAM_TIMEOUTS,
+);
 export const streamOpenAICodexResponses = createLazyStream(
 	loadOpenAICodexResponsesProviderModule,
 	PROVIDER_HANDLED_STREAM_TIMEOUTS,

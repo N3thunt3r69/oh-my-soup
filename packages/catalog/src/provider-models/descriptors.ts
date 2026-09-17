@@ -153,6 +153,11 @@ export const CATALOG_PROVIDERS = [
 		catalogDiscovery: { label: "Cursor", envVars: ["CURSOR_API_KEY"], oauthProvider: "cursor" },
 	},
 	{
+		id: "openai-prism",
+		defaultModel: "gpt-5.6-sol",
+		envVars: ["PRISM_COOKIE"],
+	},
+	{
 		id: "deepinfra",
 		defaultModel: "deepseek-ai/DeepSeek-V4-Flash-0731",
 		envVars: ["DEEPINFRA_API_KEY"],

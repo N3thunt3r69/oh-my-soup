@@ -48,6 +48,7 @@ import {
 	MODELS_DEV_PROVIDER_DESCRIPTORS,
 	mapModelsDevToModels,
 	OPENAI_DAYBREAK_CURATED_FALLBACK_MODELS,
+	OPENAI_PRISM_STATIC_MODELS,
 	projectOpenAIProReasoningAliases,
 	SAKANA_FUGU_STATIC_MODELS,
 	stripFireworksDeepSeekThinkingToggle,
@@ -563,6 +564,9 @@ async function generateModels() {
 	// Seed Meta's documented Muse model so first-run selection does not depend on
 	// credentials or live discovery.
 	allModels.push(...META_MUSE_STATIC_MODELS);
+	// Prism has no public catalog endpoint; preserve its verified models without
+	// requiring a signed-in browser session or a project during generation.
+	allModels.push(...OPENAI_PRISM_STATIC_MODELS);
 	// Mantle's catalog endpoint is account/API-key scoped. Keep the generated
 	// bundle deterministic; authenticated runtime discovery may replace this seed.
 	allModels.push(...BEDROCK_MANTLE_STATIC_MODELS);

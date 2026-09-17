@@ -21,6 +21,7 @@ const BUILTIN_API_IDS = [
 	"openai-responses",
 	"openrouter",
 	"openai-codex-responses",
+	"openai-prism",
 	"azure-openai-responses",
 	"anthropic-messages",
 	"bedrock-converse-stream",

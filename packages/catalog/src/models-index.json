@@ -3008,6 +3008,11 @@
 		"gpt-6-astra",
 		"gpt-daybreak-blue-latest"
 	],
+	"openai-prism": [
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-6-astra"
+	],
 	"opencode": [
 		"glm-5-free",
 		"gpt-5.3-codex-spark",

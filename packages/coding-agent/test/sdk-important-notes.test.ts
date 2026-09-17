@@ -516,7 +516,7 @@ describe("SDK important notes requests", () => {
 			}));
 			const mock = createMockModel({ provider: model.provider, id: model.id, handler: { content: ["done"] } });
 			vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
-			await expect(session.prompt("Continue.")).rejects.toThrow("Saved notes are unchanged");
+			await expect(session.prompt("Continue.")).rejects.toThrow("could not reclaim enough space");
 			expect(compact).toHaveBeenCalledTimes(1);
 			expect(mock.calls).toHaveLength(0);
 			expect(getImportantNotesFromEntries(manager.getBranch())).toEqual(notes);
@@ -541,10 +541,112 @@ describe("SDK important notes requests", () => {
 			await session.setModel({ ...getBundledModel("openai", "gpt-4o"), contextWindow: 4096 });
 			session.settings.set("compaction.thresholdTokens", 3000);
 			for (const prompt of ["Continue.", "Retry with the same notes."]) {
-				await expect(session.prompt(prompt)).rejects.toThrow("Saved notes are unchanged");
+				await expect(session.prompt(prompt)).rejects.toThrow("explicitly shorten or delete notes");
 			}
 			expect(mock.calls).toHaveLength(1);
 			expect(compact).not.toHaveBeenCalled();
+			expect(getImportantNotesFromEntries(manager.getBranch())).toEqual(notes);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
+	});
+
+	it("recovers an over-budget request by trimming tool results instead of failing", async () => {
+		using tempDir = TempDir.createSync("sdk-notes-toolresult-rescue-");
+		const contextWindow = 8192;
+		const { manager, model, authStorage, create } = await budgetFixture(tempDir, contextWindow);
+		const notes = [{ key: "evidence", text: "0123456789abcdef".repeat(64) }];
+		manager.appendMessage({ role: "user", content: "Investigate everything.", timestamp: 1 });
+		manager.appendMessage({
+			role: "assistant",
+			content: [{ type: "toolCall", id: "call-big-grep", name: "grep", arguments: { pattern: "TODO" } }],
+			api: "openai-completions",
+			provider: model.provider,
+			model: model.id,
+			stopReason: "toolUse",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: 2,
+		});
+		manager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-big-grep",
+			toolName: "grep",
+			content: [{ type: "text", text: "match line\n".repeat(3000) }],
+			isError: false,
+			timestamp: 3,
+		});
+		manager.appendCustomEntry(IMPORTANT_NOTES_CUSTOM_TYPE, { version: 1, notes });
+		const { session } = await create();
+		try {
+			// Compaction fully unavailable: the only recovery left is reclaiming
+			// the oversized tool result. Before the tiered rescue this prompt
+			// failed with "Important notes cannot fit the safe context budget".
+			session.settings.set("compaction.enabled", false);
+			const budget =
+				contextWindow -
+				compaction.resolveBudgetReserveTokens(contextWindow, session.settings.getGroup("compaction"));
+			expect(session.getContextUsage()!.tokens!).toBeGreaterThan(budget);
+			const compactSpy = vi.spyOn(compaction, "compact");
+			const mock = createMockModel({ provider: model.provider, id: model.id, handler: { content: ["done"] } });
+			vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
+			await session.prompt("Summarize the findings.");
+			expect(compactSpy).not.toHaveBeenCalled();
+			expect(mock.calls).toHaveLength(1);
+			expect(JSON.stringify(mock.calls[0].context.messages)).not.toContain("match line");
+			expect(noteData(mock.calls[0].context)).toEqual([notes]);
+			const sentTokens =
+				session.agent.tokenizer.countMessages(mock.calls[0].context.messages, { excludeEncryptedReasoning: true }) +
+				computeNonMessageTokens(session, session.agent.tokenizer);
+			expect(sentTokens).toBeLessThanOrEqual(budget);
+			expect(getImportantNotesFromEntries(manager.getBranch())).toEqual(notes);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
+	});
+
+	it("compacts an over-budget request below a raised threshold instead of failing", async () => {
+		using tempDir = TempDir.createSync("sdk-notes-threshold-gap-");
+		const contextWindow = 8192;
+		const { manager, model, authStorage, create } = await budgetFixture(tempDir, contextWindow);
+		const notes = [{ key: "evidence", text: "0123456789abcdef".repeat(256) }];
+		manager.appendMessage({ role: "user", content: "old evidence ".repeat(1800), timestamp: 1 });
+		manager.appendMessage({ role: "user", content: "0123456789abcdef".repeat(140), timestamp: 2 });
+		manager.appendCustomEntry(IMPORTANT_NOTES_CUSTOM_TYPE, { version: 1, notes });
+		const { session } = await create();
+		try {
+			// A threshold above the budget leaves a gap where shouldCompact says
+			// "no" while the request cannot fit. Before the recovery ladder this
+			// gap hard-failed the prompt and demanded a manual /compact.
+			session.settings.set("compaction.thresholdTokens", session.getContextUsage()!.tokens! + 512);
+			const budget =
+				contextWindow -
+				compaction.resolveBudgetReserveTokens(contextWindow, session.settings.getGroup("compaction"));
+			expect(session.getContextUsage()!.tokens!).toBeGreaterThan(budget);
+			const compactSpy = vi.spyOn(compaction, "compact").mockImplementation(async preparation => ({
+				summary: "Previous evidence reviewed.",
+				firstKeptEntryId: preparation.firstKeptEntryId,
+				tokensBefore: preparation.tokensBefore,
+				details: {},
+			}));
+			const mock = createMockModel({ provider: model.provider, id: model.id, handler: { content: ["done"] } });
+			vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
+			await session.prompt("Continue.");
+			expect(compactSpy).toHaveBeenCalledTimes(1);
+			expect(mock.calls).toHaveLength(1);
+			expect(noteData(mock.calls[0].context)).toEqual([notes]);
+			const sentTokens =
+				session.agent.tokenizer.countMessages(mock.calls[0].context.messages, { excludeEncryptedReasoning: true }) +
+				computeNonMessageTokens(session, session.agent.tokenizer);
+			expect(sentTokens).toBeLessThanOrEqual(budget);
 			expect(getImportantNotesFromEntries(manager.getBranch())).toEqual(notes);
 		} finally {
 			await session.dispose();

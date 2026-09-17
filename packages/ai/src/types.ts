@@ -50,6 +50,7 @@ import type { GoogleVertexOptions } from "./providers/google-vertex";
 import type { OllamaChatOptions } from "./providers/ollama";
 import type { OpenAICodexResponsesOptions } from "./providers/openai-codex-responses";
 import type { OpenAICompletionsOptions } from "./providers/openai-completions";
+import type { OpenAIPrismOptions } from "./providers/openai-prism";
 import type { OpenAIResponsesOptions } from "./providers/openai-responses";
 import type { kStreamingPartialJson } from "./utils/block-symbols";
 import type { AssistantMessageEventStream } from "./utils/event-stream";
@@ -82,6 +83,7 @@ export interface ApiOptionsMap {
 	"google-gemini-cli": GoogleGeminiCliOptions;
 	"google-vertex": GoogleVertexOptions;
 	"ollama-chat": OllamaChatOptions;
+	"openai-prism": OpenAIPrismOptions;
 	"cursor-agent": CursorOptions;
 	"gitlab-duo-agent": GitLabDuoWorkflowOptions;
 	"devin-agent": DevinOptions;
@@ -829,7 +831,15 @@ export interface OpenAIResponsesHistoryPayload {
 	items: Array<Record<string, unknown>>;
 }
 
-export type ProviderPayload = OpenAIResponsesHistoryPayload;
+/** Durable Prism thread identity. Credentials and sandbox tokens must never be persisted here. */
+export interface OpenAIPrismHistoryPayload {
+	type: "openaiPrismHistory";
+	conversationId: string;
+	projectId: string;
+	userId: string;
+}
+
+export type ProviderPayload = OpenAIResponsesHistoryPayload | OpenAIPrismHistoryPayload;
 
 export interface UserMessage {
 	role: "user";

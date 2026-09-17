@@ -103,7 +103,11 @@ describe("session image persistence", () => {
 		};
 
 		const persisted = prepareEntryForPersistence(original, blobStore);
-		if (persisted.type !== "message" || persisted.message.role !== "assistant") {
+		if (
+			persisted.type !== "message" ||
+			persisted.message.role !== "assistant" ||
+			persisted.message.providerPayload?.type !== "openaiResponsesHistory"
+		) {
 			throw new Error("expected persisted assistant message");
 		}
 		const persistedImage = persisted.message.content.find(block => block.type === "image");
@@ -117,7 +121,11 @@ describe("session image persistence", () => {
 		const loaded: FileEntry[] = [structuredClone(persisted)];
 		await resolveBlobRefsInEntries(loaded, blobStore);
 		const resolved = loaded[0];
-		if (resolved?.type !== "message" || resolved.message.role !== "assistant") {
+		if (
+			resolved?.type !== "message" ||
+			resolved.message.role !== "assistant" ||
+			resolved.message.providerPayload?.type !== "openaiResponsesHistory"
+		) {
 			throw new Error("expected resolved assistant message");
 		}
 		const resolvedImage = resolved.message.content.find(block => block.type === "image");
